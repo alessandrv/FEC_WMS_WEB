@@ -7,6 +7,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { notification } from 'antd';
 import { InfoCircleOutlined } from '@ant-design/icons';
 import { Tabs } from 'antd';
+import { CloseCircleOutlined } from '@ant-design/icons';
 
 const { TabPane } = Tabs;
 const { Content, Sider } = Layout;
@@ -1198,6 +1199,16 @@ const Picking = () => {
             <Layout>
                 <div style={{ padding: '20px', background: '#fff' }}>
                 <Input.Group compact>
+                <Button
+    type="default"
+    icon={<CloseCircleOutlined />}
+    onClick={() => {
+      setScaffale('');
+      setArticolo('');
+      setMovimento('');
+    }}
+    style={{ width: 'calc(5% - 10px)' }}
+  />
         {/* Scaffale Input */}
         <Input
           ref={scaffaleRef}
@@ -1215,18 +1226,35 @@ const Picking = () => {
 
         {/* Articolo Input */}
         <Input
-          ref={articoloRef}
-          style={{ width: 'calc(25% - 10px)', marginRight: '10px' }}
-          placeholder="Articolo"
-          value={articolo}
-          onChange={(e) => setArticolo(e.target.value)}
-          onPressEnter={() => {
-            // Focus the "Movimento" input when Enter is pressed
-            if (movimentoRef.current) {
-              movimentoRef.current.focus();
-            }
-          }}
-        />
+  ref={articoloRef}
+  style={{ width: 'calc(25% - 10px)', marginRight: '10px' }}
+  placeholder="Articolo"
+  value={articolo}
+  onChange={(e) => {
+    const value = e.target.value;
+    const parts = value.split(',');
+
+    if (parts.length >= 3) {
+      // Set articolo to the first part and movimento to the last part
+      if (movimentoRef.current) {
+        movimentoRef.current.focus();
+      }
+      setArticolo(parts[0].trim());  // First part before the first comma
+      setMovimento(parts[2].trim()); // Last part after the second comma
+
+    } else {
+      // If there are not exactly two commas, we just update articolo
+      setArticolo(value.trim());
+    }
+  }}
+  onPressEnter={() => {
+    // Focus the "Movimento" input when Enter is pressed
+    if (movimentoRef.current) {
+      movimentoRef.current.focus();
+    }
+  }}
+/>
+
 
         {/* Movimento Input */}
         <Input
@@ -1241,10 +1269,11 @@ const Picking = () => {
             }
           }}
         />
-         <Button           style={{ width: 'calc(25% - 10px)' }}
+         <Button           style={{ width: 'calc(20% - 10px)' }}
  type="primary" onClick={handleHighlight}>
           Preleva
         </Button>
+
       </Input.Group>
       
                 </div>

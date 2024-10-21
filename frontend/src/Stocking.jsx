@@ -49,40 +49,37 @@ const StockingDettagli = () => {
     }
   }, [isModalVisible]);
 
-  const handleArticoloEnter = async (code) => {
-    const articolo = code || articoloCode;
-    setArticoloCode(articolo)
+  const handleArticoloEnter = async () => {
+    // Only set the articolo code, don't make API call
+    setArticoloCode(articoloCode);
+    if (fornitoreRef.current) {
+      fornitoreRef.current.focus();
+    }
+  };
+
+  const handleFornitoreEnter = async () => {
+    // Only set the fornitore code, don't make API call
+    setFornitoreCode(fornitoreCode);
+    if (movimentoRef.current) {
+      movimentoRef.current.focus();
+    }
+  };
+
+  const handleMovimentoEnter = async () => {
+    // Perform all API calls here
     try {
-      const response = await axios.get(`http://172.16.16.69:5000/api/articolo-descrizione?codice_articolo=${articolo}`);
-      setDescrizioneArticolo(response.data.descrizione || 'Descrizione non trovata');
+      // Articolo API call
+      const articoloResponse = await axios.get(`http://172.16.16.69:5000/api/articolo-descrizione?codice_articolo=${articoloCode}`);
+      setDescrizioneArticolo(articoloResponse.data.descrizione || 'Descrizione non trovata');
       setArticoloDaCercare(articoloCode);
-      if (fornitoreRef.current) {
-        fornitoreRef.current.focus();
-      }
-    } catch (ex) {
-      message.error(`Errore: ${ex.response?.data?.error || ex.message}`);
-    }
-  };
 
-  const handleFornitoreEnter = async (code) => {
-    const fornitore = code || fornitoreCode;
-    setFornitoreCode(fornitore)
-    try {
-      const response = await axios.get(`http://172.16.16.69:5000/api/fornitore-ragione-sociale?codice_fornitore=${fornitore}`);
-      setRagioneSocialeFornitore(response.data.ragione_sociale || 'Fornitore non trovato');
-      if (movimentoRef.current) {
-        movimentoRef.current.focus();
-      }
-    } catch (ex) {
-      message.error(`Errore: ${ex.response?.data?.error || ex.message}`);
-    }
-  };
+      // Fornitore API call
+      const fornitoreResponse = await axios.get(`http://172.16.16.69:5000/api/fornitore-ragione-sociale?codice_fornitore=${fornitoreCode}`);
+      setRagioneSocialeFornitore(fornitoreResponse.data.ragione_sociale || 'Fornitore non trovato');
 
-  const handleMovimentoEnter = async (articolo, movimento, fornitore) => {
-
-    try {
-      const response = await axios.get(`http://172.16.16.69:5000/api/movimento-coerenza?codice_articolo=${articolo}&codice_movimento=${movimento}&codice_fornitore=${fornitore}`);
-      if (response.data.coerenza) {
+      // Movimento API call
+      const movimentoResponse = await axios.get(`http://172.16.16.69:5000/api/movimento-coerenza?codice_articolo=${articoloCode}&codice_movimento=${movimentoCode}&codice_fornitore=${fornitoreCode}`);
+      if (movimentoResponse.data.coerenza) {
         message.success('Informazioni coerenti');
         setIsDataConsistent(true);
         if (quantitaRef.current) {
@@ -199,7 +196,6 @@ const StockingDettagli = () => {
       setter(value);
     }
   };
-
   const handleMovimentoInputChange = (e) => {
     const value = e.target.value;
     setScannedMovimento(value);
@@ -260,13 +256,13 @@ const StockingDettagli = () => {
 
       <Row gutter={16}>
         <Col xs={24} sm={12} md={8}>
-          <Card title="Articolo" className="card">
+        <Card title="Articolo" className="card">
             <Form layout="vertical" className="form">
               <Form.Item label="Codice Articolo">
                 <Input
                   value={articoloCode}
-                  onChange={(e) => setArticoloCode(e.target.value)}
-                  onPressEnter={(e) => handleArticoloEnter(articoloCode)}
+                  onChange={(e) => handleInputChange(e, setArticoloCode, fornitoreRef)}
+                  onPressEnter={handleArticoloEnter}
                   placeholder="Codice Articolo"
                   ref={articoloRef}
                   className="input-small"
@@ -288,10 +284,10 @@ const StockingDettagli = () => {
           <Card title="Fornitore" className="card">
             <Form layout="vertical" className="form">
               <Form.Item label="Codice Fornitore">
-                <Input
+              <Input
                   value={fornitoreCode}
-                  onChange={(e) => setFornitoreCode(e.target.value)}
-                  onPressEnter={(e) => handleFornitoreEnter(fornitoreCode)}
+                  onChange={(e) => handleInputChange(e, setFornitoreCode, movimentoRef)}
+                  onPressEnter={handleFornitoreEnter}
                   placeholder="Codice Fornitore"
                   ref={fornitoreRef}
                   className="input-small"
@@ -313,10 +309,10 @@ const StockingDettagli = () => {
           <Card title="Movimento" className="card">
             <Form layout="vertical" className="form">
               <Form.Item label="Codice Movimento">
-                <Input
+              <Input
                   value={movimentoCode}
-                  onChange={(e) => setMovimentoCode(e.target.value)}
-                  onPressEnter={(e) => handleMovimentoEnter(articoloCode, movimentoCode, fornitoreCode)}
+                  onChange={(e) => handleInputChange(e, setMovimentoCode, quantitaRef)}
+                  onPressEnter={handleMovimentoEnter}
                   placeholder="Codice Movimento"
                   ref={movimentoRef}
                   className="input-small"
