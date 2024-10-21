@@ -37,11 +37,7 @@ const StockingDettagli = () => {
   const scanFornitoreRef = useRef(null);
   const scanMovimentoRef = useRef(null);
 
-  useEffect(() => {
-    if (articoloRef.current) {
-      articoloRef.current.focus();
-    }
-  }, []);
+
 
   useEffect(() => {
     if (isModalVisible && scanArticoloRef.current) {
@@ -69,16 +65,16 @@ const StockingDettagli = () => {
     // Perform all API calls here
     try {
       // Articolo API call
-      const articoloResponse = await axios.get(`http://172.16.16.69:5000/api/articolo-descrizione?codice_articolo=${articoloCode}`);
+      const articoloResponse = await axios.get(`${process.env.REACT_APP_API_URL}/api/articolo-descrizione?codice_articolo=${articoloCode}`);
       setDescrizioneArticolo(articoloResponse.data.descrizione || 'Descrizione non trovata');
       setArticoloDaCercare(articoloCode);
 
       // Fornitore API call
-      const fornitoreResponse = await axios.get(`http://172.16.16.69:5000/api/fornitore-ragione-sociale?codice_fornitore=${fornitoreCode}`);
+      const fornitoreResponse = await axios.get(`${process.env.REACT_APP_API_URL}/api/fornitore-ragione-sociale?codice_fornitore=${fornitoreCode}`);
       setRagioneSocialeFornitore(fornitoreResponse.data.ragione_sociale || 'Fornitore non trovato');
 
       // Movimento API call
-      const movimentoResponse = await axios.get(`http://172.16.16.69:5000/api/movimento-coerenza?codice_articolo=${articoloCode}&codice_movimento=${movimentoCode}&codice_fornitore=${fornitoreCode}`);
+      const movimentoResponse = await axios.get(`${process.env.REACT_APP_API_URL}/api/movimento-coerenza?codice_articolo=${articoloCode}&codice_movimento=${movimentoCode}&codice_fornitore=${fornitoreCode}`);
       if (movimentoResponse.data.coerenza) {
         message.success('Informazioni coerenti');
         setIsDataConsistent(true);
@@ -204,7 +200,11 @@ const StockingDettagli = () => {
     }
   };
   
-
+  useEffect(() => {
+    if (articoloRef.current) {
+      articoloRef.current.focus();
+    }
+  }, );
   return (
     <div className="stocking-dettagli">
       <Title level={2} className="title">Stocking Dettagli</Title>
