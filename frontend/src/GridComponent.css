@@ -1,0 +1,154 @@
+/* ViewMagazzino.css */
+.view-magazzino {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100%; /* Full viewport height */
+    width: 100%; /* Full viewport width */
+    margin: 0;
+    overflow: hidden; /* Prevent scrollbars */
+  }
+  
+  .grid-container {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 100%;
+    justify-content: space-between;
+  }
+  
+  .grid-group {
+    display: grid;
+    gap: 2px;
+    margin-bottom: 1%; /* Space between grid sections */
+    height: auto;
+  }
+  
+  .large-grid {
+    grid-template-columns: repeat(8, 1fr);
+    grid-template-rows: repeat(4, 1fr);
+    width: 100%;
+  }
+  
+  .smaller-grid {
+    grid-template-columns: repeat(7, 1fr);
+    width: 100%;
+  }
+  
+  .second-group {
+    width: 75%; /* 75% of the screen width */
+  }
+  
+  .grid-item {
+    background-color: #e0e0e0;
+    border: 1px solid #d0d0d0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px; /* Adjust font size for readability */
+    height: 100%; /* Fill the grid cell */
+  }
+  
+  .spacer {
+    height: 2%; /* Space between grid sections */
+  }
+  
+  .third-grid {
+    width: 60%;
+    margin-left: 20%;
+   
+   
+}
+
+
+
+/* ViewMagazzino.css */
+.hidden-input {
+  position: absolute;
+  left: -9999px; /* Hide the input off-screen */
+}
+
+.grid-item {
+ 
+  text-align: center;
+  background-color: #f0f0f0;
+}
+
+.highlight {
+  background-color: yellow;
+}
+
+.spacer {
+  height: 20px;
+}
+.grid-item {
+  /* Default styles */
+  font-size: 1rem;
+  text-align: center;
+  transition: background-color 0.3s ease;
+}
+
+.highlight {
+  background-color: yellow;
+}
+
+.green {
+  background-color: green;
+}
+
+.red {
+  background-color: red;
+}
+
+.hidden-input {
+  opacity: 0;
+}
+
+
+
+
+.grid-item.green {
+  background-color: lightgreen;
+}
+
+.grid-item.red {
+  background-color: lightcoral;
+}
+
+.highlighted {
+    background-color: yellow; /* Step 2: Highlight color */
+  }
+
+
+
+  .grid-item {
+    /* Make the cells rounded */
+    border-radius: 10px !important; /* Circular/rounded corners */
+  
+    /* Apply a dark border */
+    border: 2px solid #a7a7a7 !important; /* Dark border */
+  
+    /* No background color by default */
+    background-color: transparent;
+
+  }
+  
+  /* Optional hover effect */
+  .grid-item:hover {
+    border-color: #666; /* Slightly lighter border on hover */
+  }
+  
+  /* Highlighted styles (if any) */
+  .highlight {
+    background-color: yellow !important;
+  }
+  
+  /* Example custom background colors (can be removed if unnecessary) */
+  .green {
+    background-color: lightgreen !important;
+  }
+  
+  .red {
+    background-color: lightcoral !important;
+  }
+  

@@ -1,0 +1,32 @@
+.missing-row {
+    background-color: red !important; /* Red background for missing items */
+    color: white; /* Optional: change text color for better visibility */
+  }
+  .missing-row:hover td{
+    background-color: rgba(107, 3, 3, 0.342) !important; /* Red background for missing items */
+  }
+
+  .highlighted {
+    background-color: #adc6ff; /* Step 2: Highlight color */
+  }
+
+  .highlighted-row {
+    background-color: #71ff71 !important; /* Light green background */
+  }
+  .highlighted-row:hover td{
+    background-color: #54c054 !important; /* Light green background */
+  }
+  
+  /* styles.css */
+
+
+.dark-row {
+  background: #444; /* Background for table cells */
+  color: #fff; /* Text color for table cells */
+}
+.custom-row-hover:hover td {background: rgba(224, 248, 232, 1)!important;}
+
+/* Optional: Customize hover effects */
+.dark-row:hover td{
+  background: #555 !important; /* Row hover effect */
+}

@@ -1,0 +1,67 @@
+/* Compact scaling for the form and cards */
+.stocking-dettagli {
+    padding: 10px;
+    max-width: 1200px; /* Limit the max width for a more compact view */
+    margin: 0 auto; /* Center the container */
+  }
+  
+  .title {
+    font-size: 28px; /* Slightly smaller title */
+  }
+  
+  .alert {
+    margin-bottom: 10px;
+  }
+  
+  .card {
+    margin-bottom: 10px;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  }
+  
+
+  
+  .input-number-small {
+    width: 100%; /* Full width for number input */
+  }
+  
+  .select-small .ant-select-selector {
+    font-size: 14px; /* Smaller font size for select dropdown */
+    height: 30px; /* Shorter select dropdown */
+    line-height: 30px; /* Align text vertically */
+  }
+  
+  .button {
+    font-size: 14px; /* Smaller font size for the button */
+    height: 30px; /* Shorter button */
+  }
+  
+
+  .stocking-dettagli .ant-card {
+    display: flex;
+    flex-direction: column;
+  }
+  
+  .card {
+    min-height: 200px; /* Adjust this value as needed */
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+
+    height: 95%;
+  }
+  
+  .card .ant-card-body {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+  }
+  
+  .input-small {
+    width: 100%;
+  }
+  
+  .actions {
+    margin-top: 16px;
+  }
+  

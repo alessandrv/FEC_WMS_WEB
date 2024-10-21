@@ -1,0 +1,23 @@
+.desktop-sider {
+    display: block; /* Show the sider by default */
+  }
+  .floating-button {
+    display: block; /* Show floating button on mobile */
+    position: fixed; /* Fixed position */
+    bottom: 20px; /* 20px from the bottom */
+    right: 20px; /* 20px from the right */
+    background-color: '#e62d3a';
+    z-index: 1000; /* Ensure it's on top */
+  }
+  .custom-sider {
+    background: #57aeff; /* Change to your desired color */
+  }
+  .desktop-sider {
+    display: none; /* Hide sider on mobile */
+  }
+  @media (max-width: 768px) {
+   
+  
+   
+  }
+  
