@@ -37,7 +37,11 @@ const StockingDettagli = () => {
   const scanFornitoreRef = useRef(null);
   const scanMovimentoRef = useRef(null);
 
-
+  useEffect(() => {
+    if (articoloRef.current) {
+      articoloRef.current.focus();
+    }
+  }, []);
 
   useEffect(() => {
     if (isModalVisible && scanArticoloRef.current) {
@@ -200,11 +204,7 @@ const StockingDettagli = () => {
     }
   };
   
-  useEffect(() => {
-    if (articoloRef.current) {
-      articoloRef.current.focus();
-    }
-  }, );
+
   return (
     <div className="stocking-dettagli">
       <Title level={2} className="title">Stocking Dettagli</Title>

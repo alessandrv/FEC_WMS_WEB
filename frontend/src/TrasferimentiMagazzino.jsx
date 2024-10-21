@@ -101,7 +101,7 @@ const App = () => {
 useEffect(() => {
   const fetchShelvesData = async () => {
     try {
-      const response = await axios.get('http://172.16.16.69:5000/api/shelves');
+      const response = await axios.get('${process.env.REACT_APP_API_URL}/api/shelves');
       // Preprocess shelvesData to include shelfCode
       const processedData = response.data.map((shelf) => ({
         ...shelf,
@@ -122,7 +122,7 @@ useEffect(() => {
   useEffect(() => {
     const fetchVolumes = async () => {
       try {
-        const response = await axios.get('http://172.16.16.69:5000/api/dimensioni');
+        const response = await axios.get('${process.env.REACT_APP_API_URL}/api/dimensioni');
         setVolumes(response.data);
       } catch (error) {
         console.error('Error fetching volumes data:', error);
@@ -222,7 +222,7 @@ useEffect(() => {
       };
       
       // Make the API call
-      await axios.post('http://172.16.16.69:5000/api/transfer-packages', transferData);
+      await axios.post('${process.env.REACT_APP_API_URL}/api/transfer-packages', transferData);
       
       // Notify the user of success
       message.success('Transfer successful!');
@@ -318,7 +318,7 @@ useEffect(() => {
       if (!newDescriptions[articolo]) {
         try {
           const response = await axios.get(
-            `http://172.16.16.69:5000/api/articolo-descrizione?codice_articolo=${articolo}`
+            `${process.env.REACT_APP_API_URL}/api/articolo-descrizione?codice_articolo=${articolo}`
           );
           newDescriptions[articolo] = response.data.descrizione;
         } catch (error) {
@@ -374,7 +374,7 @@ useEffect(() => {
 
     try {
       const response = await fetch(
-        `http://172.16.16.69:5000/api/articoli-scaffale?area=${area}&scaffale=${scaffale}&colonna=${colonna}&piano=${piano}`
+        `${process.env.REACT_APP_API_URL}/api/articoli-scaffale?area=${area}&scaffale=${scaffale}&colonna=${colonna}&piano=${piano}`
       );
 
       if (!response.ok) {

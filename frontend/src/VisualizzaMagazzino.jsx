@@ -23,7 +23,7 @@ const GroupedItemsTable = () => {
   const fetchItems = async (page = 1, limit = 10) => {
     try {
       setLoading(true);
-      const response = await axios.get('http://172.16.16.69:5000/api/get-items', {
+      const response = await axios.get('${process.env.REACT_APP_API_URL}/api/get-items', {
         params: {
           page,
           limit,

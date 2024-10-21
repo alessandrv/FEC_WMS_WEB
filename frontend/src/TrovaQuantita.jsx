@@ -10,7 +10,7 @@ const GetQuantitaRegistrata = ({articoloCode}) => {
   const [codiceScansionato, setCodiceScansionato] = useState('');
   const fetchDescrizione = async () => {
     try {
-      const response = await axios.get(`http://172.16.16.69:5000/api/articolo-descrizione?codice_articolo=${articoloCode}`);
+      const response = await axios.get(`${process.env.REACT_APP_API_URL}/api/articolo-descrizione?codice_articolo=${articoloCode}`);
       setDescrizioneArticolo(response.data.descrizione || 'Descrizione non trovata');
     } catch (ex) {
       message.error(`Errore nel recupero della descrizione: ${ex.response?.data?.error || ex.message}`);
@@ -24,7 +24,7 @@ const GetQuantitaRegistrata = ({articoloCode}) => {
   
   const fetchQuantita = async () => {
     try {
-      const response = await axios.get(`http://172.16.16.69:5000/api/get-quantita-registrata?codice_articolo=${articoloCode}`);
+      const response = await axios.get(`${process.env.REACT_APP_API_URL}/api/get-quantita-registrata?codice_articolo=${articoloCode}`);
       setExpression(response.data.espressione || 'Espressione non trovata');
     } catch (ex) {
       message.error(`Errore nel recupero della quantità: ${ex.response?.data?.error || ex.message}`);

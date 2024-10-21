@@ -24,7 +24,7 @@ const FornitoriComponent = () => {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const response = await axios.get('http://172.16.16.69:5000/api/fornitori');
+      const response = await axios.get('${process.env.REACT_APP_API_URL}/api/fornitori');
       setData(response.data);
       setFilteredData(response.data); // Initialize with unfiltered data
     } catch (error) {
@@ -65,7 +65,7 @@ const FornitoriComponent = () => {
   const fetchDetails = async (tipo, code) => {
     setDetailsLoading(true);
     try {
-      const response = await axios.get('http://172.16.16.69:5000/api/fornitore-details', {
+      const response = await axios.get('${process.env.REACT_APP_API_URL}/api/fornitore-details', {
         params: { tipo, code },
       });
       setDettagliData(response.data);

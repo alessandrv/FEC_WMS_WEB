@@ -451,7 +451,7 @@ const Picking = () => {
         try {
             // Make a GET request to the Articolo Search API
             const response = await fetch(
-                `http://172.16.16.69:5000/api/articolo-search?articolo_id=${encodeURIComponent(
+                `${process.env.REACT_APP_API_URL}/api/articolo-search?articolo_id=${encodeURIComponent(
                     articoloInput.trim()
                 )}&quantity=${articoloQuantity}`
             );
@@ -501,7 +501,7 @@ const Picking = () => {
         setLoading(true); // Set loading to true
         shelfItems.clear();
         try {
-            const response = await fetch(`http://172.16.16.69:5000/api/ordine-lavoro?ordine_lavoro=${ordineLavoro}`);
+            const response = await fetch(`${process.env.REACT_APP_API_URL}/api/ordine-lavoro?ordine_lavoro=${ordineLavoro}`);
             if (!response.ok) {
                 throw new Error('Network response was not ok');
             }
@@ -649,7 +649,7 @@ const Picking = () => {
 
     const updatePacchi = async ({ articolo, location, movimento, quantity }) => {
         try {
-            const response = await fetch('http://172.16.16.69:5000/api/update-pacchi', {
+            const response = await fetch('${process.env.REACT_APP_API_URL}/api/update-pacchi', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -698,7 +698,7 @@ const Picking = () => {
                 'piano': piano
             });
 
-            const response = await fetch(`http://172.16.16.69:5000/api/item-present?${queryParams.toString()}`);
+            const response = await fetch(`${process.env.REACT_APP_API_URL}/api/item-present?${queryParams.toString()}`);
 
             if (!response.ok) {
                 throw new Error('Errore nella risposta di rete');
