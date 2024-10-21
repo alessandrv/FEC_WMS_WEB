@@ -649,7 +649,7 @@ const Picking = () => {
 
     const updatePacchi = async ({ articolo, location, movimento, quantity }) => {
         try {
-            const response = await fetch('${process.env.REACT_APP_API_URL}/api/update-pacchi', {
+            const response = await fetch(`${process.env.REACT_APP_API_URL}/api/update-pacchi`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',

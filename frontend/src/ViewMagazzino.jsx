@@ -112,7 +112,7 @@ const ViewMagazzino = () => {
   useEffect(() => {
     const fetchVolumes = async () => {
       try {
-        const response = await axios.get('${process.env.REACT_APP_API_URL}/api/dimensioni');
+        const response = await axios.get(`${process.env.REACT_APP_API_URL}/api/dimensioni`);
         setVolumes(response.data);
       } catch (error) {
         console.error('Error details:', error);
@@ -141,7 +141,7 @@ const ViewMagazzino = () => {
     const fetchShelvesData = async () => {
       setLoading(true); // Start loading
       try {
-        const response = await axios.get('${process.env.REACT_APP_API_URL}/api/shelves');
+        const response = await axios.get(`${process.env.REACT_APP_API_URL}/api/shelves`);
         setShelvesData(response.data);
         console.log('Fetched shelves data:', response.data);
       } catch (error) {
@@ -201,7 +201,7 @@ const ViewMagazzino = () => {
 
   const postShelfData = async (data) => {
     try {
-      await axios.post('${process.env.REACT_APP_API_URL}/api/conferma-inserimento', data);
+      await axios.post(`${process.env.REACT_APP_API_URL}/api/conferma-inserimento`, data);
       message.success('Dati salvati con successo!');
       navigate(-1);
     } catch (error) {

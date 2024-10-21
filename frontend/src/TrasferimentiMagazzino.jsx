@@ -101,7 +101,7 @@ const App = () => {
 useEffect(() => {
   const fetchShelvesData = async () => {
     try {
-      const response = await axios.get('${process.env.REACT_APP_API_URL}/api/shelves');
+      const response = await axios.get(`${process.env.REACT_APP_API_URL}/api/shelves`);
       // Preprocess shelvesData to include shelfCode
       const processedData = response.data.map((shelf) => ({
         ...shelf,
@@ -122,7 +122,7 @@ useEffect(() => {
   useEffect(() => {
     const fetchVolumes = async () => {
       try {
-        const response = await axios.get('${process.env.REACT_APP_API_URL}/api/dimensioni');
+        const response = await axios.get(`${process.env.REACT_APP_API_URL}/api/dimensioni`);
         setVolumes(response.data);
       } catch (error) {
         console.error('Error fetching volumes data:', error);
@@ -222,7 +222,7 @@ useEffect(() => {
       };
       
       // Make the API call
-      await axios.post('${process.env.REACT_APP_API_URL}/api/transfer-packages', transferData);
+      await axios.post(`${process.env.REACT_APP_API_URL}/api/transfer-packages`, transferData);
       
       // Notify the user of success
       message.success('Transfer successful!');
