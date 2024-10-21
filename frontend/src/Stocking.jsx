@@ -209,50 +209,6 @@ const StockingDettagli = () => {
     <div className="stocking-dettagli">
       <Title level={2} className="title">Stocking Dettagli</Title>
 
-      <Button onClick={showModal} style={{ marginBottom: '20px' }}>Scan QR Code</Button>
-
-      <Modal
-        title="Scan QR Code"
-        visible={isModalVisible}
-        onOk={handleOk}
-        onCancel={handleCancel}
-        footer={null}
-      >
-        {isProcessing ? (
-          <div style={{ textAlign: 'center', padding: '20px' }}>
-            <Spin size="large" />
-            <p style={{ marginTop: '10px' }}>Processing scanned code...</p>
-          </div>
-        ) : (
-          <div style={{ padding: '20px' }}>
-            <Form layout="vertical">
-              <Form.Item label="Articolo">
-                <Input
-                  ref={scanArticoloRef}
-                  value={scannedArticolo}
-                  onChange={(e) => handleInputChange(e, setScannedArticolo, scanFornitoreRef)}
-                  autoFocus
-                />
-              </Form.Item>
-              <Form.Item label="Fornitore">
-                <Input
-                  ref={scanFornitoreRef}
-                  value={scannedFornitore}
-                  onChange={(e) => handleInputChange(e, setScannedFornitore, scanMovimentoRef)}
-                />
-              </Form.Item>
-              <Form.Item label="Movimento">
-                <Input
-                  ref={scanMovimentoRef}
-                  value={scannedMovimento}
-                  onChange={(e) => handleInputChange(e, setScannedMovimento, scanMovimentoRef)}
-                  onPressEnter={handleMovimentoInputChange}
-                />
-              </Form.Item>
-            </Form>
-          </div>
-        )}
-      </Modal>
 
       <Row gutter={16}>
         <Col xs={24} sm={12} md={8}>
