@@ -9,6 +9,9 @@ import {
   MenuUnfoldOutlined,
   MenuFoldOutlined,
   MenuOutlined,
+  CheckOutlined,
+  CommentOutlined,
+  DeliveredProcedureOutlined,
 } from '@ant-design/icons';
 import './CollapsibleMenu.css'; // Ensure to include your CSS file for additional styles
 
@@ -66,6 +69,7 @@ const CollapsibleMenu = () => {
             <Link to="/prelievi">Prelievi</Link>
           </Menu.Item>
         </Menu>
+        
       </Sider>
 
       {/* Floating button to expand menu on mobile */}
@@ -95,6 +99,30 @@ const CollapsibleMenu = () => {
         visible={drawerVisible}
         width={'50%'} // Adjust this value for the desired width
       >
+        <Row gutter={[16, 16]} style={{ marginBottom: '16px' }}>
+        <Col span={8}>
+            <Link to="/accettazione" onClick={closeDrawer}>
+              <Card
+                hoverable
+                style={{ textAlign: 'center', fontSize: '1.5rem' }}
+                cover={<CheckOutlined style={{ fontSize: '3rem', marginTop: '20px' }} />}
+              >
+                Accettazione
+              </Card>
+            </Link>
+          </Col>
+          <Col span={8}>
+            <Link to="/in-arrivo" onClick={closeDrawer}>
+              <Card
+                hoverable
+                style={{ textAlign: 'center', fontSize: '1.5rem' }}
+                cover={<DeliveredProcedureOutlined style={{ fontSize: '3rem', marginTop: '20px' }} />}
+              >
+                In arrivo
+              </Card>
+            </Link>
+          </Col>
+          </Row>
         {/* First Row: Magazzino Section */}
         <Row gutter={[16, 16]} style={{ marginBottom: '16px' }}>
           <Col span={8}>
@@ -146,6 +174,7 @@ const CollapsibleMenu = () => {
             </Link>
           </Col>
         </Row>
+        
       </Drawer>
     </>
   );

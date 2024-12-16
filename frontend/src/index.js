@@ -15,6 +15,8 @@ import TrovaQuantita from './TrovaQuantita'
 import VisualizzaMagazzino from './VisualizzaMagazzino'
 import TrasferimentiMagazzino from './TrasferimentiMagazzino'
 import Picking from './Picking'
+import Accettazione from './Accettazione';
+import IncomingItemsTable from './IncomingItemsTable';
 
 const { Content } = Layout;
 
@@ -68,6 +70,8 @@ root.render(
               <Route path="/visualizza-magazzino" element={<VisualizzaMagazzino />} />
               <Route path="/trasferimenti-magazzino" element={<TrasferimentiMagazzino />} />
               <Route path="/prelievi" element={<Picking />} />
+              <Route path="/accettazione" element={<Accettazione />} />
+              <Route path="/in-arrivo" element={<IncomingItemsTable />} />
 
             </Routes>
           </Content>

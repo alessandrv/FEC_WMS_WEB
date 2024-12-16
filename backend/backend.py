@@ -3,9 +3,18 @@ import pyodbc
 from flask_cors import CORS
 from decimal import Decimal
 import uuid
+from datetime import datetime
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
+def format_delivery_date(date_str):
+    try:
+        # Parse the input string to a datetime object
+        delivery_date = datetime.strptime(date_str, "%a, %d %b %Y %H:%M:%S GMT")
+        # Return the formatted string (e.g., "25 Jan 2025")
+        return delivery_date.strftime("%d %b %Y")
+    except ValueError:
+        return date_str  # Return the original string if the date format is invalid
 
 # Define your connection string
 connection_string = 'DSN=fec;UID=informix;PWD=informix;'
@@ -312,7 +321,28 @@ def check_movimento_coerenza():
     try:
         conn = connect_to_db()
         cursor = conn.cursor()
-        query = "SELECT DISTINCT oft_cofo, ofc_arti, gim_code FROM ofordit, ofordic, mggior WHERE oft_cofo = ? AND ofc_arti = ? AND gim_code = ? AND ofc_arti = gim_arti;"
+        query = '''SELECT distinct
+    oft.oft_cofo, 
+    ofc.ofc_arti,
+    bf.blt_code
+FROM 
+    ofordit oft
+JOIN 
+    ofordic ofc 
+ON 
+    oft.oft_tipo = ofc.ofc_tipo AND oft.oft_cofo = ? and ofc.ofc_arti = ?
+JOIN 
+    mggior mg 
+ON 
+    ofc.ofc_arti = mg.gim_arti and mg.gim_code = ?
+JOIN 
+    bfbolt bf 
+ON 
+    mg.gim_code = bf.blt_code and bf.blt_cocl = oft_cofo
+WHERE 
+
+     bf.blt_code = mg.gim_code;
+'''
         cursor.execute(query, (codice_fornitore, codice_articolo, codice_movimento))
         result = cursor.fetchall()
         coerenza = len(result) > 0
@@ -1323,5 +1353,336 @@ def transfer_packages():
         if 'conn' in locals():
             conn.close()
 
+@app.route('/api/ordini-fornitore', methods=['GET'])
+def get_ordini_fornitore():
+    try:
+        conn = connect_to_db()
+        cursor = conn.cursor()
+        query = '''
+SELECT 
+    oft_tipo, 
+    oft_code, 
+    oft_stat, 
+    oft_data, 
+    oft_stat,
+    ag.des_clifor AS cliente_nome,
+  	oft_inarrivo,  
+	oft_actz
+FROM 
+    ofordit AS o
+JOIN 
+    agclifor AS ag 
+ON 
+    o.oft_cofo = ag.cod_clifor
+ORDER BY 
+    oft_data DESC;'''
+        cursor.execute(query)
+        # Get column names from cursor description
+        columns = [column[0] for column in cursor.description]
+        # Fetch all rows and convert them into a list of dictionaries
+        results = [dict(zip(columns, row)) for row in cursor.fetchall()]
+        
+        return jsonify({'results': results})
+
+    except pyodbc.Error as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        if 'conn' in locals():
+            conn.close()
+
+from flask import jsonify, request
+import pyodbc
+
+@app.get("/api/ordine-details")
+def get_article_details():
+    ofc_tipo = request.args.get('ofc_tipo')
+    ofc_code = request.args.get('ofc_code')
+    if not ofc_tipo or not ofc_code:
+        return jsonify({'error': 'Missing ofc_code or ofc_tipo parameter'}), 400
+
+    try:
+        # Connect to the database
+        conn = connect_to_db()
+        cursor = conn.cursor()
+
+        # SQL query with placeholders for parameters
+        query = """
+        SELECT 
+            ofc_arti, 
+            (ofc_desc || ' ' || ofc_des2) AS article_description, 
+            ofc_dtco, 
+            ofc_qtarrivata, 
+            ofc_inarrivo,
+            ofc_qord,
+            ofc_riga,
+            ofc_inarrivo
+        FROM 
+            ofordic 
+        WHERE 
+            ofc_tipo = ? AND ofc_code = ?
+        """
+
+        # Execute the query with parameters
+        cursor.execute(query, (ofc_tipo, ofc_code))
+
+        # Fetch results and convert to a list of dictionaries
+        columns = [column[0] for column in cursor.description]
+        results = [dict(zip(columns, row)) for row in cursor.fetchall()]
+        filtered_results = [result for result in results if result['ofc_arti'] is not None]
+
+        # Close the database connection
+        cursor.close()
+        conn.close()
+
+        # Check if results are empty and return an error if needed
+        if not filtered_results:
+            return jsonify({'error': 'No records found for the given tipo and code.'}), 404
+
+        # Return results as JSON
+        return jsonify({'results': filtered_results})
+
+    except pyodbc.Error as e:
+        print(f"Database error: {str(e)}")
+        return jsonify({'error': 'Internal Server Error', 'details': str(e)}), 500
+@app.put("/api/update-quantity")
+def update_quantity():
+    data = request.get_json()
+    ofc_tipo = data.get('ofc_tipo')
+    ofc_code = data.get('ofc_code')
+    new_quantity = data.get('ofc_qtarrivata')
+    ofc_riga = data.get('ofc_riga')
+    # Validate inputs
+    if not all([ofc_tipo, ofc_code, new_quantity, ofc_riga]):
+        return jsonify({'error': 'Missing required parameters'}), 400
+
+    try:
+        # Connect to the database
+        conn = connect_to_db()
+        cursor = conn.cursor()
+        
+        # SQL update query
+        update_query = """
+        UPDATE ofordic
+        SET ofc_qtarrivata = ? , ofc_inarrivo = 'N'
+        WHERE ofc_tipo = ? AND ofc_code = ? and ofc_riga = ?
+
+        
+        """
+        print(ofc_tipo, ofc_code, new_quantity, ofc_riga)
+        # Execute the update query with parameters
+        cursor.execute(update_query, (new_quantity, ofc_tipo, ofc_code, ofc_riga))
+        conn.commit()
+
+        # Check if any rows were updated
+        if cursor.rowcount == 0:
+            return jsonify({'error': f'{new_quantity, ofc_tipo, ofc_code, ofc_riga}'}), 404
+
+        return jsonify({'message': 'Quantity updated successfully'}), 200
+
+    except pyodbc.Error as e:
+        print(f"Database error: {str(e)}")
+        return jsonify({'error': 'Internal Server Error', 'details': str(e)}), 500
+
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        if 'conn' in locals():
+            conn.close()
+
+@app.route('/api/articoli-in-arrivo', methods=['GET'])
+def articoli_in_arrivo():
+    try:
+        conn = connect_to_db()
+        cursor = conn.cursor()
+        query = '''
+SELECT 
+    o.ofc_tipo, 
+    o.ofc_arti,
+    (o.ofc_desc || ' ' || o.ofc_des2) AS article_description, 
+    o.ofc_code, 
+    o.ofc_dtco, 
+    o.ofc_inarrivo,
+    NVL(SUM(w.qta), 0) AS total_quantity  -- Replace COALESCE or IFNULL with NVL
+FROM 
+    ofordic AS o
+LEFT JOIN 
+    wms_items AS w ON o.ofc_arti = w.id_art  -- Join with wms_items on ofc_arti and id_art
+WHERE 
+    o.ofc_dtco >= TODAY 
+    AND o.ofc_arti IS NOT NULL
+GROUP BY 
+    o.ofc_tipo, 
+    o.ofc_arti,
+    o.ofc_desc, 
+    o.ofc_des2, 
+    o.ofc_code, 
+    o.ofc_dtco, 
+    o.ofc_inarrivo
+ORDER BY 
+    o.ofc_dtco ASC;
+
+'''
+        cursor.execute(query)
+        # Get column names from cursor description
+        columns = [column[0] for column in cursor.description]
+        # Fetch all rows and convert them into a list of dictionaries
+        results = [dict(zip(columns, row)) for row in cursor.fetchall()]
+        
+        return jsonify({'results': results})
+
+    except pyodbc.Error as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        if 'conn' in locals():
+            conn.close()
+
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.mime.image import MIMEImage
+import base64
+import os
+
+
+# Office 365 SMTP configuration
+# Gmail SMTP configuration
+SMTP_SERVER = 'smtp.gmail.com'
+SMTP_PORT = 587
+SENDER_EMAIL = 'accettazionemerce.fecpos@gmail.com'  # Replace with your Gmail address
+SENDER_PASSWORD = 'osoh swye mjcb fkzp'  # Replace with your Gmail app-specific password
+@app.route('/api/send-email', methods=['POST'])
+def send_email():
+    data = request.json
+    image_base64 = data.get('image')
+    order_id = data.get('order_id')
+    message_text = data.get('message')  # New field for the message
+
+    if not image_base64 or not order_id or not message_text:
+        return jsonify({'error': 'Image, order ID, and message are required'}), 400
+
+    try:
+        # Decode the base64 image
+        image_data = base64.b64decode(image_base64.split(',')[1])  # Strip out 'data:image/jpeg;base64,' part
+
+        # Create email
+        msg = MIMEMultipart()
+        msg['From'] = SENDER_EMAIL
+        msg['To'] = 'd.fasano@fecpos.it'  # Replace with recipient email
+        msg['Subject'] = f"Problema ordine - {order_id}"
+
+        # Attach the message
+        text = MIMEText(f"Un problema è emerso per l'ordine {order_id}. Dettagli del problema: {message_text}. Immagine allegata.")
+        msg.attach(text)
+
+        # Attach image
+        image = MIMEImage(image_data, name="problem.jpg")
+        msg.attach(image)
+
+        # Connect to Gmail's SMTP server and send the email
+        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+        server.starttls()  # Upgrade to a secure connection
+        server.login(SENDER_EMAIL, SENDER_PASSWORD)
+        server.sendmail(SENDER_EMAIL, msg['To'], msg.as_string())
+        server.quit()
+
+        return jsonify({'message': 'Email sent successfully'}), 200
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/send-save-confirmation-email', methods=['POST'])
+def send_save_confirmation_email():
+    data = request.json
+    order_id = data.get('order_id')
+    items = data.get('items')
+
+    if not order_id or not items:
+        return jsonify({'error': 'Order ID and items are required'}), 400
+
+    try:
+        # Start the email body as HTML
+        email_body = f"""
+        <html>
+        <body>
+        <p>Ordine: {data.get('order_tipo', 'Tipo non disponibile')} - {order_id}</p>
+        <p>Fornitore: {data.get('supplier_name', 'Fornitore non disponibile')}</p>
+        <p>Consegnato:</p>
+        <table border="1" cellpadding="5" cellspacing="0">
+        <thead>
+            <tr>
+                <th>Articolo</th>
+                <th>Descrizione</th>
+                <th>Arrivata</th>
+                <th>Prevista</th>
+                <th>Consegna prevista</th>
+            </tr>
+        </thead>
+        <tbody>
+        """
+        
+        for item in items:
+            arrived_quantity = item['arrivedQuantity']
+            expected_quantity = item['expectedQuantity']
+            
+            # If arrived quantity is None, replace it with 'Non arrivato'
+            arrived_quantity_text = arrived_quantity if arrived_quantity is not None else 'Non arrivato'
+            # If expected quantity is None, replace it with 'Non previsto'
+            expected_quantity_text = expected_quantity if expected_quantity is not None else 'Non previsto'
+
+            # Clean article description and get other fields
+            article = item['article'].strip()
+            description = item.get('article_description', 'Descrizione non disponibile')  # Default if description is missing
+            deliveryDate = format_delivery_date(item['deliveryDate'])
+
+            # Add item data to the table
+            email_body += f"""
+            <tr>
+                <td>{article}</td>
+                <td>{description}</td>
+                <td>{arrived_quantity_text}</td>
+                <td>{expected_quantity_text}</td>
+                <td>{deliveryDate}</td>
+            </tr>
+            """
+
+        email_body += """
+        </tbody>
+        </table>
+        </body>
+        </html>
+        """
+
+        # Create the email message
+        msg = MIMEMultipart()
+        msg['From'] = SENDER_EMAIL
+        msg['To'] = 'd.fasano@fecpos.it'  # Replace with recipient email
+        msg['Subject'] = f"Ordine ID_{order_id} Consegnato"
+
+        # Attach the email body as HTML
+        msg.attach(MIMEText(email_body, 'html'))
+
+        # Connect to Gmail's SMTP server and send the email
+        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+        server.starttls()  # Upgrade to a secure connection
+        server.login(SENDER_EMAIL, SENDER_PASSWORD)
+        server.sendmail(SENDER_EMAIL, msg['To'], msg.as_string())
+        server.quit()
+
+        return jsonify({'message': 'Email sent successfully'}), 200
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 if __name__ == '__main__':
-    app.run(host='172.16.16.69', port=5000, debug=True)
+    # Run with SSL context for HTTPS
+    app.run(host='172.16.16.69', port=5000, debug=True, ssl_context=(
+        '../frontend/localhost+3.pem',  # Certificate file generated by mkcert
+        '../frontend/localhost+3-key.pem'  # Key file generated by mkcert
+    ))
+
+
