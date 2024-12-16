@@ -1,0 +1,9 @@
+td.ant-table-cell {
+    padding: 0 16px !important;
+}
+.custom-yellow-button {
+    background-color: yellow;
+    color: black;
+    border: 1px solid black;
+  }
+  
