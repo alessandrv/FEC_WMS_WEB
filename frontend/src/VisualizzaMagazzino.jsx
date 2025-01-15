@@ -26,7 +26,49 @@ const GroupedItemsTable = () => {
   const [selectedLayout, setSelectedLayout] = useState('simple');
   const [selectedShelf, setSelectedShelf] = useState(null);
   const [occupiedShelves, setOccupiedShelves] = useState(new Set());
+  const groupSubitemsByLocationAndMovement = (subitems) => {
+    const groupedItems = {};
+    
+    subitems.forEach(subItem => {
+      const groupKey = `${subItem.id_mov}-${subItem.area}-${subItem.scaffale}-${subItem.colonna}-${subItem.piano}`;
+      const locazione = `${subItem.area}-${subItem.scaffale}-${subItem.colonna.toString().padStart(2, '0')}-${subItem.piano}`;
+      
+      if (!groupedItems[groupKey]) {
+        groupedItems[groupKey] = {
+          id_mov: subItem.id_mov,
+          area: subItem.area,
+          scaffale: subItem.scaffale,
+          colonna: subItem.colonna,
+          piano: subItem.piano,
+          locazione: locazione,
+          totalQta: 0,
+          description: subItem.amg_desc + ' ' + subItem.amg_des2,
+        };
+      }
+      
+      groupedItems[groupKey].totalQta += subItem.qta;
+    });
 
+    // Convert to array and sort by locazione
+    return Object.values(groupedItems).sort((a, b) => a.locazione.localeCompare(b.locazione));
+  };
+
+  const sortMovimento = (a, b) => {
+    // Convert both values to strings for comparison
+    const movA = String(a.id_mov);
+    const movB = String(b.id_mov);
+    
+    // First try numeric sorting if both are valid numbers
+    const numA = parseInt(movA);
+    const numB = parseInt(movB);
+    
+    if (!isNaN(numA) && !isNaN(numB)) {
+      return numA - numB;
+    }
+    
+    // Fall back to string comparison if not both numbers
+    return movA.localeCompare(movB);
+  };
   const layouts = {
       1: [
           {
@@ -380,47 +422,58 @@ highlightedShelves={highlightedShelves}
   // Subcolumns for the subitems table
   const subColumns = [
     {
+      title: 'Locazione',
+      dataIndex: 'locazione',
+      key: 'locazione',
+      sorter: (a, b) => a.locazione.localeCompare(b.locazione),
+      defaultSortOrder: 'ascend',
+    },
+    {
       title: 'Movimento',
       dataIndex: 'id_mov',
       key: 'id_mov',
-      sorter: (a, b) => a.id_mov.localeCompare(b.id_mov),
+      sorter: sortMovimento,
     },
     {
       title: 'Area',
       dataIndex: 'area',
       key: 'area',
-      sorter: (a, b) => a.area.localeCompare(b.area),
+      sorter: (a, b) => String(a.area).localeCompare(String(b.area)),
     },
     {
       title: 'Scaffale',
       dataIndex: 'scaffale',
       key: 'scaffale',
-      sorter: (a, b) => a.scaffale.localeCompare(b.scaffale),
+      sorter: (a, b) => String(a.scaffale).localeCompare(String(b.scaffale)),
     },
     {
       title: 'Colonna',
       dataIndex: 'colonna',
       key: 'colonna',
-      sorter: (a, b) => a.colonna.localeCompare(b.colonna),
+      sorter: (a, b) => {
+        const colA = String(a.colonna).padStart(2, '0');
+        const colB = String(b.colonna).padStart(2, '0');
+        return colA.localeCompare(colB);
+      },
     },
     {
       title: 'Piano',
       dataIndex: 'piano',
       key: 'piano',
-      sorter: (a, b) => a.piano - b.piano,
+      sorter: (a, b) => Number(a.piano) - Number(b.piano),
     },
     {
-      title: 'Q.ta nello scaffale',
+      title: 'Q.ta nella posizione',
       dataIndex: 'totalQta',
       key: 'totalQta',
       sorter: (a, b) => a.totalQta - b.totalQta,
     },
     {
       title: 'Descrizione',
-      dataIndex: 'description', // Assuming backend concatenates descriptions
+      dataIndex: 'description',
       key: 'description',
       render: (text) => <span>{text}</span>,
-      sorter: (a, b) => a.description.localeCompare(b.description),
+      sorter: (a, b) => String(a.description).localeCompare(String(b.description)),
     },
     {
       title: 'Visualizza',
@@ -448,6 +501,27 @@ highlightedShelves={highlightedShelves}
 
   setIsModalVisible(false);
   
+  };
+  const expandableConfig = {
+    expandedRowRender: (record) => (
+      <Table
+        dataSource={groupSubitemsByLocationAndMovement(record.subItems).map(item => ({
+          key: `${item.id_mov}-${item.locazione}`,
+          id_mov: item.id_mov,
+          area: item.area,
+          scaffale: item.scaffale,
+          colonna: item.colonna,
+          piano: item.piano,
+          locazione: item.locazione,
+          totalQta: item.totalQta,
+          description: item.description,
+        }))}
+        columns={subColumns}
+        pagination={false}
+        rowKey="key"
+      />
+    ),
+    rowExpandable: (record) => record.subItems.length > 0,
   };
 
   return (
@@ -532,33 +606,14 @@ highlightedShelves={highlightedShelves}
           </div>
         ) : (
           <Table
-            dataSource={dataSource}
-            columns={columns}
-            expandable={{
-              expandedRowRender: (record) => (
-                <Table
-                  dataSource={record.subItems.map(subItem => ({
-                    key: `${subItem.id_mov}-${subItem.area}-${subItem.scaffale}-${subItem.colonna}-${subItem.piano}`, // Unique key for subitem
-                    id_mov: subItem.id_mov,
-                    area: subItem.area,
-                    scaffale: subItem.scaffale,
-                    colonna: subItem.colonna,
-                    piano: subItem.piano,
-                    totalQta: subItem.qta,
-                    description: `${subItem.amg_desc} ${subItem.amg_des2}`.trim(),
-                  }))}
-                  columns={subColumns}
-                  pagination={false}
-                  rowKey="key"
-                />
-              ),
-              rowExpandable: (record) => record.subItems.length > 0,
-            }}
-            rowKey="id_art"
-            pagination={false} // Disable internal pagination
-            scroll={{ x: 'max-content' }}
-          />
-        )}
+          dataSource={dataSource}
+          columns={columns}
+          expandable={expandableConfig}
+          rowKey="id_art"
+          pagination={false}
+          scroll={{ x: 'max-content' }}
+        />
+      )}
       </div>
       {/* Pagination Controls */}
       <div style={{ marginTop: '20px', textAlign: 'right' }}>

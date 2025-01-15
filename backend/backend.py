@@ -814,7 +814,7 @@ def update_pacchi():
     colonna = data.get('colonna')
     piano = data.get('piano')
     quantity = data.get('quantity')
-
+    movimento = data.get('movimento')
     # Validate input parameters
     if not all([articolo, area, scaffale, colonna, piano, quantity]):
         return jsonify({'error': 'Missing parameters'}), 400
@@ -839,8 +839,9 @@ def update_pacchi():
           AND scaffale = ?
           AND colonna = ?
           AND piano = ?
+          AND id_mov = ?
         """
-        cursor.execute(total_quantity_query, (articolo, area, scaffale, colonna, piano))
+        cursor.execute(total_quantity_query, (articolo, area, scaffale, colonna, piano, movimento))
         result = cursor.fetchone()
 
         if not result or result.total_qta is None:
@@ -860,9 +861,10 @@ def update_pacchi():
           AND scaffale = ?
           AND colonna = ?
           AND piano = ?
+          and id_mov = ?
         ORDER BY qta ASC
         """
-        cursor.execute(pacchi_query, (articolo, area, scaffale, colonna, piano))
+        cursor.execute(pacchi_query, (articolo, area, scaffale, colonna, piano, movimento))
         pacchi = cursor.fetchall()
 
         if not pacchi:
@@ -918,7 +920,7 @@ def update_pacchi():
         # Step 3: Update the volume in wms_scaffali
         
         conn.commit()
-        operation_details = f"Prelievo articolo {articolo} da {area}-{scaffale}-{colonna}-{piano} - QTA: {quantity}"
+        operation_details = f"Prelievo articolo {articolo} con {movimento} da {area}-{scaffale}-{colonna}-{piano} - QTA: {quantity}"
 
         log_operation(
             operation_type="UPDATE",
