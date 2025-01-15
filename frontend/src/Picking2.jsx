@@ -1,8 +1,6 @@
 import React, { useState,useRef, useCallback, useEffect } from 'react';
 import { Input, Button, Table, Layout, Space, message, Tooltip, Spin, Tag, Modal, InputNumber, Pagination } from 'antd';
 import WarehouseGrid from './GridComponent';
-import axios from 'axios';
-
 import './Picking.css';
 import { LoadingOutlined } from '@ant-design/icons';
 import { v4 as uuidv4 } from 'uuid';
@@ -10,223 +8,11 @@ import { notification } from 'antd';
 import { InfoCircleOutlined } from '@ant-design/icons';
 import { Tabs } from 'antd';
 import { CloseCircleOutlined } from '@ant-design/icons';
-import WarehouseGridSystem from './WarehouseGridSystem';
 
 const { TabPane } = Tabs;
 const { Content, Sider } = Layout;
 
-const Picking = () => {
-    const [selectedLayout, setSelectedLayout] = useState('simple');
-    const [selectedShelf, setSelectedShelf] = useState(null);
-    const [occupiedShelves, setOccupiedShelves] = useState(new Set());
-    const [articleFilter, setArticleFilter] = useState('simple');
-    const [confirmLoading, setConfirmLoading] = useState(false); // State to manage loading
-
-    
-    const layouts = {
-        1: [
-            {
-                id: 'A',
-                startRow: 0,
-                startCol: 0,
-                width: 8,
-                height: 4,
-                shelfPattern: 'regular'
-              },
-              {
-                id: 'B',
-                startRow: 7,
-                startCol: 0,
-                width: 7,
-                height: 4,
-                shelfPattern: 'regular'
-              },
-              {
-                id: 'C',
-                startRow: 11,
-                startCol: 0,
-                width: 7,
-                height: 5,
-                shelfPattern: 'regular'
-              },
-              {
-                id: 'D',
-                startRow: 19,
-                startCol: 0,
-                width: 2,
-                height: 6,
-                shelfPattern: 'regular'
-              },
-              {
-                id: 'D',
-                startRow: 19,
-                startCol: 3,
-                width: 5,
-                height: 6,
-                startingValue: 3,
-                shelfPattern: 'regular'
-              },
-              {
-                id: 'X',
-                startRow: 25,
-                startCol: 3,
-                width: 5,
-                height: 2,
-                startingValue: 1,
-                startingFloor: -1,
-                spanRow: 2,
-                spanCol: 5,
-                shelfPattern: 'regular'
-              },{
-                id: 'TEXT1',
-                type: 'customText',
-                customText: 'SCALE',
-                rotateText: false, // or false for horizontal text
-                startRow: 27,
-                startCol: 4,
-                width: 4,
-                height: 2,
-                spanRow: 3,
-                spanCol: 4
-              },
-              {
-                id: 'TEXT1',
-                type: 'customText',
-                customText: 'ENTRATA',
-                rotateText: false, // or false for horizontal text
-                startRow: 29,
-                startCol: 1,
-                width: 2,
-                height: 1,
-                spanRow: 1,
-                spanCol: 2
-              },
-              
-        ],
-        2: [
-            {
-                id: 'E',
-                startRow: 10,
-                startCol: 0,
-                width: 8,
-                height: 5,
-                shelfPattern: 'regular'
-              },
-              {
-                id: 'R',
-                startRow: 4,
-                startCol: 2,
-                width: 5,  // Number of columns you want
-                height: 1,
-                startingValue: 1,
-                shelfPattern: 'horizontal',  // Use 'horizontal' instead of 'regular'
-                startingFloor: 1
-              },
-              {
-                id: 'R',
-                startRow: 5,
-                startCol: 2,
-                width: 5,  // Number of columns you want
-                height: 1,
-                startingValue: 2,
-                shelfPattern: 'horizontal',  // Use 'horizontal' instead of 'regular'
-                startingFloor: 1
-              },
-              {
-                id: 'R',
-                startRow: 6,
-
-                startCol: 2,
-                width: 5,  // Number of columns you want
-                height: 1,
-                startingValue: 3,
-                shelfPattern: 'horizontal',  // Use 'horizontal' instead of 'regular'
-                startingFloor: 1
-              },
-
-              
-
-              {
-                id: 'S',
-                startRow: 3,
-                startCol: 8,
-                width: 1,
-                height: 5,
-                startingFloor:-4,
-                startingValue:1,
-                spanRow: 5,
-                spanCol: 1,
-                shelfPattern: 'regular'
-              },{
-                id: 'TEXT1',
-                type: 'customText',
-                customText: 'RIPARAZIONI',
-                rotateText: false, // or false for horizontal text
-                startRow: 3,
-                startCol: 7,
-                width: 1,
-                height: 5,
-                spanRow: 5,
-                spanCol: 1
-              },
-              {
-                id: 'TEXT2',
-                type: 'customText',
-                customText: 'ENTRATA',
-                rotateText: false, // or false for horizontal text
-                startRow: 14,
-                startCol: 8,
-                width: 1,
-                spanCol:1,
-                height: 1,
-              },
-              {
-                id: 'TEXT3',
-                type: 'customText',
-                customText: 'POS. DOMENICO',
-                rotateText: false, // or false for horizontal text
-                startRow: 0,
-                startCol: 0,
-                width: 1,
-                
-                height: 1,
-              }
-              ,
-              {
-                id: 'TEXT4',
-                type: 'customText',
-                customText: 'ENTRATA',
-                rotateText: false, // or false for horizontal text
-                startRow: 0,
-                startCol: 8,
-                width: 1,
-                
-                height: 1,
-              }
-              ,
-              {
-                id: 'TEXT5',
-                type: 'customText',
-                customText: 'POS. CECILIA',
-                rotateText: false, // or false for horizontal text
-                startRow: 0,
-                startCol: 9,
-                width: 1,
-                
-                height: 1,
-              }
-        
-         
-        ]
-      };
-      const getShelfStatus = (shelfId) => {
-        if (shelfId === selectedShelf) return 'selected';
-        if (occupiedShelves.has(shelfId)) return 'full';
-        return 'available';
-      };
-
-      const [locazioni, setLocazioni] = useState([]);
-
+const Picking2 = () => {
     const [ordineLavoro, setOrdineLavoro] = useState('');
     const [scaffale, setScaffale] = useState('');
     const [articolo, setArticolo] = useState('');
@@ -239,8 +25,6 @@ const Picking = () => {
     const [forcedPickingModalVisible, setForcedPickingModalVisible] = useState(false);
     const [forcedPickingData, setForcedPickingData] = useState(null);
     const [quantityModalVisible, setQuantityModalVisible] = useState(false);
-    const [locationChangeModalVisible, setlocationChangeModalVisible] = useState(false);
-
     const [quantityModalData, setQuantityModalData] = useState(null);
     const [pickedQuantity, setPickedQuantity] = useState(0);
     const [maxAvailableQuantity, setMaxAvailableQuantity] = useState(0);
@@ -256,7 +40,6 @@ const Picking = () => {
     const movimentoRef = useRef(null);
     
     const handleQuantityConfirm = async () => {
-        setConfirmLoading(true); // Start loading
         if (pickedQuantity <= 0) {
             notification.error({
                 message: 'Errore',
@@ -391,13 +174,14 @@ const Picking = () => {
 
             // Find all rows that match the article code
             const matchingRows = tableData.filter(item => item.occ_arti.trim() === articolo.trim());
+
             let articleDescription = 'Descrizione non disponibile';
             let originalArticleData = null;
 
             if (matchingRows.length > 0) {
                 // Prioritize rows with a matching location, if any
-                originalArticleData = matchingRows.find(item => 
-                    item.location  &&
+                originalArticleData = matchingRows.find(item =>
+                    item.location &&
                     `${item.location.area}-${item.location.scaffale}-${item.location.colonna}-${item.location.piano}` === originalLocation
                 ) || matchingRows[0]; // Fallback to the first matching row if no location match
 
@@ -410,21 +194,18 @@ const Picking = () => {
             let remainingQuantity = pickedQuantity;
 
             // Step 1: Deduct the quantity from existing rows (excluding the forced picking location and highlighted rows)
-            
             const updatedTableData = tableData.map(item => {
-                
                 if (
                     item.occ_arti.trim() === articolo.trim() &&
                     item.location &&
-                    
+                    `${item.location.area}-${item.location.scaffale}-${item.location.colonna}-${item.location.piano}` !== scaffale &&
                     !highlightedRows.has(item.id) // Exclude highlighted rows
                 ) {
-                    
                     if (remainingQuantity > 0) {
                         const deduction = Math.min(item.available_quantity, remainingQuantity);
                         remainingQuantity -= deduction;
                         const newQuantity = item.available_quantity - deduction;
-                        console.log(newQuantity)
+
                         return newQuantity > 0 ? { ...item, available_quantity: newQuantity } : null;
                     }
                 }
@@ -499,25 +280,9 @@ const Picking = () => {
             } catch (error) {
                 // Handle error if needed
             }
-            
         }
-        setConfirmLoading(false); // Stop loading
+    };
 
-    };
-    useEffect(() => {
-        if (articleFilter !== null) {
-            console.log(articleFilter); // This will log the updated state
-            fetchItems(); // Call your function after the state is updated
-        }
-    }, [articleFilter]); // This effect runs when articleFilter changes
-    
-    const handleLocationChangeModalVisible = (article) => {
-        setArticleFilter(article);
-        setlocationChangeModalVisible(true);
-    };
-    const handleLocationChangeModalClose = () => {
-        setlocationChangeModalVisible(false);
-    }
     const handleQuantityCancel = () => {
         setQuantityModalVisible(false);
         setQuantityModalData(null);
@@ -661,9 +426,6 @@ const Picking = () => {
 
     const handleArticoloPicking = async () => {
         // Validate inputs
-        setScaffale('');
-        setMovimento('');
-        setArticolo(articoloInput)
         if (!articoloInput.trim()) {
             notification.warning({
                 message: 'Attenzione',
@@ -733,9 +495,6 @@ const Picking = () => {
 
 
     const handleSearch = async () => {
-        setScaffale('');
-        setArticolo('');
-        setMovimento('');
         setHighlightedRows(new Set());
         setHighlightedShelves(new Set());
         setTableData([]); // Clear the data immediately
@@ -825,8 +584,6 @@ const Picking = () => {
 
     const handleShelfClick = (shelf) => {
         console.log('Clicked shelf:', shelf);
-        console.log(highlightedShelves.has(shelf))
-
     };
 
     const getTooltipContent = useCallback((shelf) => {
@@ -1195,32 +952,82 @@ const Picking = () => {
     const renderWarehouseSection = () => {
         if (currentPage === 1) {
             return (
-        <div>
-        <WarehouseGridSystem
-        warehouseLayout={layouts[1]}
-        GRID_ROWS = {30}
-        GRID_COLS = {9}
-        onCellClick={handleShelfClick}
-        getShelfStatus={getShelfStatus}
-        tooltipContent={getTooltipContent}
-        highlightedShelves={highlightedShelves}
+                <>
+                    <WarehouseGrid
+                        group='A'
+                        columns={8}
+                        rows={4}
+                        getShelfClass={getShelfClass}
+                        onShelfClick={handleShelfClick}
+                        tooltipContent={getTooltipContent}
+                        gridClassName="large-grid"
+                    />
+                    <div className="spacer" />
+                    <div>
+                        <WarehouseGrid
+                            group="B"
+                            columns={7}
+                            rows={4}
+                            getShelfClass={getShelfClass}
+                            onShelfClick={handleShelfClick}
+                            tooltipContent={getTooltipContent}
+                            gridClassName="smaller-grid second-group"
+                        />
+                        <WarehouseGrid
+                            group="C"
+                            columns={7}
+                            rows={5}
+                            getShelfClass={getShelfClass}
+                            onShelfClick={handleShelfClick}
+                            tooltipContent={getTooltipContent}
+                            gridClassName="smaller-grid second-group"
+                        />
+                    </div>
+                    <div className="spacer" />
+                    <WarehouseGrid
+                        group="D"
+                        columns={7}
+                        rows={6}
+                        getShelfClass={getShelfClass}
+                        onShelfClick={handleShelfClick}
+                        tooltipContent={getTooltipContent}
+                        gridClassName="smaller-grid third-grid"
+                    />
+                </>
+            );
+        } else if (currentPage === 2) {
+            return (
+                <>
+                
+                    <div className="spacer" />
+                     {/* Rectangle with "PRODUZIONE" text */}
+                     <div className="vertical-grid-container">
+              <div className="vertical-grid">
+                <WarehouseGrid
+                  group="R"
+                  columns={3}
+                  rows={5}
+                  getShelfClass={getShelfClass}
+                  onShelfClick={handleShelfClick}
+                  tooltipContent={getTooltipContent}
+                  gridClassName="vertical-grid-r"
+                />
+              </div>
+              <div className="vertical-bar">RIPARAZIONI</div>
+            </div>
 
-      />
-    </div>)}
-    else if (currentPage === 2) {
-        return (
-    <div>
-    <WarehouseGridSystem
-    GRID_ROWS = {15}
-    GRID_COLS = {11}
-    warehouseLayout={layouts[2]}
-    onCellClick={handleShelfClick}
-    getShelfStatus={getShelfStatus}
-    tooltipContent={getTooltipContent}
-    highlightedShelves={highlightedShelves}
-
-  />
-</div>)}
+                    <WarehouseGrid
+                        group="E"
+                        columns={8}
+                        rows={5}
+                        getShelfClass={getShelfClass}
+                        onShelfClick={handleShelfClick}
+                        tooltipContent={getTooltipContent}
+                        gridClassName="large-grid"
+                    />
+                </>
+            );
+        }
     };
 
     const columns = [
@@ -1236,15 +1043,19 @@ const Picking = () => {
             render: (description) => (
                 <span>
                     {description.length > 10 ? (
-                        <Tooltip title={description} placement="topLeft">
-                            {description.substring(0, 10)}...
-                            <InfoCircleOutlined style={{ marginLeft: 4 }} />
-                        </Tooltip>
+                        <>
+
+                            <Tooltip title={description} placement="topLeft">
+                                {description.substring(0, 10)}...
+                                <InfoCircleOutlined style={{ marginLeft: 4 }} />
+                            </Tooltip>
+                        </>
                     ) : (
                         description
                     )}
                 </span>
             ),
+
         },
         {
             title: 'Q.ta Da prelevare',
@@ -1260,124 +1071,24 @@ const Picking = () => {
             title: 'Posizione',
             dataIndex: 'location',
             key: 'location',
-            render: (location, record) => (
+
+            render: location => (
                 <>
                     {location.area ? (
                         <Tag color={'geekblue'} key={location} style={{ wordBreak: 'break-word', whiteSpace: 'normal' }}>
-                            <Button type="text" onClick={() => handleLocationChangeModalVisible(record.occ_arti)}>
-                                {location.area}-{location.scaffale}-{location.colonna}-{location.piano}
-                            </Button>
+                            {location.area}-{location.scaffale}-{location.colonna}-{location.piano}
                         </Tag>
+
                     ) : (
                         <Tag color={'red'} style={{ wordBreak: 'break-word', whiteSpace: 'normal' }}>
-                            Mancante
-                        </Tag>
+                            Mancante            </Tag>
                     )}
                 </>
             ),
         },
     ];
-    
-// Columns configuration for the main table
-const locationColumns = [
-    {
-      title: 'ID Art',
-      dataIndex: 'id_art',
-      key: 'id_art',
-      sorter: (a, b) => a.id_art.localeCompare(b.id_art),
-    },
-    {
-      title: 'Descrizione',
-      dataIndex: 'description',
-      key: 'description',
-      render: (text) => <span>{text}</span>,
-      sorter: (a, b) => a.description.localeCompare(b.description),
-    },
-    {
-      title: 'Codice Fornitore',
-      dataIndex: 'fornitore',
-      key: 'fornitore',
-      sorter: (a, b) => a.fornitore.localeCompare(b.fornitore),
-    },
-    {
-      title: 'Q.ta in magazzino',
-      dataIndex: 'totalQta',
-      key: 'totalQta',
-      sorter: (a, b) => a.totalQta - b.totalQta,
-      render: (text) => <span>{text}</span>,
-    },
-  ];
 
-  // Subcolumns for the subitems table
-  const subColumns = [
-    {
-      title: 'Movimento',
-      dataIndex: 'id_mov',
-      key: 'id_mov',
-      sorter: (a, b) => a.id_mov.localeCompare(b.id_mov),
-    },
-    {
-      title: 'Area',
-      dataIndex: 'area',
-      key: 'area',
-      sorter: (a, b) => a.area.localeCompare(b.area),
-    },
-    {
-      title: 'Scaffale',
-      dataIndex: 'scaffale',
-      key: 'scaffale',
-      sorter: (a, b) => a.scaffale.localeCompare(b.scaffale),
-    },
-    {
-      title: 'Colonna',
-      dataIndex: 'colonna',
-      key: 'colonna',
-      sorter: (a, b) => a.colonna.localeCompare(b.colonna),
-    },
-    {
-      title: 'Piano',
-      dataIndex: 'piano',
-      key: 'piano',
-      sorter: (a, b) => a.piano - b.piano,
-    },
-    {
-      title: 'Q.ta nello scaffale',
-      dataIndex: 'totalQta',
-      key: 'totalQta',
-      sorter: (a, b) => a.totalQta - b.totalQta,
-    },
-    {
-      title: 'Descrizione',
-      dataIndex: 'description', // Assuming backend concatenates descriptions
-      key: 'description',
-      render: (text) => <span>{text}</span>,
-      sorter: (a, b) => a.description.localeCompare(b.description),
-    },
-    
-  ];
-    const fetchItems = async () => {
-        try {
-          //setLoading(true);
-          const response = await axios.get(`${process.env.REACT_APP_API_URL}/api/get-items`, {
-            params: {
-              articleFilter
-              
-            },
-          });
-    
-          if (response.data && response.data.items) {
-            setLocazioni(response.data.items);
 
-          } else {
-            setLocazioni([]);
-          }
-        } catch (error) {
-          console.error('Error fetching items:', error);
-          message.error('Failed to fetch items. Please try again.');
-        } finally {
-          setLoading(false);
-        }
-      };
     const rowClassName = (record) => {
         if (highlightedRows.has(record.id)) {
             return 'highlighted-row';
@@ -1390,92 +1101,50 @@ const locationColumns = [
             handleSearch();
         }
     };
-    const handleKeyPressArticolo = (e) => {
-        if (e.key === 'Enter') {
-            handleArticoloPicking();
-        }
-    };
     const tableStyle = {
         tableLayout: 'fixed', // Fix the table layout to control column width
     };
-
-    const dataSource = locazioni.map(item => ({
-        key: item.id_art, // Unique key for each row
-        id_art: item.id_art,
-        fornitore: item.fornitore,
-        totalQta: item.totalQta,
-        description: item.description, // Concatenated description from backend
-        subItems: item.subItems,
-      }));
     return (
         <Layout style={{ minHeight: '100%' }}>
- <Modal
-                title="Locazioni articolo"
-                visible={locationChangeModalVisible}
-                onOk={handleLocationChangeModalClose}
-                onCancel={handleLocationChangeModalClose}
-                okText=""
-                cancelText="Chiudi"
-            >
-                
-                {dataSource.length > 0 && (
-    <Table
-        dataSource={dataSource[0].subItems.map(subItem => ({
-            key: `${subItem.id_mov}-${subItem.area}-${subItem.scaffale}-${subItem.colonna}-${subItem.piano}`, // Unique key for subitem
-            id_mov: subItem.id_mov,
-            area: subItem.area,
-            scaffale: subItem.scaffale,
-            colonna: subItem.colonna,
-            piano: subItem.piano,
-            totalQta: subItem.qta,
-            description: `${subItem.amg_desc} ${subItem.amg_des2}`.trim(),
-        }))}
-        columns={subColumns}
-        pagination={false}
-        rowKey="key"
-        scroll={{ x: 'max-content' }}
-    />
-)}
 
-            </Modal>
             <Modal
-            title="Conferma Quantità da Prelevare"
-            visible={quantityModalVisible}
-            onOk={handleQuantityConfirm}
-            onCancel={handleQuantityCancel}
-            confirmLoading={confirmLoading} // Apply loading state to the modal
-            okText="Conferma"
-            cancelText="Annulla"
-        >
-            {quantityModalData && quantityModalData.mode === 'exact' && (
-                <>
-                    <p>Sei sicuro di voler prelevare <strong>{quantityModalData.rowData.occ_arti}</strong> da <strong>{quantityModalData.rowData.location.area}-{quantityModalData.rowData.location.scaffale}-{quantityModalData.rowData.location.colonna}-{quantityModalData.rowData.location.piano}</strong>?</p>
-                    <p>Quantità da prelevare: <strong>{quantityModalData.rowData.available_quantity}</strong></p>
-                    <p>Inserisci la quantità da prelevare:</p>
-                    <InputNumber
-                        min={1}
-                        max={quantityModalData.rowData.available_quantity}
-                        value={pickedQuantity}
-                        onChange={(value) => setPickedQuantity(value)}
-                        style={{ width: '100%' }}
-                    />
-                </>
-            )}
-            {quantityModalData && quantityModalData.mode === 'forced' && (
-                <>
-                    <p>Sei sicuro di voler effettuare un prelievo forzato di <strong>{quantityModalData.forcedPickingInfo.articolo}</strong> da <strong>{quantityModalData.forcedPickingInfo.scaffale}</strong>?</p>
-                    <p>Movimento: <strong>{quantityModalData.forcedPickingInfo.movimento}</strong></p>
-                    <p>Inserisci la quantità da prelevare: (FORZATO)</p>
-                    <InputNumber
-                        min={0}
-                        
-                        value={pickedQuantity}
-                        onChange={(value) => setPickedQuantity(value)}
-                        style={{ width: '100%' }}
-                    />
-                </>
-            )}
-        </Modal>
+                title="Conferma Quantità da Prelevare"
+                visible={quantityModalVisible}
+                onOk={handleQuantityConfirm}
+                onCancel={handleQuantityCancel}
+                okText="Conferma"
+                cancelText="Annulla"
+            >
+                {quantityModalData && quantityModalData.mode === 'exact' && (
+                    <>
+                        <p>Sei sicuro di voler prelevare <strong>{quantityModalData.rowData.occ_arti}</strong> da <strong>{quantityModalData.rowData.location.area}-{quantityModalData.rowData.location.scaffale}-{quantityModalData.rowData.location.colonna}-{quantityModalData.rowData.location.piano}</strong>?</p>
+                        <p>Quantità da prelevare: <strong>{quantityModalData.rowData.available_quantity}</strong></p>
+                        <p>Inserisci la quantità da prelevare:</p>
+                        <InputNumber
+                            min={1}
+                            max={maxAvailableQuantity}
+                            value={pickedQuantity}
+                            onChange={(value) => setPickedQuantity(value)}
+                            style={{ width: '100%' }}
+                        />
+                    </>
+                )}
+                {quantityModalData && quantityModalData.mode === 'forced' && (
+                    <>
+                        <p>Sei sicuro di voler effettuare un prelievo forzato di <strong>{quantityModalData.forcedPickingInfo.articolo}</strong> da <strong>{quantityModalData.forcedPickingInfo.scaffale}</strong>?</p>
+                        <p>Movimento: <strong>{quantityModalData.forcedPickingInfo.movimento}</strong></p>
+                        <p>Inserisci la quantità da prelevare:</p>
+                        <InputNumber
+                            min={0}
+                            max={maxAvailableQuantity}
+                            value={pickedQuantity}
+                            onChange={(value) => setPickedQuantity(value)}
+                            style={{ width: '100%' }}
+                        />
+
+                    </>
+                )}
+            </Modal>
 
 
             <Sider width={"50%"} style={{ background: '#fff' }}>
@@ -1505,14 +1174,12 @@ const locationColumns = [
                                     value={articoloInput}
                                     onChange={(e) => setArticoloInput(e.target.value)}
                                     style={{ flexGrow: 7 }} // Represents 70% proportionally
-                                    onKeyPress={handleKeyPressArticolo}
                                 />
                                 <InputNumber
                                     min={1}
                                     value={articoloQuantity}
                                     onChange={(value) => setArticoloQuantity(value)}
                                     style={{ flexGrow: 1 }} // Represents 10% proportionally
-                                    onKeyPress={handleKeyPressArticolo}
                                 />
                                 <Button
                                     type="primary"
@@ -1561,22 +1228,18 @@ const locationColumns = [
   />
         {/* Scaffale Input */}
         <Input
-  ref={scaffaleRef}
-  style={{ width: 'calc(25% - 10px)', marginRight: '10px' }}
-  placeholder="Scaffale"
-  value={scaffale}
-  onChange={(e) => {
-    // Replace "'" with "-" in the input value
-    setScaffale(e.target.value.replace(/'/g, '-'));
-  }}
-  onPressEnter={() => {
-    // Focus the "Articolo" input when Enter is pressed
-    
-      articoloRef.current.focus();
-    
-  }}
-/>
-
+          ref={scaffaleRef}
+          style={{ width: 'calc(25% - 10px)', marginRight: '10px' }}
+          placeholder="Scaffale"
+          value={scaffale}
+          onChange={(e) => setScaffale(e.target.value)}
+          onPressEnter={() => {
+            // Focus the "Articolo" input when Enter is pressed
+            if (articoloRef.current) {
+              articoloRef.current.focus();
+            }
+          }}
+        />
 
         {/* Articolo Input */}
         <Input
@@ -1662,4 +1325,4 @@ const locationColumns = [
     );
 };
 
-export default Picking;
+export default Picking2;

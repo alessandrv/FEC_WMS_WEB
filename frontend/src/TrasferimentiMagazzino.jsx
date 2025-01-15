@@ -1,14 +1,24 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Input, Typography, Button, message, Modal, Table, Spin, Pagination } from 'antd';
+import { Input, Typography, Button, message, Modal, Table, InputNumber, Spin, Pagination, Card, Form } from 'antd';
 import axios from 'axios';
 import WarehouseGrid from './GridComponent';
 import './App.css'; // Make sure to import your CSS
-
+import WarehouseGridSystem from './WarehouseGridSystem';
+import { LoadingOutlined } from '@ant-design/icons';
 const { Title } = Typography;
 
 const App = () => {
   const [otp, setOtp] = useState(['', '', '', '']);
   const inputRefs = [useRef(), useRef(), useRef(), useRef()];
+  const articoloRef = useRef(null);
+  const fornitoreRef = useRef(null);
+  const movimentoRef = useRef(null);
+  const [articoloCode, setArticoloCode] = useState('');
+  const [fornitoreCode, setFornitoreCode] = useState('');
+  const [movimentoCode, setMovimentoCode] = useState('');
+  const [transferQuantity, setTransferQuantity] = useState(1);
+  
+  const[isTransferConfirmationOpen, setIsTransferConfirmationOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [tableData, setTableData] = useState([]);
@@ -23,74 +33,282 @@ const App = () => {
   // New state variables for volume calculation
   const [volumes, setVolumes] = useState([]);
   const [totalVolume, setTotalVolume] = useState(0);
+  const [selectedLayout, setSelectedLayout] = useState('simple');
+    const [selectedShelf, setSelectedShelf] = useState(null);
+    const [occupiedShelves, setOccupiedShelves] = useState(new Set());
+    const handleShelfClick = (shelf) => {
+      setHighlightedShelf(shelf);
+      setIsWarehouseMapOpen(false); // Close the map modal
+      
+      setIsTransferConfirmationOpen(true); // Open the confirmation modal
+    };
+    const layouts = {
+        1: [
+            {
+                id: 'A',
+                startRow: 0,
+                startCol: 0,
+                width: 8,
+                height: 4,
+                shelfPattern: 'regular'
+              },
+              {
+                id: 'B',
+                startRow: 7,
+                startCol: 0,
+                width: 7,
+                height: 4,
+                shelfPattern: 'regular'
+              },
+              {
+                id: 'C',
+                startRow: 11,
+                startCol: 0,
+                width: 7,
+                height: 5,
+                shelfPattern: 'regular'
+              },
+              {
+                id: 'D',
+                startRow: 19,
+                startCol: 0,
+                width: 2,
+                height: 6,
+                shelfPattern: 'regular'
+              },
+              {
+                id: 'D',
+                startRow: 19,
+                startCol: 3,
+                width: 5,
+                height: 6,
+                startingValue: 3,
+                shelfPattern: 'regular'
+              },
+              {
+                id: 'X',
+                startRow: 25,
+                startCol: 3,
+                width: 5,
+                height: 2,
+                startingValue: 1,
+                startingFloor: -1,
+                spanRow: 2,
+                spanCol: 5,
+                shelfPattern: 'regular'
+              },{
+                id: 'TEXT1',
+                type: 'customText',
+                customText: 'SCALE',
+                rotateText: false, // or false for horizontal text
+                startRow: 27,
+                startCol: 4,
+                width: 4,
+                height: 2,
+                spanRow: 3,
+                spanCol: 4
+              },
+              {
+                id: 'TEXT1',
+                type: 'customText',
+                customText: 'ENTRATA',
+                rotateText: false, // or false for horizontal text
+                startRow: 29,
+                startCol: 1,
+                width: 2,
+                height: 1,
+                spanRow: 1,
+                spanCol: 2
+              },
+              
+        ],
+        2: [
+            {
+                id: 'E',
+                startRow: 10,
+                startCol: 0,
+                width: 8,
+                height: 5,
+                shelfPattern: 'regular'
+              },
+              {
+                id: 'R',
+                startRow: 4,
+                startCol: 3,
+                width: 3,  // Number of columns you want
+                height: 1,
+                startingValue: 1,
+                shelfPattern: 'horizontal',  // Use 'horizontal' instead of 'regular'
+                startingFloor: 1
+              },
+              {
+                id: 'R',
+                startRow: 5,
+                startCol: 3,
+                width: 3,  // Number of columns you want
+                height: 1,
+                startingValue: 2,
+                shelfPattern: 'horizontal',  // Use 'horizontal' instead of 'regular'
+                startingFloor: 1
+              },
+              {
+                id: 'R',
+                startRow: 6,
 
+                startCol: 3,
+                width: 3,  // Number of columns you want
+                height: 1,
+                startingValue: 3,
+                shelfPattern: 'horizontal',  // Use 'horizontal' instead of 'regular'
+                startingFloor: 1
+              },
+
+              
+
+              {
+                id: 'S',
+                startRow: 3,
+                startCol: 8,
+                width: 1,
+                height: 5,
+                startingFloor:-4,
+                startingValue:1,
+                spanRow: 5,
+                spanCol: 1,
+                shelfPattern: 'regular'
+              },{
+                id: 'TEXT1',
+                type: 'customText',
+                customText: 'RIPARAZIONI',
+                rotateText: false, // or false for horizontal text
+                startRow: 3,
+                startCol: 6,
+                width: 1,
+                height: 5,
+                spanRow: 5,
+                spanCol: 1
+              },
+              {
+                id: 'TEXT2',
+                type: 'customText',
+                customText: 'ENTRATA',
+                rotateText: false, // or false for horizontal text
+                startRow: 14,
+                startCol: 8,
+                width: 1,
+                spanCol:1,
+                height: 1,
+              },
+              {
+                id: 'TEXT3',
+                type: 'customText',
+                customText: 'POS. DOMENICO',
+                rotateText: false, // or false for horizontal text
+                startRow: 0,
+                startCol: 0,
+                width: 1,
+                
+                height: 1,
+              }
+              ,
+              {
+                id: 'TEXT4',
+                type: 'customText',
+                customText: 'ENTRATA',
+                rotateText: false, // or false for horizontal text
+                startRow: 0,
+                startCol: 8,
+                width: 1,
+                
+                height: 1,
+              }
+              ,
+              {
+                id: 'TEXT5',
+                type: 'customText',
+                customText: 'POS. CECILIA',
+                rotateText: false, // or false for horizontal text
+                startRow: 0,
+                startCol: 9,
+                width: 1,
+                
+                height: 1,
+              }
+        
+         
+        ]
+      };
+      const getShelfStatus = (shelfId) => {
+        if (shelfId === selectedShelf) return 'selected';
+        if (occupiedShelves.has(shelfId)) return 'full';
+        return 'available';
+      };
   const handlePageChange = (page) => {
     setCurrentPage(page);
   };
-
-  const renderWarehouseSection = () => {
-    if (currentPage === 1) {
-      return (
-        <>
-          <WarehouseGrid
-            group='A'
-            columns={8}
-            rows={4}
-            getShelfClass={getShelfClass}
-            onShelfClick={handleShelfClick}
-            tooltipContent={getTooltipContent}
-            gridClassName="large-grid"
-          />
-          <div className="spacer" />
-          <div>
-            <WarehouseGrid
-              group="B"
-              columns={7}
-              rows={4}
-              getShelfClass={getShelfClass}
-              onShelfClick={handleShelfClick}
-              tooltipContent={getTooltipContent}
-              gridClassName="smaller-grid second-group"
-            />
-            <WarehouseGrid
-              group="C"
-              columns={7}
-              rows={5}
-              getShelfClass={getShelfClass}
-              onShelfClick={handleShelfClick}
-              tooltipContent={getTooltipContent}
-              gridClassName="smaller-grid second-group"
-            />
-          </div>
-          <div className="spacer" />
-          <WarehouseGrid
-            group="D"
-            columns={7}
-            rows={6}
-            getShelfClass={getShelfClass}
-            onShelfClick={handleShelfClick}
-            tooltipContent={getTooltipContent}
-            gridClassName="smaller-grid third-grid"
-          />
-        </>
-      );
-    } else if (currentPage === 2) {
-      return (
-        <>
-          <div className="spacer" />
-          <WarehouseGrid
-            group="E"
-            columns={8}
-            rows={5}
-            getShelfClass={getShelfClass}
-            onShelfClick={handleShelfClick}
-            tooltipContent={getTooltipContent}
-            gridClassName="large-grid"
-          />
-        </>
-      );
+  const handleTransfer = async () => {
+    setLoading(true);
+    try {
+      const payload = {
+        area: shelfInfo.area,
+        scaffale: shelfInfo.scaffale,
+        colonna: shelfInfo.colonna,
+        piano: shelfInfo.piano,
+        articolo: articoloCode,
+        movimento: movimentoCode,
+        quantity: transferQuantity,
+      };
+  
+      const response = await fetch(`${process.env.REACT_APP_API_URL}/api/initiate-transfer`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+  
+      if (!response.ok) {
+        throw new Error('Network response was not ok');
+      }
+  
+      message.success('Trasferimento avviato con successo');
+      setIsModalOpen(false); // Close the modal on success
+    } catch (error) {
+      message.error('Errore durante il trasferimento');
+      console.error('Error:', error);
+    } finally {
+      setLoading(false);
     }
   };
+  
+  const renderWarehouseSection = () => {
+    if (currentPage === 1) {
+        return (
+    <div>
+    <WarehouseGridSystem
+    warehouseLayout={layouts[1]}
+    GRID_ROWS = {30}
+    GRID_COLS = {9}
+    onCellClick={handleShelfClick}
+    getShelfStatus={getShelfStatus}
+    tooltipContent={getTooltipContent}
+
+  />
+</div>)}
+else if (currentPage === 2) {
+    return (
+<div>
+<WarehouseGridSystem
+GRID_ROWS = {15}
+GRID_COLS = {11}
+warehouseLayout={layouts[2]}
+onCellClick={handleShelfClick}
+getShelfStatus={getShelfStatus}
+tooltipContent={getTooltipContent}
+
+/>
+</div>)}
+};
 
   const openWarehouseMap = () => {
     setIsWarehouseMapOpen(true);
@@ -159,33 +377,40 @@ useEffect(() => {
     return hasEnoughSpace ? 'grid-item green' : 'grid-item red';
   }, [shelvesData, totalVolume, highlightedShelf]);
   
-  const handleShelfClick = (shelf) => {
-    setHighlightedShelf(shelf);
 
-    // Confirm the selection
-    Modal.confirm({
-      title: `Confirm Transfer to Shelf ${shelf}?`,
-      content: (
-        <div>
-          <p><strong>Destination Shelf:</strong> {shelf}</p>
-          <p><strong>Packages to Transfer:</strong></p>
-          <ul>
-            {selectedPackages.map((pkg) => (
-              <li key={pkg.id_mov}>
-                {pkg.id_art} - Quantity: {pkg.qta}
-              </li>
-            ))}
-          </ul>
-          <p><strong>Total Volume:</strong> {totalVolume} m³</p>
-        </div>
-      ),
-      onOk: () => {
-        // Proceed to show summary modal or perform the transfer
-        performTransfer(shelf);
-      },
-    });
+  const confirmTransfer = async () => {
+    setLoading(true);
+    const [scaffaleDest, colonnaDest, pianoDest] = highlightedShelf.split('-');
+    const areaDest='A';
+
+    try {
+      await axios.post(`${process.env.REACT_APP_API_URL}/api/trasferimento`, {
+         articolo : articoloCode,
+       
+    area:shelfInfo.area,
+    scaffale:shelfInfo.scaffale,
+    colonna:shelfInfo.colonna,
+    piano:shelfInfo.piano,
+
+    areaDest:areaDest,
+    scaffaleDest : scaffaleDest,
+    colonnaDest : colonnaDest,
+    pianoDest : pianoDest,
+
+    movimento :movimentoCode,
+    fornitore :fornitoreCode,
+    quantity : transferQuantity,
+      });
+      message.success('Trasferimento completato con successo!');
+      setIsTransferConfirmationOpen(false);
+      setIsModalOpen(false)
+    } catch (error) {
+      console.error('Error confirming transfer:', error);
+      message.error('Errore nel trasferimento.');
+    } finally {
+      setLoading(false);
+    }
   };
-
   
   const getTooltipContent = (shelf) => {
     const shelfData = shelvesData.find((s) => s.shelfCode === shelf);
@@ -301,13 +526,55 @@ useEffect(() => {
     if (e.key === 'Enter') {
       const emptyFields = otp.some((value) => value.trim() === '');
       if (!emptyFields) {
-        handleConfirm(); // Call handleConfirm only if all fields are filled
+        articoloRef.current.focus();
       } else {
-        message.error('Please fill all the fields.');
+        message.error('Inserisci la locazione completa.');
       }
+      
     }
   };
 
+  const handleInputChange = (e, setter, nextRef) => {
+    const value = e.target.value;
+    if (value.includes(',')) {
+      const [beforeComma, afterComma] = value.split(',');
+      setter(beforeComma);
+      if (nextRef && nextRef.current) {
+        nextRef.current.focus();
+        nextRef.current.input.value = afterComma;
+      }
+    } else {
+      setter(value);
+    }
+  };
+  const handleKeyDownArticolo = ( e) => {
+
+    if (e.key === 'Enter') {
+      
+        fornitoreRef.current.focus();
+      
+      
+    }
+    
+  };
+  const handleKeyDownFornitore = ( e) => {
+
+    if (e.key === 'Enter') {
+      
+        movimentoRef.current.focus();
+      
+      
+    }
+  };
+  const handleKeyDownMovimento = ( e) => {
+
+    if (e.key === 'Enter') {
+      
+      handleConfirm();
+      
+      
+    }
+  };
   // Fetch the description for each unique article
   const fetchDescriptions = async (articoli) => {
     const newDescriptions = { ...descriptions };
@@ -348,51 +615,71 @@ useEffect(() => {
 
     setTotalVolume(total);
   }, [volumes, selectedPackages]);
-
-  const handleConfirm = async () => {
-    // Check for empty fields in the current otp state
-    const emptyFields = otp.map((value, index) => {
+  const validateFields = () => {
+    // Check if OTP fields are empty
+    const emptyOtpFields = otp.map((value, index) => {
       if (value.trim() === '') {
         console.log(`Field at index ${index} is empty`);
         return index; // Return the index of the empty field
       }
       return null; // Return null for non-empty fields
     }).filter(index => index !== null); // Filter out the null values
-
-    if (emptyFields.length > 0) {
-      message.error('Please fill all the fields.');
+  
+    // Check if Codice Articolo or Movimento are empty
+    if (articoloCode.trim() === '') {
+      console.log('Codice Articolo is empty');
+      message.error('Codice Articolo is obbligatorio.');
+      return false;
+    }
+  
+    if (movimentoCode.trim() === '') {
+      console.log('Movimento is empty');
+      message.error('Codice Movimento è obbligatorio.');
+      return false;
+    }
+  
+    if (emptyOtpFields.length > 0) {
+      message.error('Compila tutti i campi di posizione.');
+      return false;
+    }
+  
+    // All fields are filled
+    return true;
+  };
+  const handleConfirm = async () => {
+    if (!validateFields()) {
       return;
     }
-
-    // Proceed with the API call if all fields are filled
+  
     setLoading(true);
-
+  
     const area = otp[0];
     const scaffale = otp[1];
     const colonna = otp[2];
     const piano = otp[3];
-
+  
     try {
       const response = await fetch(
-        `${process.env.REACT_APP_API_URL}/api/articoli-scaffale?area=${area}&scaffale=${scaffale}&colonna=${colonna}&piano=${piano}`
+        `${process.env.REACT_APP_API_URL}/api/articoli-scaffale?area=${area}&scaffale=${scaffale}&colonna=${colonna}&piano=${piano}&articolo=${articoloCode}&fornitore=${fornitoreCode}&movimento=${movimentoCode}`
       );
-
+  
       if (!response.ok) {
         throw new Error('Network response was not ok');
       }
-
+  
       const data = await response.json();
-      setTableData(data); // Set the data to be displayed in the modal table
-      setShelfInfo({ area, scaffale, colonna, piano });
-      await fetchDescriptions(data); // Fetch descriptions for the items
-      message.success('Dati ottenuti');
-      setIsModalOpen(true); // Open modal with the results
-
-      // After data is fetched and modal is open, calculate the total volume
-      // Do not auto-select all packages; user selects via checkboxes
-      // Instead, you might want to reset selectedPackages
-      setSelectedPackages([]); // Reset selected packages
-      setTotalVolume(0); // Reset total volume
+  
+      // Summing up the total quantity
+      const totalQuantity = data.reduce((sum, item) => sum + (item.qta || 0), 0);
+  
+      setShelfInfo({
+        area,
+        scaffale,
+        colonna,
+        piano,
+        totalQuantity,
+      });
+      setIsModalOpen(true); // Open the modal
     } catch (error) {
       message.error('Errore di connessione o di scansione');
       console.error('Error:', error);
@@ -400,26 +687,31 @@ useEffect(() => {
       setLoading(false);
     }
   };
-
-  const inputStyle = {
-    width: '60px',
-    height: '60px',
-    fontSize: '24px',
-    textAlign: 'center',
-    margin: '0 8px',
-  };
+  
 
   const containerStyle = {
     display: 'flex',
     justifyContent: 'center',
     alignItems: 'center',
-    height: '100%',
-    flexDirection: 'column',
+    minHeight: '100vh', // Full viewport height
   };
 
+  const cardStyle = {
+    width: '400px',
+    padding: '20px',
+    boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)', // Optional shadow for a modern look
+  };
+
+  const inputStyle = {
+    width: '60px',
+    textAlign: 'center',
+  };
+ 
   useEffect(() => {
+    if (inputRefs[0].current) {
     // Focus the first input field when the component mounts
     inputRefs[0].current.focus();
+    }
   }, []);
 
   // Recalculate total volume whenever selectedPackages changes
@@ -428,9 +720,13 @@ useEffect(() => {
   }, [selectedPackages, calculateTotalVolume]);
 
   return (
-    <div style={containerStyle}>
-      <Title level={3}>Trasferimenti</Title>
-      <div style={{ display: 'flex', alignItems: 'center' }}>
+    <div style={{display:"flex", justifyContent: 'center', alignItems: 'center', flexWrap: 'wrap !important',}}>
+
+    
+<div style={containerStyle}>
+      <Card title="Trasferimenti" style={cardStyle}>
+        {/* Top section with location inputs */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
         {['AREA', 'SCAFFALE', 'COLONNA', 'PIANO'].map((label, index) => (
           <div key={index} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
             <span style={{ marginBottom: '4px' }}>{label}</span>
@@ -442,59 +738,156 @@ useEffect(() => {
               maxLength={index === 2 ? 2 : 1}
               style={inputStyle}
             />
+            
           </div>
-        ))}
+
+        )
+        )
+        }
+        </div>
+
+        {/* Form section with article and movimento inputs */}
+        <Form layout="vertical">
+        <Form.Item label="Codice Articolo">
+            <Input ref={articoloRef} onChange={(e) => handleInputChange(e, setArticoloCode, fornitoreRef)} value={articoloCode}  onKeyDown={(e) => handleKeyDownArticolo(e)} placeholder="Codice Articolo" />
+          </Form.Item>
+          <Form.Item label="Codice Fornitore">
+            <Input ref={fornitoreRef} onChange={(e) => handleInputChange(e, setFornitoreCode, movimentoRef)} value={fornitoreCode}  onKeyDown={(e) => handleKeyDownFornitore(e)} placeholder="Codice Fornitore" />
+          </Form.Item>
+          <Form.Item label="Movimento">
+            <Input ref={movimentoRef} onChange={(e) => setMovimentoCode(e.target.value)} value={movimentoCode} onKeyDown={(e) => handleKeyDownMovimento(e)} placeholder="Codice Movimento" />
+          </Form.Item>
+        </Form>
+
+        {/* Confirm Button */}
         <Button
           type="primary"
           onClick={handleConfirm}
-          loading={loading}
-          style={{ marginLeft: '16px', height: '60px' }}
+          block
+          style={{
+            height: '50px',
+            marginTop: '10px',
+          }}
         >
-          Conferma
+          Inizia
         </Button>
-      </div>
+      </Card>
+       {/* Modal with Table */}
+       <Modal
+       style={{width:"50%"}}
+  title={`Scanned Shelf: Area ${shelfInfo.area}, Scaffale ${shelfInfo.scaffale}, Colonna ${shelfInfo.colonna}, Piano ${shelfInfo.piano}`}
+  visible={isModalOpen}
+  onCancel={() => setIsModalOpen(false)}
+  footer={[
+    <Button key="cancel" onClick={() => setIsModalOpen(false)}>
+      Indietro
+    </Button>,
+    <Button
+    type="primary"
+    onClick={() => setIsWarehouseMapOpen(true)}
+    disabled={transferQuantity <= 0 || transferQuantity > shelfInfo.totalQuantity}
 
-      {/* Modal with Table */}
-      <Modal
-        title={`Scanned Shelf: Area ${shelfInfo.area}, Scaffale ${shelfInfo.scaffale}, Colonna ${shelfInfo.colonna}, Piano ${shelfInfo.piano}`}
-        visible={isModalOpen}
-        onCancel={() => setIsModalOpen(false)}
-        footer={[
-          <Button key="cancel" onClick={() => setIsModalOpen(false)}>
-            Cancel
-          </Button>,
-          <Button
-            key="transfer"
-            type="primary"
-            disabled={selectedPackages.length === 0}
-            onClick={openWarehouseMap}
-          >
-            Transfer
-          </Button>,
-        ]}
-        width={800}
-      >
-        <Table
-          dataSource={tableData}
-          columns={columns}
-          rowKey="id_mov"
-          pagination={false}
-        />
-        {/* Display Total Volume in the Modal */}
-        <div style={{ marginTop: '16px', textAlign: 'right' }}>
-          <strong>Total Volume:</strong> {totalVolume} m³
-        </div>
-      </Modal>
+  >
+    Seleziona destinazione
+  </Button>
+  ,
+  ]}
+>
+  <div style={{ marginBottom: '16px' }}>
+    <strong>ID Articolo:</strong> {articoloCode}
+  </div>
+  <div style={{ marginBottom: '16px' }}>
+    <strong>Movimento:</strong> {movimentoCode}
+  </div>
+  <div style={{ marginBottom: '16px' }}>
+    <strong>Quantità Totale:</strong> {shelfInfo.totalQuantity}
+  </div>
+  <div style={{ marginBottom: '16px' }}>
+    <strong>Quantità da spostare:</strong>
+    <InputNumber
+  min={1} // Ensures the minimum value is 1
+  max={shelfInfo.totalQuantity} // Sets the maximum value to the total quantity
+  value={transferQuantity} // Binds the value to state
+ 
+  onChange={(value) => {
+    if (value <= shelfInfo.totalQuantity) {
+      setTransferQuantity(value); // Update the state if within valid range
+    }
+  }}
+  style={{ width: '100%', marginTop: '8px' }}
+  onPressEnter={() => {
+    // Optional: Handle pressing Enter (e.g., confirm the value)
+    if (transferQuantity > 0 && transferQuantity <= shelfInfo.totalQuantity) {
+      message.success('Quantità impostata correttamente');
+    }
+  }}
+  step={1} // Allow users to use step increments
+  parser={(value) => value.replace(/[^\d]/g, '')} // Ensure only numeric input
+  formatter={(value) => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')} // Format numbers with commas
+/>
+
+  </div>
+</Modal>
+<Modal
+  title="Conferma Trasferimento"
+  visible={isTransferConfirmationOpen}
+  onCancel={() => setIsTransferConfirmationOpen(false)}
+  onOk={confirmTransfer} // Function to finalize the transfer
+  okText="Conferma"
+  cancelText="Annulla"
+>
+  <div>
+  <p><strong>ID Articolo:</strong> {articoloCode}</p>
+ 
+ <p><strong>Movimento:</strong> {movimentoCode}</p>
+ <p><strong>Partenza:</strong> {shelfInfo.area}-{shelfInfo.scaffale}-{shelfInfo.colonna}-{shelfInfo.piano}</p>
+  <p><strong>Destinazione:</strong> A-{highlightedShelf}</p>
+
+  <p><strong>Quantità:</strong> {transferQuantity}</p>
+
+  </div>
+</Modal>
+<Modal
+  title="Seleziona la posizione di destinazione"
+  visible={isWarehouseMapOpen}
+  onCancel={() => setIsWarehouseMapOpen(false)}
+  footer={null}
+  width={1000}
+>
+  {loading ? (
+    <Spin indicator={<LoadingOutlined style={{ fontSize: 48 }} spin />} />
+  ) : (
+    <div className="warehouse-map-container">
+      <WarehouseGridSystem
+        warehouseLayout={layouts[currentPage]}
+        GRID_ROWS={30} // Adjust rows/columns as needed
+        GRID_COLS={9}
+        onCellClick={handleShelfClick}
+        getShelfStatus={getShelfStatus}
+        tooltipContent={getTooltipContent}
+      />
+      <Pagination
+        current={currentPage}
+        total={Object.keys(layouts).length}
+        pageSize={1}
+        onChange={(page) => setCurrentPage(page)}
+        showSizeChanger={false}
+        simple
+      />
+    </div>
+  )}
+</Modal>
+
 
       <Modal
-        title="Select Destination Shelf"
+        title="Selezionare scaffale di destinazione"
         visible={isWarehouseMapOpen}
         onCancel={() => setIsWarehouseMapOpen(false)}
         footer={null}
         width="80%"
       >
         {/* Warehouse Map Content */}
-        <div style={{ maxHeight: '90%', overflowY: 'auto' }}>
+        <div style={{ maxHeight: '100%', overflowY: 'auto' }}>
           <div className="grid-container">
             {renderWarehouseSection()}
           </div>
@@ -511,7 +904,7 @@ useEffect(() => {
           </div>
         </div>
       </Modal>
-    </div>
+    </div></div>
   );
 };
 

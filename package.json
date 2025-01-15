@@ -6,5 +6,12 @@
     "start": "concurrently \"npm run start:backend\" \"npm run start:frontend\"",
     "start:backend": "npm --prefix backend start",
     "start:frontend": "npm --prefix frontend start"
+  },
+  "dependencies": {
+    "antd": "^5.22.5",
+    "axios": "^1.7.9",
+    "file-saver": "^2.0.5",
+    "react-router-dom": "^7.0.2",
+    "xlsx": "^0.18.5"
   }
 }

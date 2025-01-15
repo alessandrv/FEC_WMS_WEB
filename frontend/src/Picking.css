@@ -19,6 +19,23 @@
   
   /* styles.css */
 
+  .rectangle {
+    z-index: 0;
+    width: 100%;
+    height: 20%;  /* You can adjust the height as needed */
+    background-color: rgb(230 45 58);;  /* Rectangle background color */
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    margin-bottom: 10px;  /* Adds some space between the rectangle and the grid */
+}
+
+.rectangle-text {
+    color: white;  /* Text color */
+    font-size: 16px;  /* Text size */
+    font-weight: bold;
+}
+
 
 .dark-row {
   background: #444; /* Background for table cells */

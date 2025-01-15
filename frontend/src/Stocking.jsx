@@ -17,8 +17,8 @@ const StockingDettagli = () => {
   const [ragioneSocialeFornitore, setRagioneSocialeFornitore] = useState('');
   const [movimentoCode, setMovimentoCode] = useState('');
   const [quantitaPerPacco, setQuantitaPerPacco] = useState('');
-  const [totalePacchi, setTotalePacchi] = useState();
-  const [dimensione, setDimensione] = useState();
+  const [totalePacchi, setTotalePacchi] = useState(1);
+  const [dimensione, setDimensione] = useState('Zero');
   const [isDataConsistent, setIsDataConsistent] = useState(false);
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -211,7 +211,7 @@ const StockingDettagli = () => {
 
 
       <Row gutter={16}>
-        <Col xs={24} sm={12} md={8}>
+        <Col xs={24} sm={24} md={12}>
         <Card title="Articolo" className="card">
             <Form layout="vertical" className="form">
               <Form.Item label="Codice Articolo">
@@ -236,7 +236,7 @@ const StockingDettagli = () => {
           </Card>
         </Col>
 
-        <Col xs={24} sm={12} md={8}>
+        <Col xs={24} sm={12} md={12}>
           <Card title="Fornitore" className="card">
             <Form layout="vertical" className="form">
               <Form.Item label="Codice Fornitore">
@@ -260,8 +260,10 @@ const StockingDettagli = () => {
             </Form>
           </Card>
         </Col>
+        </Row>
 
-        <Col xs={24} sm={12} md={8}>
+        <Row gutter={16}>
+        <Col xs={24} sm={12} md={12}>
           <Card title="Movimento" className="card">
             <Form layout="vertical" className="form">
               <Form.Item label="Codice Movimento">
@@ -277,58 +279,35 @@ const StockingDettagli = () => {
             </Form>
           </Card>
         </Col>
-      </Row>
 
-      <Row gutter={16}>
-        <Col xs={24} sm={12} md={8}>
+      
+        <Col xs={24} sm={12} md={12}>
           <Card title="Dati Pacco" className="card">
             <Form layout="vertical" className="form">
-              <Form.Item label="Quantità per Pacco">
+              <Form.Item label="Quantità">
                 <Input
                   value={quantitaPerPacco}
                   onChange={(e) => setQuantitaPerPacco(e.target.value)}
                   onPressEnter={handleQuantitaEnter}
-                  placeholder="Quantità per Pacco"
+                  placeholder="Quantità"
                   ref={quantitaRef}
                   className="input-small"
                 />
               </Form.Item>
-              <Form.Item label="Totale Pacchi">
-                <InputNumber
-                  min={1}
-                  value={totalePacchi}
-                  onChange={(value) => setTotalePacchi(value)}
-                  onPressEnter={handleTotalePacchiEnter}
-                  ref={totalePacchiRef}
-                  className="input-small"
-                />
-              </Form.Item>
-              <Form.Item label="Dimensione">
-                <Select
-                  ref={dimensioneSelectRef}
-                  size='large'
-                  value={dimensione}
-                  onChange={(value) => setDimensione(value)}
-                  className="input-small"
-                >
-                  <Option value="Zero">Zero</Option>
-                  <Option value="Piccolo">Piccolo</Option>
-                  <Option value="Medio">Medio</Option>
-                  <Option value="Grande">Grande</Option>
-                </Select>
-              </Form.Item>
+          
             </Form>
           </Card>
         </Col>
-        <Col xs={24} sm={12} md={8}>
-          <Card title="Quantita registrata in magazzino a gestionale" className="card">
+        {/*<Col xs={24} sm={12} md={8}> 
+          <Card title="Quantità registrata in magazzino a gestionale" className="card">
             <TrovaQuantita articoloCode={articoloDaCercare} />
           </Card>
-        </Col>
+        </Col> */}
       </Row>
       <div className="actions">
-        <Button type="primary" onClick={handleShowMagazzino}>Mostra Magazzino</Button>
-        <Button type="default" onClick={clearAllFields}>Pulisci</Button>
+        <Button type="default" style={{margin:10}} onClick={clearAllFields}>Pulisci campi</Button>
+        <Button type="primary" style={{margin:10}} onClick={handleShowMagazzino}>Immagazzina</Button>
+
       </div>
     </div>
   );

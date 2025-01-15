@@ -15,8 +15,12 @@ import TrovaQuantita from './TrovaQuantita'
 import VisualizzaMagazzino from './VisualizzaMagazzino'
 import TrasferimentiMagazzino from './TrasferimentiMagazzino'
 import Picking from './Picking'
+import Picking2 from './Picking2'
+import LogsTable from './LogsTable';
 import Accettazione from './Accettazione';
 import IncomingItemsTable from './IncomingItemsTable';
+import FiveInputPage from './FiveInputPage';
+import WarehouseGridTest from './WarehouseGridTest';
 
 const { Content } = Layout;
 
@@ -72,7 +76,9 @@ root.render(
               <Route path="/prelievi" element={<Picking />} />
               <Route path="/accettazione" element={<Accettazione />} />
               <Route path="/in-arrivo" element={<IncomingItemsTable />} />
-
+              <Route path="/inventario" element={<FiveInputPage />} />
+              <Route path="/test" element={<Picking2 />} />
+              <Route path="/logs" element={<LogsTable />} />
             </Routes>
           </Content>
         </Layout>

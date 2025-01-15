@@ -1,0 +1,27 @@
+/* FiveInputPage.css */
+
+
+  
+  .title {
+    text-align: center;
+    margin-bottom: 24px;
+  }
+  
+  .card {
+    margin-bottom: 16px;
+  }
+  
+  .form {
+    max-width: 300px;
+  }
+  
+  .input-small {
+    width: 100%;
+  }
+  
+  .actions {
+    margin-top: 24px;
+    display: flex;
+    justify-content: center;
+  }
+  

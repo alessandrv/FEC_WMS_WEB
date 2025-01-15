@@ -12,6 +12,9 @@ import {
   CheckOutlined,
   CommentOutlined,
   DeliveredProcedureOutlined,
+  InsertRowAboveOutlined,
+  Loading3QuartersOutlined,
+  DatabaseFilled,
 } from '@ant-design/icons';
 import './CollapsibleMenu.css'; // Ensure to include your CSS file for additional styles
 
@@ -161,7 +164,7 @@ const CollapsibleMenu = () => {
         </Row>
 
         {/* Second Row: Prelievi Section */}
-        <Row gutter={[16, 16]}>
+        <Row gutter={[16, 16]} style={{ marginBottom: '16px' }}>
           <Col span={8}>
             <Link to="/prelievi" onClick={closeDrawer}>
               <Card
@@ -170,6 +173,31 @@ const CollapsibleMenu = () => {
                 cover={<BoxPlotOutlined style={{ fontSize: '3rem', marginTop: '20px' }} />}
               >
                 Prelievi
+              </Card>
+            </Link>
+          </Col>
+        </Row>
+
+        <Row gutter={[16, 16]}>
+        <Col span={8}>
+            <Link to="/inventario" onClick={closeDrawer}>
+              <Card
+                hoverable
+                style={{ textAlign: 'center', fontSize: '1.5rem' }}
+                cover={<InsertRowAboveOutlined style={{ fontSize: '3rem', marginTop: '20px' }} />}
+              >
+                Inventario
+              </Card>
+            </Link>
+          </Col>
+          <Col span={8}>
+            <Link to="/logs" onClick={closeDrawer}>
+              <Card
+                hoverable
+                style={{ textAlign: 'center', fontSize: '1.5rem' }}
+                cover={<DatabaseFilled style={{ fontSize: '3rem', marginTop: '20px' }} />}
+              >
+                Log sistema
               </Card>
             </Link>
           </Col>

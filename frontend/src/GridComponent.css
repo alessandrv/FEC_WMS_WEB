@@ -34,6 +34,10 @@
     grid-template-columns: repeat(7, 1fr);
     width: 100%;
   }
+  .smaller-grid2 {
+    grid-template-columns: repeat(2, 1fr);
+    width: 100%;
+  }
   
   .second-group {
     width: 75%; /* 75% of the screen width */
@@ -53,13 +57,14 @@
     height: 2%; /* Space between grid sections */
   }
   
-  .third-grid {
-    width: 60%;
-    margin-left: 20%;
+  .third-group {
+    width: 30%;
    
    
 }
-
+:where(.css-dev-only-do-not-override-1xbpjwy).ant-table-wrapper .ant-table-tbody >tr >th >.ant-table-wrapper:only-child .ant-table, :where(.css-dev-only-do-not-override-1xbpjwy).ant-table-wrapper .ant-table-tbody >tr >td >.ant-table-wrapper:only-child .ant-table, :where(.css-dev-only-do-not-override-1xbpjwy).ant-table-wrapper .ant-table-tbody >tr >th >.ant-table-expanded-row-fixed>.ant-table-wrapper:only-child .ant-table, :where(.css-dev-only-do-not-override-1xbpjwy).ant-table-wrapper .ant-table-tbody >tr >td >.ant-table-expanded-row-fixed>.ant-table-wrapper:only-child .ant-table {
+   margin-block: -0;
+}
 
 
 /* ViewMagazzino.css */

@@ -5,6 +5,8 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import './ViewMagazzino.css';
 import { LoadingOutlined } from '@ant-design/icons';
 import WarehouseGrid from './GridComponent';
+import WarehouseGridSystem from './WarehouseGridSystem';
+
 const generateShelfNames = (group, columns, rows) => {
   const shelves = [];
   for (let row = rows; row >= 1; row--) {
@@ -25,78 +27,244 @@ const ViewMagazzino = () => {
   const location = useLocation();
   const [showHiddenInput, setShowHiddenInput] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
+  const [selectedShelf, setSelectedShelf] = useState(null);
+  const [occupiedShelves, setOccupiedShelves] = useState(new Set());
 
+  const layouts = {
+    1: [
+        {
+            id: 'A',
+            startRow: 0,
+            startCol: 0,
+            width: 8,
+            height: 4,
+            shelfPattern: 'regular'
+          },
+          {
+            id: 'B',
+            startRow: 7,
+            startCol: 0,
+            width: 7,
+            height: 4,
+            shelfPattern: 'regular'
+          },
+          {
+            id: 'C',
+            startRow: 11,
+            startCol: 0,
+            width: 7,
+            height: 5,
+            shelfPattern: 'regular'
+          },
+          {
+            id: 'D',
+            startRow: 19,
+            startCol: 0,
+            width: 2,
+            height: 6,
+            shelfPattern: 'regular'
+          },
+          {
+            id: 'D',
+            startRow: 19,
+            startCol: 3,
+            width: 5,
+            height: 6,
+            startingValue: 3,
+            shelfPattern: 'regular'
+          },
+          {
+            id: 'X',
+            startRow: 25,
+            startCol: 3,
+            width: 5,
+            height: 2,
+            startingValue: 1,
+            startingFloor: -1,
+            spanRow: 2,
+            spanCol: 5,
+            shelfPattern: 'regular'
+          },{
+            id: 'TEXT1',
+            type: 'customText',
+            customText: 'SCALE',
+            rotateText: false, // or false for horizontal text
+            startRow: 27,
+            startCol: 4,
+            width: 4,
+            height: 2,
+            spanRow: 3,
+            spanCol: 4
+          },
+          {
+            id: 'TEXT1',
+            type: 'customText',
+            customText: 'ENTRATA',
+            rotateText: false, // or false for horizontal text
+            startRow: 29,
+            startCol: 1,
+            width: 2,
+            height: 1,
+            spanRow: 1,
+            spanCol: 2
+          },
+          
+    ],
+    2: [
+      {
+          id: 'E',
+          startRow: 10,
+          startCol: 0,
+          width: 8,
+          height: 5,
+          shelfPattern: 'regular'
+        },
+        {
+          id: 'R',
+          startRow: 4,
+          startCol: 2,
+          width: 5,  // Number of columns you want
+          height: 1,
+          startingValue: 1,
+          shelfPattern: 'horizontal',  // Use 'horizontal' instead of 'regular'
+          startingFloor: 1
+        },
+        {
+          id: 'R',
+          startRow: 5,
+          startCol: 2,
+          width: 5,  // Number of columns you want
+          height: 1,
+          startingValue: 2,
+          shelfPattern: 'horizontal',  // Use 'horizontal' instead of 'regular'
+          startingFloor: 1
+        },
+        {
+          id: 'R',
+          startRow: 6,
+
+          startCol: 2,
+          width: 5,  // Number of columns you want
+          height: 1,
+          startingValue: 3,
+          shelfPattern: 'horizontal',  // Use 'horizontal' instead of 'regular'
+          startingFloor: 1
+        },
+
+        
+
+        {
+          id: 'S',
+          startRow: 3,
+          startCol: 8,
+          width: 1,
+          height: 5,
+          startingFloor:-4,
+          startingValue:1,
+          spanRow: 5,
+          spanCol: 1,
+          shelfPattern: 'regular'
+        },{
+          id: 'TEXT1',
+          type: 'customText',
+          customText: 'RIPARAZIONI',
+          rotateText: false, // or false for horizontal text
+          startRow: 3,
+          startCol: 7,
+          width: 1,
+          height: 5,
+          spanRow: 5,
+          spanCol: 1
+        },
+        {
+          id: 'TEXT2',
+          type: 'customText',
+          customText: 'ENTRATA',
+          rotateText: false, // or false for horizontal text
+          startRow: 14,
+          startCol: 8,
+          width: 1,
+          spanCol:1,
+          height: 1,
+        },
+        {
+          id: 'TEXT3',
+          type: 'customText',
+          customText: 'POS. DOMENICO',
+          rotateText: false, // or false for horizontal text
+          startRow: 0,
+          startCol: 0,
+          width: 1,
+          
+          height: 1,
+        }
+        ,
+        {
+          id: 'TEXT4',
+          type: 'customText',
+          customText: 'ENTRATA',
+          rotateText: false, // or false for horizontal text
+          startRow: 0,
+          startCol: 8,
+          width: 1,
+          
+          height: 1,
+        }
+        ,
+        {
+          id: 'TEXT5',
+          type: 'customText',
+          customText: 'POS. CECILIA',
+          rotateText: false, // or false for horizontal text
+          startRow: 0,
+          startCol: 9,
+          width: 1,
+          
+          height: 1,
+        }
+  
+   
+  ]
+  };
+  const getShelfStatus = (shelfId) => {
+    if (shelfId === selectedShelf) return 'selected';
+    if (occupiedShelves.has(shelfId)) return 'full';
+    return 'available';
+  };
   const navigate = useNavigate();
   const [quantita, setQuantita] = useState(0);
   const [volumes, setVolumes] = useState([]);
   const [totalVolumeRequired, setTotalVolumeRequired] = useState(0);
   const [totalVolume, setTotalVolume] = useState(0);
   const [selectedArea, setSelectedArea] = useState('A');
-
   const renderWarehouseSection = () => {
     if (currentPage === 1) {
-      return (
-        <>
-          <WarehouseGrid
-            group='A'
-            columns={8}
-            rows={4}
-            getShelfClass={getShelfClass}
-            onShelfClick={handleShelfClick}
-            tooltipContent={getTooltipContent}
-            gridClassName="large-grid"
-          />
-          <div className="spacer" />
-          <div>
-            <WarehouseGrid
-              group="B"
-              columns={7}
-              rows={4}
-              getShelfClass={getShelfClass}
-              onShelfClick={handleShelfClick}
-              tooltipContent={getTooltipContent}
-              gridClassName="smaller-grid second-group"
-            />
-            <WarehouseGrid
-              group="C"
-              columns={7}
-              rows={5}
-              getShelfClass={getShelfClass}
-              onShelfClick={handleShelfClick}
-              tooltipContent={getTooltipContent}
-              gridClassName="smaller-grid second-group"
-            />
-          </div>
-          <div className="spacer" />
-          <WarehouseGrid
-            group="D"
-            columns={7}
-            rows={6}
-            getShelfClass={getShelfClass}
-            onShelfClick={handleShelfClick}
-            tooltipContent={getTooltipContent}
-            gridClassName="smaller-grid third-grid"
-          />
-        </>
-      );
-    } else if (currentPage === 2) {
-      return (
-        <>
-                    <div className="spacer" />
+        return (
+    <div>
+    <WarehouseGridSystem
+    warehouseLayout={layouts[1]}
+    GRID_ROWS = {30}
+    GRID_COLS = {9}
+    onCellClick={handleShelfClick}
+    getShelfStatus={getShelfStatus}
+    tooltipContent={getTooltipContent}
 
-        <WarehouseGrid
-          group="E"
-          columns={8}
-          rows={5}
-          getShelfClass={getShelfClass}
-          onShelfClick={handleShelfClick}
-          tooltipContent={getTooltipContent}
-          gridClassName="large-grid"
-        />
-      </>
-      );
-    }
-  };
+  />
+</div>)}
+else if (currentPage === 2) {
+    return (
+<div>
+<WarehouseGridSystem
+GRID_ROWS = {15}
+GRID_COLS = {11}
+warehouseLayout={layouts[2]}
+onCellClick={handleShelfClick}
+getShelfStatus={getShelfStatus}
+tooltipContent={getTooltipContent}
+
+/>
+</div>)}
+};
   const {
     articoloCode,
     descrizioneArticolo,
@@ -169,36 +337,6 @@ const ViewMagazzino = () => {
   }, []);
 
  
-  useEffect(() => {
-    const newDebug = {};
-    const allShelves = [
-      ...generateShelfNames('A', 8, 4),
-      ...generateShelfNames('B', 7, 4),
-      ...generateShelfNames('C', 7, 5),
-      ...generateShelfNames('D', 7, 6),
-      ...generateShelfNames('E', 8, 5)
-    ];
-
-    allShelves.forEach(shelf => {
-      const [scaffale, colonna, piano] = shelf.split('-');
-      const shelfData = shelvesData.find(s =>
-        s.scaffale === scaffale &&
-        s.colonna === colonna &&
-        s.piano === piano.toString()
-      );
-
-      newDebug[shelf] = {
-        shelf,
-        shelfData,
-        quantita: totalVolumeRequired,
-        volumeLibero: shelfData ? shelfData.volume_libero : 'N/A',
-        hasEnoughSpace: shelfData ? (shelfData.volume_libero - totalVolumeRequired) > 0 : 'N/A',
-      };
-    });
-
-    setDebug(newDebug);
-  }, [shelvesData, totalVolumeRequired]);
-
   const postShelfData = async (data) => {
     try {
       await axios.post(`${process.env.REACT_APP_API_URL}/api/conferma-inserimento`, data);
@@ -245,21 +383,18 @@ const ViewMagazzino = () => {
               <p><strong>Articolo:</strong> {descrizioneArticolo} ({articoloCode})</p>
               <p><strong>Fornitore:</strong> {ragioneSocialeFornitore} ({fornitoreCode})</p>
               <p><strong>Movimento:</strong> {movimentoCode}</p>
-              <p><strong>Quantità per pacco:</strong> {quantitaPerPacco}</p>
-              <p><strong>Totale pacchi:</strong> {totalePacchi}</p>
-              <p><strong>Dimensione:</strong> {dimensione}</p>
-              <p><strong>Quantità totale:</strong> {quantitaPerPacco * totalePacchi}</p>
-              <p><strong>Volume totale:</strong> {totalVolume} m³</p>
+              <p><strong>Quantità:</strong> {quantitaPerPacco}</p>
               <p><strong>Scaffale rilevato:</strong> {scannedValue}</p>
-              {shelfData ? (
-                <>
-                  <p><strong>Volume libero:</strong> {shelfData.volume_libero} m³</p>
-                </>
-              ) : (
-                <p style={{ color: 'red' }}>Dati scaffale non trovati!</p>
-              )}
+              
             </div>
           ),
+          okText: 'Immagazzina', // Text for the OK button
+          cancelText: 'Cancella', // Text for the Cancel button
+          okButtonProps: {
+            type: 'primary', // Set the OK button type to primary
+            
+          },
+         
           onOk: () => {
             const postData = {
               area: scannedValue.split('-')[0],
@@ -281,6 +416,7 @@ const ViewMagazzino = () => {
             setHighlightedShelf('');
             event.target.value = ''; // Clear input
           },
+          
         });
       };
 
@@ -288,32 +424,25 @@ const ViewMagazzino = () => {
     }
   };
 
-  const getShelfClass = useCallback((shelf) => {
-    const [scaffale, colonna, piano] = shelf.split('-');
-    const shelfData = shelvesData.find(s =>
-      s.scaffale === scaffale &&
-      s.colonna === colonna &&
-      s.piano === piano.toString()
-    );
-
-    if (shelfData) {
-      const hasEnoughSpace = (shelfData.volume_libero - totalVolumeRequired) > 0;
-
-      if (shelf === highlightedShelf) {
-        return hasEnoughSpace ? 'grid-item highlight-green' : 'grid-item highlight-red';
-      }
-      return hasEnoughSpace ? 'grid-item green' : 'grid-item red';
-    } else {
-      return 'grid-item yellow';
-    }
-  }, [shelvesData, totalVolumeRequired, highlightedShelf]);
-
+  const simulateBarcodeScan = (barcode) => {
+    const simulatedEvent = {
+      key: 'Enter', // Simulate the Enter key press
+      target: {
+        value: barcode, // Set the scanned barcode value
+      },
+    };
+  
+    handleBarcodeScan(simulatedEvent);
+  };
+  
   const handleShelfClick = (shelf) => {
     setHighlightedShelf(shelf);
+    console.log(shelf)
+    simulateBarcodeScan(`A-${shelf}`)
+    
   };
 
   const getTooltipContent = useCallback((shelf) => {
-    return `Volume Libero: ${debug[shelf]?.volumeLibero || 'N/A'}m³`;
   }, [debug]);
   return (
     <div className="view-magazzino">

@@ -23,6 +23,116 @@ def connect_to_db():
         return pyodbc.connect(connection_string)
     except pyodbc.Error as e:
         raise Exception(f"Unable to connect to the database: {str(e)}")
+    
+# Endpoint to fetch logs
+# Endpoint to fetch logs
+@app.route('/api/operation-logs', methods=['GET'])
+def get_operation_logs():
+    """
+    Fetches operation logs from the database.
+    Supports pagination and filtering by operation type and timestamp range.
+    """
+    try:
+        # Get query parameters for filtering
+        page = int(request.args.get('page', 1))
+        limit = int(request.args.get('limit', 10))
+        operation_type = request.args.get('operation_type')
+        start_date = request.args.get('start_date')  # Optional start date
+        end_date = request.args.get('end_date')  # Optional end date
+
+        offset = (page - 1) * limit
+
+        conn = connect_to_db()
+        cursor = conn.cursor()
+
+        # Base query
+        query = """
+        SELECT {skip} {first} id, timestamp, operation_type, operation_details, user, ip_address
+        FROM wms_log
+        WHERE 1=1
+        """.format(
+            skip=f"SKIP {offset}" if offset > 0 else "",
+            first=f"FIRST {limit}"
+        )
+        params = []
+
+        # Add filters
+        if operation_type:
+            query += " AND operation_type = ?"
+            params.append(operation_type)
+        if start_date:
+            query += " AND timestamp >= ?"
+            params.append(datetime.strptime(start_date, "%Y-%m-%d"))
+        if end_date:
+            query += " AND timestamp <= ?"
+            params.append(datetime.strptime(end_date, "%Y-%m-%d"))
+
+        # Add ordering
+        query += " ORDER BY timestamp DESC"
+
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+
+        # Get column names from cursor description
+        columns = [column[0] for column in cursor.description]
+
+        # Convert rows to list of dictionaries
+        logs = [dict(zip(columns, row)) for row in rows]
+
+        # Get total count for pagination
+        count_query = "SELECT COUNT(*) FROM wms_log WHERE 1=1"
+        count_params = []
+
+        if operation_type:
+            count_query += " AND operation_type = ?"
+            count_params.append(operation_type)
+        if start_date:
+            count_query += " AND timestamp >= ?"
+            count_params.append(datetime.strptime(start_date, "%Y-%m-%d"))
+        if end_date:
+            count_query += " AND timestamp <= ?"
+            count_params.append(datetime.strptime(end_date, "%Y-%m-%d"))
+
+        cursor.execute(count_query, count_params)
+        total_count = cursor.fetchone()[0]
+
+        return jsonify({
+            'logs': logs,
+            'total': total_count,
+            'page': page,
+            'limit': limit
+        })
+
+    except pyodbc.Error as e:
+        return jsonify({'error': str(e)}), 500
+
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        if 'conn' in locals():
+            conn.close()
+
+def log_operation(operation_type, operation_details, user=None, ip_address=None):
+    try:
+        conn = connect_to_db()
+        cursor = conn.cursor()
+        
+        # Insert log entry into the database
+        query = """
+        INSERT INTO wms_log (timestamp,operation_type, operation_details, user, ip_address)
+        VALUES (CURRENT, ?, ?, ?, ?)
+        """
+        cursor.execute(query, (operation_type, operation_details, user, ip_address))
+        conn.commit()
+    except pyodbc.Error as e:
+        # Log the error to the console or a file if the logging itself fails
+        print(f"Logging error: {str(e)}")
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        if 'conn' in locals():
+            conn.close()
+
 @app.route('/api/articolo-descrizione', methods=['GET'])
 def get_descrizione_articolo():
     codice_articolo = request.args.get('codice_articolo')
@@ -178,7 +288,7 @@ def get_items():
             count_query += " AND CAST(id_art AS VARCHAR(20)) LIKE ?"
             params.append(f"%{article_filter}%")
         if supplier_filter:
-            count_query += " AND codice_fornitore LIKE ?"
+            count_query += " AND fornitore LIKE ?"
             params.append(f"%{supplier_filter}%")
         if filter_string:
             # Expected format: Area-Scaffale-Colonna-Piano (e.g., A-A-01-1)
@@ -206,8 +316,9 @@ def get_items():
         if article_filter:
             id_art_query += " AND CAST(id_art AS VARCHAR(20)) LIKE ?"
             id_art_params.append(f"%{article_filter}%")
+            
         if supplier_filter:
-            id_art_query += " AND codice_fornitore LIKE ?"
+            id_art_query += " AND fornitore LIKE ?"
             id_art_params.append(f"%{supplier_filter}%")
         if filter_string:
             id_art_query += " AND EXISTS (SELECT 1 FROM wms_items AS wi2 WHERE wi2.id_art = wms_items.id_art AND wi2.area = ? AND wi2.scaffale = ? AND wi2.colonna = ? AND wi2.piano = ?)"
@@ -269,7 +380,7 @@ def get_items():
             if id_art not in grouped_items:
                 grouped_items[id_art] = {
                     'id_art': id_art,
-                    'codice_fornitore': item.get('codice_fornitore', ''),
+                    'fornitore': item.get('fornitore', ''),
                     'totalQta': 0,
                     'description': f"{item.get('amg_desc', '')} {item.get('amg_des2', '')}".strip(),
                     'subItems': []
@@ -308,7 +419,6 @@ def get_items():
             cursor.close()
         if 'conn' in locals():
             conn.close()
-
 @app.route('/api/movimento-coerenza', methods=['GET'])
 def check_movimento_coerenza():
     codice_movimento = request.args.get('codice_movimento')
@@ -321,29 +431,62 @@ def check_movimento_coerenza():
     try:
         conn = connect_to_db()
         cursor = conn.cursor()
-        query = '''SELECT distinct
-    oft.oft_cofo, 
-    ofc.ofc_arti,
-    bf.blt_code
-FROM 
-    ofordit oft
-JOIN 
-    ofordic ofc 
-ON 
-    oft.oft_tipo = ofc.ofc_tipo AND oft.oft_cofo = ? and ofc.ofc_arti = ?
-JOIN 
-    mggior mg 
-ON 
-    ofc.ofc_arti = mg.gim_arti and mg.gim_code = ?
-JOIN 
-    bfbolt bf 
-ON 
-    mg.gim_code = bf.blt_code and bf.blt_cocl = oft_cofo
-WHERE 
 
-     bf.blt_code = mg.gim_code;
-'''
-        cursor.execute(query, (codice_fornitore, codice_articolo, codice_movimento))
+        # Build the query dynamically based on the value of codice_fornitore
+        if codice_fornitore == 'F000000':
+            query = '''SELECT DISTINCT
+                oft.oft_cofo, 
+                ofc.ofc_arti,
+                bf.blt_code
+            FROM 
+                ofordit oft
+            JOIN 
+                ofordic ofc 
+            ON 
+                oft.oft_tipo = ofc.ofc_tipo 
+                AND ofc.ofc_arti = ?
+            JOIN 
+                mggior mg 
+            ON 
+                ofc.ofc_arti = mg.gim_arti 
+                AND mg.gim_code = ?
+            JOIN 
+                bfbolt bf 
+            ON 
+                mg.gim_code = bf.blt_code 
+                AND bf.blt_cocl = oft.oft_cofo
+            WHERE 
+                bf.blt_code = mg.gim_code;
+            '''
+            cursor.execute(query, (codice_articolo, codice_movimento))
+        else:
+            query = '''SELECT DISTINCT
+                oft.oft_cofo, 
+                ofc.ofc_arti,
+                bf.blt_code
+            FROM 
+                ofordit oft
+            JOIN 
+                ofordic ofc 
+            ON 
+                oft.oft_tipo = ofc.ofc_tipo 
+                AND oft.oft_cofo = ? 
+                AND ofc.ofc_arti = ?
+            JOIN 
+                mggior mg 
+            ON 
+                ofc.ofc_arti = mg.gim_arti 
+                AND mg.gim_code = ?
+            JOIN 
+                bfbolt bf 
+            ON 
+                mg.gim_code = bf.blt_code 
+                AND bf.blt_cocl = oft.oft_cofo
+            WHERE 
+                bf.blt_code = mg.gim_code;
+            '''
+            cursor.execute(query, (codice_fornitore, codice_articolo, codice_movimento))
+
         result = cursor.fetchall()
         coerenza = len(result) > 0
         return jsonify({'coerenza': coerenza})
@@ -355,6 +498,7 @@ WHERE
             cursor.close()
         if 'conn' in locals():
             conn.close()
+
 
 @app.route('/api/coerenza-dati', methods=['GET'])
 def check_coerenza_dati():
@@ -527,15 +671,18 @@ def get_articoli_scaffale():
     scaffale = request.args.get('scaffale')
     colonna = request.args.get('colonna')
     piano = request.args.get('piano')
+    articolo = request.args.get('articolo')
+    fornitore = request.args.get('fornitore')
+    movimento = request.args.get('movimento')
     try:
         # Connect to the database
         conn = connect_to_db()
         cursor = conn.cursor()
         
         # Define the query to fetch shelves based on area
-        query = "select * FROM wms_items WHERE area = ? AND  scaffale = ? AND colonna= ? AND piano= ?"
+        query = "select * FROM wms_items WHERE area = ? AND  scaffale = ? AND colonna= ? AND piano= ? AND id_art= ? AND fornitore = ? AND id_mov= ?"
 
-        cursor.execute(query, (area, scaffale, colonna, piano))
+        cursor.execute(query, (area, scaffale, colonna, piano, articolo, fornitore, movimento))
         
         # Fetch all rows
         rows = cursor.fetchall()
@@ -617,8 +764,7 @@ def conferma_inserimento():
     try:
         conn = connect_to_db()
         cursor = conn.cursor()
-        transaction = conn.autocommit = False  # Start transaction
-
+        conn.autocommit = False  # Start transaction
 
         insert_query = """
         INSERT INTO wms_items (id_art, id_mov, fornitore, area, scaffale, colonna, piano, qta, dimensione) 
@@ -634,18 +780,29 @@ def conferma_inserimento():
             cursor.execute(insert_query, (codice_articolo, codice_movimento, codice_fornitore, area, scaffale, colonna, piano, quantita, dimensioni))
         cursor.execute(update_query, (volume_totale, area, scaffale, colonna, piano))
 
-        conn.commit()  # Commit transaction
+        conn.commit()
+
+        # Log the operation
+        operation_details = f"Inserimento {numero_pacchi} pacchi con {quantita} articolo {codice_articolo} in {area}-{scaffale}-{colonna}-{piano}"
+        log_operation(
+            operation_type="INSERT",
+            operation_details=operation_details,
+            user="current_user",  # Replace with actual user info if available
+            ip_address=request.remote_addr
+        )
+
         return jsonify({'success': True}), 200
 
     except pyodbc.Error as e:
         if conn:
-            conn.rollback()  # Rollback transaction on error
+            conn.rollback()
         return jsonify({'error': str(e)}), 500
     finally:
         if 'cursor' in locals():
             cursor.close()
         if 'conn' in locals():
             conn.close()
+
 @app.route('/api/update-pacchi', methods=['POST'])
 def update_pacchi():
     data = request.get_json()
@@ -759,14 +916,154 @@ def update_pacchi():
             return jsonify({'error': 'No updates were made.'}), 400
 
         # Step 3: Update the volume in wms_scaffali
-        update_shelf_volume_query = """
-        UPDATE wms_scaffali
-        SET volume_libero = volume_libero + ?
-        WHERE area = ? AND scaffale = ? AND colonna = ? AND piano = ?
-        """
-        cursor.execute(update_shelf_volume_query, (total_volume_to_add, area, scaffale, colonna, piano))
-
+        
         conn.commit()
+        operation_details = f"Prelievo articolo {articolo} da {area}-{scaffale}-{colonna}-{piano} - QTA: {quantity}"
+
+        log_operation(
+            operation_type="UPDATE",
+            operation_details=operation_details,
+            user="current_user",  # Replace with actual user info if available
+            ip_address=request.remote_addr
+        )
+        if new_qta == 0:
+            operation_details = f"Pacco contentente {articolo} con quantitativo zero in {area}-{scaffale}-{colonna}-{piano} rimosso."
+
+            log_operation(
+                operation_type="DELETE",
+                operation_details=operation_details,
+                user="current_user",  # Replace with actual user info if available
+                ip_address=request.remote_addr
+            )
+        return jsonify({'success': True}), 200
+
+    except pyodbc.Error as e:
+        conn.rollback()
+        return jsonify({'error': str(e)}), 500
+
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        if 'conn' in locals():
+            conn.close()
+
+@app.route('/api/trasferimento', methods=['POST'])
+def trasferimento():
+    data = request.get_json()
+
+    # Extract parameters from the request
+    articolo = data.get('articolo')
+    area = data.get('area')
+    scaffale = data.get('scaffale')
+    colonna = data.get('colonna')
+    piano = data.get('piano')
+
+    areaDest = data.get('areaDest')
+    scaffaleDest = data.get('scaffaleDest')
+    colonnaDest = data.get('colonnaDest')
+    pianoDest = data.get('pianoDest')
+
+    movimento =data.get('movimento')
+    fornitore =data.get('fornitore')
+    quantity = data.get('quantity')
+
+    # Validate input parameters
+    if not all([articolo, area, scaffale, colonna, piano, quantity]):
+        return jsonify({'error': 'Missing parameters'}), 400
+
+    # Convert quantity to Decimal
+    try:
+        quantity = Decimal(quantity)
+    except (ValueError, TypeError, InvalidOperation):
+        return jsonify({'error': 'Invalid quantity value'}), 400
+
+    try:
+        # Connect to the database
+        conn = connect_to_db()
+        cursor = conn.cursor()
+
+        
+        # Step 2: Retrieve all pacchi matching the articolo and location, ordered by quantity ascending
+        pacchi_query = """
+        SELECT id_pacco, qta, dimensione
+        FROM wms_items
+        WHERE id_art = ?
+          AND area = ?
+          AND scaffale = ?
+          AND colonna = ?
+          AND piano = ?
+          and id_mov = ?
+          and fornitore = ?
+        ORDER BY qta ASC
+        """
+        cursor.execute(pacchi_query, (articolo, area, scaffale, colonna, piano, movimento, fornitore))
+        pacchi = cursor.fetchall()
+
+        if not pacchi:
+            return jsonify({'error': 'No pacchi found for the specified articolo and location'}), 404
+
+        remaining_quantity = quantity
+        updated = False
+
+
+       
+
+        for pacco in pacchi:
+            id_pacco = pacco.id_pacco
+            qta = Decimal(pacco.qta)
+            
+
+            if remaining_quantity <= 0:
+                break
+
+            qta_to_remove = min(qta, remaining_quantity)
+            new_qta = qta - qta_to_remove
+
+            if new_qta == 0:
+                # Remove the pacco
+                delete_query = "DELETE FROM wms_items WHERE id_pacco = ?"
+                cursor.execute(delete_query, (id_pacco,))
+            else:
+                # Update the pacco's quantity
+                update_query = "UPDATE wms_items SET qta = ? WHERE id_pacco = ?"
+                cursor.execute(update_query, (new_qta, id_pacco))
+
+            # Calculate volume to add back to shelf
+            
+            remaining_quantity -= qta_to_remove
+            updated = True
+
+            if remaining_quantity == 0:
+                break
+
+        if remaining_quantity > 0:
+            conn.rollback()
+            return jsonify({'error': 'Insufficient quantity to fulfill the request'}), 400
+
+        if not updated:
+            return jsonify({'error': 'No updates were made.'}), 400
+        
+        # Step 3: Update the volume in wms_scaffali
+        add_query = "INSERT INTO wms_items (id_art, id_mov, fornitore, area, scaffale, colonna, piano, qta, dimensione) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Zero')"
+        cursor.execute(add_query, (articolo,movimento, fornitore, areaDest, scaffaleDest, colonnaDest, pianoDest, quantity))
+        conn.commit()
+        operation_details = f"Spostamento articolo {articolo} da {area}-{scaffale}-{colonna}-{piano} a {areaDest}-{scaffaleDest}-{colonnaDest}-{pianoDest} - QTA: {quantity}"
+
+        log_operation(
+            operation_type="UPDATE",
+            operation_details=operation_details,
+            user="current_user",  # Replace with actual user info if available
+            ip_address=request.remote_addr
+        )
+        if new_qta == 0:
+            operation_details = f"Pacco contentente {articolo} con quantitativo zero in {area}-{scaffale}-{colonna}-{piano} rimosso."
+
+            log_operation(
+                operation_type="DELETE",
+                operation_details=operation_details,
+                user="current_user",  # Replace with actual user info if available
+                ip_address=request.remote_addr
+            )
         return jsonify({'success': True}), 200
 
     except pyodbc.Error as e:
@@ -849,10 +1146,10 @@ WHERE
     p.occ_tipo = ?
     AND p.occ_code = ? 
     AND p.occ_riga >= ?
-    AND p.occ_riga < (
+    AND p.occ_riga <= (
         SELECT MIN(p1.occ_riga)
         FROM ocordic p1
-        WHERE p1.occ_arti IS NULL
+        WHERE p1.occ_arti IS NOT NULL
           AND p1.occ_tipo = ?
           AND p1.occ_code = ?
           AND p1.occ_riga >= ?
@@ -916,36 +1213,42 @@ WHERE
 
             # First, check if this `occ_arti` is in `wms_proibiti`
              # Skip if occ_arti starts with 'EG' or '0S'
-            if occ_arti.startswith('EG') or occ_arti.startswith('0S'):
+            if occ_arti.startswith('EG'):
                 continue
 
             # Query wms_items for the current occ_arti
             query_wms = """
-            SELECT 
-                id_art, 
-                id_mov, 
-                id_pacco,  -- Track id_pacco
-                fornitore, 
-                area, 
-                scaffale, 
-                colonna, 
-                piano, 
-                SUM(qta) AS qta
-            FROM 
-                wms_items
-            WHERE 
-                id_art = ?
-            GROUP BY 
-                id_art, 
-                id_mov, 
-                id_pacco,  -- Group by id_pacco
-                fornitore, 
-                area, 
-                scaffale, 
-                colonna, 
-                piano
-            ORDER BY
-                            id_mov ASC, id_pacco asc
+           SELECT 
+    id_art, 
+    id_mov, 
+    id_pacco,  -- Track id_pacco
+    fornitore, 
+    area, 
+    scaffale, 
+    colonna, 
+    piano, 
+    SUM(qta) AS qta,
+    CASE 
+        WHEN scaffale IN ('S', 'R') THEN 1 
+        ELSE 0 
+    END AS scaffale_order -- Add the CASE expression to the SELECT list
+FROM 
+    wms_items
+WHERE 
+    id_art = ?
+GROUP BY 
+    id_art, 
+    id_mov, 
+    id_pacco,  -- Group by id_pacco
+    fornitore, 
+    area, 
+    scaffale, 
+    colonna, 
+    piano
+ORDER BY
+    scaffale_order,  -- Use the alias in the ORDER BY clause
+    id_mov ASC, 
+    id_pacco ASC;
 
             """
             cursor.execute(query_wms, (occ_arti,))
@@ -1332,6 +1635,13 @@ def transfer_packages():
         # --- Commit Transaction ---
         conn.commit()
         
+
+        log_operation(
+            operation_type="UPDATE",
+            operation_details="DA RIFARE LOGICA",
+            user="current_user",  # Replace with actual user info if available
+            ip_address=request.remote_addr
+        )
         return jsonify({'message': 'Transfer successful', 'totalVolumeTransferred': total_volume}), 200
     
     except pyodbc.Error as e:
@@ -1478,7 +1788,14 @@ def update_quantity():
         # Check if any rows were updated
         if cursor.rowcount == 0:
             return jsonify({'error': f'{new_quantity, ofc_tipo, ofc_code, ofc_riga}'}), 404
+        operation_details = f"Quantità arrivata segnalata con successo ordine {ofc_tipo}-{ofc_code} - RIGA:{ofc_riga} - QTA: {new_quantity}"
 
+        log_operation(
+            operation_type="UPDATE",
+            operation_details=operation_details,
+            user="current_user",  # Replace with actual user info if available
+            ip_address=request.remote_addr
+        )
         return jsonify({'message': 'Quantity updated successfully'}), 200
 
     except pyodbc.Error as e:
@@ -1588,7 +1905,14 @@ def send_email():
         server.login(SENDER_EMAIL, SENDER_PASSWORD)
         server.sendmail(SENDER_EMAIL, msg['To'], msg.as_string())
         server.quit()
+        operation_details = f"Email accettazione per ordine {order_id} inviata correttamente"
 
+        log_operation(
+            operation_type="UPDATE",
+            operation_details=operation_details,
+            user="current_user",  # Replace with actual user info if available
+            ip_address=request.remote_addr
+        )
         return jsonify({'message': 'Email sent successfully'}), 200
 
     except Exception as e:
