@@ -1,16 +1,17 @@
 import React, { useEffect, useState } from 'react';
-import { Table, Button, Tag, Input, message } from 'antd';
-import { SearchOutlined } from '@ant-design/icons';
+import { Table, Input, Button, Tag, Card, Typography, Space, Tooltip } from 'antd';
+import { SearchOutlined, ReloadOutlined, InfoCircleOutlined } from '@ant-design/icons';
 import axios from 'axios';
+
+const { Title } = Typography;
 
 const LogsTable = () => {
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(false);
   const [searchText, setSearchText] = useState('');
-  const [tempSearchText, setTempSearchText] = useState('');
-  const [totalLogs, setTotalLogs] = useState(0); // Total logs for pagination
-  const [currentPage, setCurrentPage] = useState(1); // Current page
-  const [pageSize] = useState(20); // Page size
+  const [totalLogs, setTotalLogs] = useState(0);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize] = useState(20);
 
   useEffect(() => {
     fetchLogs(currentPage);
@@ -20,116 +21,122 @@ const LogsTable = () => {
     setLoading(true);
     try {
       const response = await axios.get(`${process.env.REACT_APP_API_URL}/api/operation-logs`, {
-        params: {
-          page,
-          limit: pageSize,
-          operation_details: searchText, // Pass the search text as a parameter
-        },
+        params: { page, limit: pageSize, operation_details: searchText },
       });
       setLogs(response.data.logs || []);
-      setTotalLogs(response.data.total || 0); // Set total logs for pagination
+      setTotalLogs(response.data.total || 0);
     } catch (error) {
       console.error('Error fetching logs:', error);
-      message.error('Failed to fetch logs. Please try again later.');
     } finally {
       setLoading(false);
     }
   };
 
   const handleTableChange = (pagination) => {
-    setCurrentPage(pagination.current); // Update current page when pagination changes
+    setCurrentPage(pagination.current);
+  };
+
+  const handleSearch = () => {
+    setCurrentPage(1);
+    fetchLogs(1);
   };
 
   const columns = [
     {
-      title: 'Timestamp',
+      title: 'Data',
       dataIndex: 'timestamp',
       key: 'timestamp',
-      render: (date) => new Date(date).toLocaleString('it-IT'),
+      render: (date) => (
+        <Tooltip title={new Date(date).toLocaleString('it-IT', { timeZone: 'UTC' })}>
+          {new Date(date).toLocaleString('en-GB', { timeZone: 'UTC' })}
+        </Tooltip>
+      ),
       sorter: (a, b) => new Date(a.timestamp) - new Date(b.timestamp),
     },
     {
-      title: 'Operation Type',
+      title: 'Operazione',
       dataIndex: 'operation_type',
       key: 'operation_type',
       filters: [
         { text: 'INSERT', value: 'INSERT' },
         { text: 'UPDATE', value: 'UPDATE' },
         { text: 'DELETE', value: 'DELETE' },
-        { text: 'QUERY', value: 'QUERY' },
       ],
       onFilter: (value, record) => record.operation_type === value,
       render: (type) => (
-        <Tag color={type === 'INSERT' ? 'green' : type === 'UPDATE' ? 'blue' : 'red'}>
+        <Tag color={type === 'INSERT' ? 'success' : type === 'UPDATE' ? 'processing' : 'error'}>
           {type}
         </Tag>
       ),
     },
     {
-      title: 'Details',
+      title: 'Dettagli',
       dataIndex: 'operation_details',
       key: 'operation_details',
-      ellipsis: true,
+      ellipsis: {
+        showTitle: false,
+      },
+      render: (details) => (
+        <Tooltip placement="topLeft" title={details}>
+          {details}
+        </Tooltip>
+      ),
     },
     {
-      title: 'IP Address',
+      title: 'IP',
       dataIndex: 'ip_address',
       key: 'ip_address',
     },
   ];
 
-  const filteredLogs = logs.filter((log) =>
-    log.operation_details?.toLowerCase().includes(searchText.toLowerCase())
-  );
-
   return (
-    <div>
-      <h2>Operation Logs</h2>
-      <Input
-        placeholder="Search operation details"
-        value={tempSearchText}
-        onChange={(e) => setTempSearchText(e.target.value)}
-        onPressEnter={() => {
-          setSearchText(tempSearchText);
-          fetchLogs(1); // Fetch logs from the first page after a new search
-        }}
-        style={{ marginBottom: '16px', width: '300px' }}
-        addonAfter={
-          <SearchOutlined
-            onClick={() => {
-              setSearchText(tempSearchText);
-              fetchLogs(1); // Fetch logs from the first page after a new search
-            }}
-            style={{ cursor: 'pointer' }}
+    <Card>
+      <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+        <Title level={2}>
+          Log sistema WMS
+          <Tooltip title="Visualizza i log delle operazioni del sistema WMS">
+            <InfoCircleOutlined style={{ fontSize: '16px', marginLeft: '8px' }} />
+          </Tooltip>
+        </Title>
+        <Space>
+          <Input.Search
+            placeholder="Cerca nei log"
+            allowClear
+            enterButton="Cerca"
+            size="large"
+            value={searchText}
+            onChange={(e) => setSearchText(e.target.value)}
+            onSearch={handleSearch}
+            style={{ width: 300 }}
           />
-        }
-      />
-      <Button
-        type="default"
-        style={{ marginLeft: '8px' }}
-        onClick={() => {
-          setSearchText('');
-          setTempSearchText('');
-          fetchLogs(1); // Reset logs and fetch the first page
-        }}
-      >
-        Reset
-      </Button>
-      <Table
-        dataSource={filteredLogs}
-        columns={columns}
-        rowKey="id"
-        loading={loading}
-        pagination={{
-          current: currentPage,
-          total: totalLogs,
-          pageSize,
-          showSizeChanger: false,
-        }}
-        onChange={handleTableChange}
-        scroll={{ x: 'max-content' }}
-      />
-    </div>
+          <Tooltip title="Ricarica i log">
+            <Button
+              icon={<ReloadOutlined />}
+              size="large"
+              onClick={() => {
+                setSearchText('');
+                fetchLogs(1);
+              }}
+            />
+          </Tooltip>
+        </Space>
+        <Table
+          dataSource={logs}
+          columns={columns}
+          rowKey="id"
+          loading={loading}
+          pagination={{
+            current: currentPage,
+            total: totalLogs,
+            pageSize,
+            showSizeChanger: false,
+            showQuickJumper: true,
+          }}
+          onChange={handleTableChange}
+          scroll={{ x: 'max-content' }}
+        />
+      </Space>
+    </Card>
   );
 };
 

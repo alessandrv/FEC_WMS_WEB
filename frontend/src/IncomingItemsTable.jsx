@@ -1,18 +1,15 @@
-import React, { useEffect, useState } from 'react';
-import { Table, Tag, message, Input, Button, Row, Col } from 'antd';
+import React, { useEffect, useState, useMemo } from 'react';
+import { Table, Tag, message, Input, Button, Row, Col, Card } from 'antd';
 import axios from 'axios';
+import { SearchOutlined, ReloadOutlined } from '@ant-design/icons';
 import Title from 'antd/es/typography/Title';
 
 const IncomingItemsTable = () => {
   const [items, setItems] = useState([]);
-  const [filteredItems, setFilteredItems] = useState([]); // State for filtered items
   const [loading, setLoading] = useState(false);
-
-  // Filter states
   const [articleFilter, setArticleFilter] = useState('');
   const [descriptionFilter, setDescriptionFilter] = useState('');
 
-  // Fetch incoming items with filters
   const fetchIncomingItems = async () => {
     setLoading(true);
     try {
@@ -21,11 +18,9 @@ const IncomingItemsTable = () => {
 
       if (rawData.results && Array.isArray(rawData.results)) {
         setItems(rawData.results);
-        setFilteredItems(rawData.results); // Initialize filtered items with fetched data
       } else {
         console.error('No results array found in fetched data', rawData);
         setItems([]);
-        setFilteredItems([]);
       }
     } catch (error) {
       console.error('Error fetching incoming items:', error);
@@ -35,44 +30,29 @@ const IncomingItemsTable = () => {
     }
   };
 
-  // Apply filters locally
-  const applyFilters = () => {
-    let filtered = [...items];
-
-    if (articleFilter) {
-      filtered = filtered.filter(item =>
-        item.ofc_arti.toLowerCase().includes(articleFilter.toLowerCase())
-      );
-    }
-
-    if (descriptionFilter) {
-      filtered = filtered.filter(item =>
-        item.article_description.toLowerCase().includes(descriptionFilter.toLowerCase())
-      );
-    }
-
-    setFilteredItems(filtered);
-  };
-
-  // Trigger filtering when filter state changes
-  useEffect(() => {
-    applyFilters();
-  }, [articleFilter, descriptionFilter]);
-
   useEffect(() => {
     fetchIncomingItems();
   }, []);
-
+  const filteredItems = useMemo(() => {
+    return items.filter(item => {
+      const articleMatch = item.ofc_arti?.toLowerCase().includes(articleFilter.toLowerCase() || '');
+      const descriptionMatch = item.article_description?.toLowerCase().includes(descriptionFilter.toLowerCase() || '');
+      return articleMatch && descriptionMatch;
+    });
+  }, [items, articleFilter, descriptionFilter]);
+  
   const columns = [
     {
       title: 'Articolo',
       dataIndex: 'ofc_arti',
       key: 'ofc_arti',
+      sorter: (a, b) => a.ofc_arti.localeCompare(b.ofc_arti),
     },
     {
       title: 'Descrizione',
       dataIndex: 'article_description',
       key: 'article_description',
+      sorter: (a, b) => a.article_description.localeCompare(b.article_description),
     },
     {
       title: 'Tipo',
@@ -89,6 +69,7 @@ const IncomingItemsTable = () => {
       dataIndex: 'ofc_dtco',
       key: 'ofc_dtco',
       render: (date) => new Date(date).toLocaleDateString('it-IT'),
+      sorter: (a, b) => new Date(a.ofc_dtco) - new Date(b.ofc_dtco),
     },
     {
       title: 'Stato Consegna',
@@ -99,23 +80,29 @@ const IncomingItemsTable = () => {
           {status === 'S' ? 'In arrivo' : 'Non in arrivo'}
         </Tag>
       ),
+      filters: [
+        { text: 'In arrivo', value: 'S' },
+        { text: 'Non in arrivo', value: 'N' },
+      ],
+      onFilter: (value, record) => record.ofc_inarrivo === value,
     },
     {
       title: 'Giacenza',
       dataIndex: 'total_quantity',
       key: 'total_quantity',
+      sorter: (a, b) => a.total_quantity - b.total_quantity,
     },
   ];
 
   return (
-    <>
-      <Title level={2} className="title">In Arrivo</Title>
+    <Card>
+      <Title level={2}>Articoli in Arrivo</Title>
 
-      {/* Filter Inputs */}
       <Row gutter={16} style={{ marginBottom: '20px' }}>
         <Col>
           <Input
-            placeholder="Search by Articolo"
+            prefix={<SearchOutlined />}
+            placeholder="Cerca per Articolo"
             value={articleFilter}
             onChange={(e) => setArticleFilter(e.target.value)}
             style={{ width: 200 }}
@@ -123,26 +110,35 @@ const IncomingItemsTable = () => {
         </Col>
         <Col>
           <Input
-            placeholder="Search by Descrizione"
+            prefix={<SearchOutlined />}
+            placeholder="Cerca per Descrizione"
             value={descriptionFilter}
             onChange={(e) => setDescriptionFilter(e.target.value)}
             style={{ width: 200 }}
           />
         </Col>
         <Col>
-          <Button type="primary" onClick={applyFilters}>Apply Filters</Button>
+          <Button
+            icon={<ReloadOutlined />}
+            onClick={() => {
+              setArticleFilter('');
+              setDescriptionFilter('');
+              fetchIncomingItems();
+            }}
+          >
+            Reset
+          </Button>
         </Col>
       </Row>
 
-      {/* Main Table */}
       <Table
-        dataSource={filteredItems} // Use filteredItems for the table data
+        dataSource={filteredItems}
         columns={columns}
-        rowKey={(record) => record.ofc_code} // Use a stable key based on 'ofc_code'
+        rowKey={(record) => `${record.ofc_tipo}-${record.ofc_code}-${record.ofc_arti}`}
         loading={loading}
-        pagination={false}
+        pagination={ false}
       />
-    </>
+    </Card>
   );
 };
 

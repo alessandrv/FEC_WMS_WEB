@@ -1,5 +1,5 @@
 import React, { useState,useRef, useCallback, useEffect } from 'react';
-import { Input, Button, Table, Layout, Space, message, Tooltip, Spin, Tag, Modal, InputNumber, Pagination } from 'antd';
+import { Input, Button, Table, Layout, Space, message, Tooltip, Spin, Tag, Modal, InputNumber, Pagination, Form, Alert } from 'antd';
 import WarehouseGrid from './GridComponent';
 import axios from 'axios';
 
@@ -11,16 +11,24 @@ import { InfoCircleOutlined } from '@ant-design/icons';
 import { Tabs } from 'antd';
 import { CloseCircleOutlined } from '@ant-design/icons';
 import WarehouseGridSystem from './WarehouseGridSystem';
+import { Typography } from 'antd';
+const { Text } = Typography;
 
 const { TabPane } = Tabs;
 const { Content, Sider } = Layout;
 
 const Picking = () => {
     const [selectedLayout, setSelectedLayout] = useState('simple');
+    const [selectedRowId, setSelectedRowId] = useState(null);
+    const [changeLocationQuantityModalVisible, setChangeLocationQuantityModalVisible] = useState(false);
+    const [selectedLocation, setSelectedLocation] = useState(null);
+    const [selectedQuantity, setSelectedQuantity] = useState(0);
+    
     const [selectedShelf, setSelectedShelf] = useState(null);
     const [occupiedShelves, setOccupiedShelves] = useState(new Set());
     const [articleFilter, setArticleFilter] = useState('simple');
     const [confirmLoading, setConfirmLoading] = useState(false); // State to manage loading
+    const [quantityNeeded, setQuantityNeeded] = useState(0);
 
     
     const layouts = {
@@ -264,6 +272,7 @@ const Picking = () => {
                 placement: 'bottomRight',
                 duration: 5, // Notification will close after 3 seconds
             });
+            setConfirmLoading(false);
 
             return;
         }
@@ -279,6 +288,8 @@ const Picking = () => {
                     placement: 'bottomRight',
                     duration: 5, // Notification will close after 3 seconds
                 });
+                setConfirmLoading(false);
+
                 return;
             }
 
@@ -291,6 +302,8 @@ const Picking = () => {
                     placement: 'bottomRight',
                     duration: 5, // Notification will close after 3 seconds
                 });
+                setConfirmLoading(false);
+
                 return;
             }
 
@@ -361,6 +374,8 @@ const Picking = () => {
                 });
                 setQuantityModalVisible(false);
                 setQuantityModalData(null);
+                setConfirmLoading(false); // Start loading
+
                 return;
             }
 
@@ -386,6 +401,8 @@ const Picking = () => {
                 });
                 setQuantityModalVisible(false);
                 setQuantityModalData(null);
+                setConfirmLoading(false);
+
                 return;
             }
 
@@ -511,153 +528,70 @@ const Picking = () => {
         }
     }, [articleFilter]); // This effect runs when articleFilter changes
     
-    const handleLocationChangeModalVisible = (article) => {
+    const handleLocationChangeModalVisible = (article, rowId) => {
+        // Clear previous data first
+        setLocazioni([]); 
+        
+        // Find the specific row by its ID
+        const currentRow = tableData.find(row => row.id === rowId);
+        if (currentRow) {
+            setQuantityNeeded(currentRow.available_quantity);
+            setSelectedRowId(rowId); // Store the selected row ID
+        }
+        
         setArticleFilter(article);
         setlocationChangeModalVisible(true);
     };
     const handleLocationChangeModalClose = () => {
+        setLocazioni([]);
+        setArticleFilter(null);
+        setQuantityNeeded(0);
+        setSelectedRowId(null); // Reset selected row ID
         setlocationChangeModalVisible(false);
-    }
+    };
     const handleQuantityCancel = () => {
         setQuantityModalVisible(false);
         setQuantityModalData(null);
         setPickedQuantity(0);
     };
-
-    const handleForcedPicking = () => {
-        if (forcedPickingData) {
-            const { articolo, scaffale, quantity, movimento } = forcedPickingData;
-
-            const scaffaleParts = scaffale.split('-');
-            if (scaffaleParts.length !== 4) {
-
-                notification.error({
-                    message: 'Errore',
-                    description: 'Formato scaffale non valido. Deve essere "area-scaffale-colonna-piano".',
-                    placement: 'bottomRight',
-                    duration: 5, // Notification will close after 3 seconds
-                }); setForcedPickingModalVisible(false);
-                return;
-            }
-
-            const [area, scaffalePart, colonna, piano] = scaffaleParts;
-
-            // Step 1: Calculate the total required quantity for this articolo
-            const totalRequiredQuantity = tableData
-                .filter(item => item.occ_arti === articolo)
-                .reduce((sum, item) => sum + item.occ_qmov, 0); // Sum of required movement quantity (`occ_qmov`)
-
-            // Step 2: Calculate the total quantity already picked (including forced picks)
-            const totalPickedQuantity = tableData
-                .filter(item => item.occ_arti === articolo)
-                .reduce((sum, item) => sum + item.picked_quantity, 0); // Sum of already picked quantity
-
-            // Step 3: Calculate the remaining quantity that needs to be picked
-            const remainingRequiredQuantity = totalRequiredQuantity - totalPickedQuantity;
-
-            // Step 4: Block forced picking if the quantity to be picked exceeds the remaining quantity
-            if (quantity > remainingRequiredQuantity) {
-                notification.error({
-                    message: 'Errore',
-                    description: `Non puoi prelevare più di quanto richiesto. Quantità rimanente da prelevare: ${remainingRequiredQuantity}`,
-                    placement: 'bottomRight',
-                    duration: 5, // Notification will close after 3 seconds
-                });
-                setForcedPickingModalVisible(false);
-                return; // Stop the forced picking action here
-            }
-
-            // Proceed with forced picking as there is enough remaining quantity
-            let remainingQuantity = quantity;
-
-            // Step 5: Deduct the quantity from existing rows (excluding the forced picking location)
-            // Modified code
-            const updatedTableData = tableData.map(item => {
-                if (item.occ_arti.trim() === articolo.trim() &&
-                    item.location &&
-                    `${item.location.area}-${item.location.scaffale}-${item.location.colonna}-${item.location.piano}` !== scaffale &&
-                    !highlightedRows.has(item.id)) { // Exclude highlighted rows
-
-                    if (remainingQuantity > 0) {
-                        const deduction = Math.min(item.available_quantity, remainingQuantity);
-                        remainingQuantity -= deduction;
-                        const newQuantity = item.available_quantity - deduction;
-
-                        return newQuantity > 0 ? { ...item, available_quantity: newQuantity } : null;
-                    }
+    const getExistingAllocations = () => {
+        const allocations = new Map();
+        
+        tableData.forEach(row => {
+            if (row.location && row.id !== selectedRowId) {
+                // Include article in the key to separate different articles
+                const key = `${row.location.area}-${row.location.scaffale}-${row.location.colonna}-${row.location.piano}-${row.movimento}-${row.occ_arti}`;
+                
+                if (allocations.has(key)) {
+                    allocations.set(key, {
+                        ...allocations.get(key),
+                        quantity: parseFloat(allocations.get(key).quantity) + parseFloat(row.available_quantity || 0)
+                    });
+                } else {
+                    allocations.set(key, {
+                        location: row.location,
+                        movimento: row.movimento,
+                        articolo: row.occ_arti,
+                        quantity: parseFloat(row.available_quantity || 0)
+                    });
                 }
-                return item;
-            }).filter(Boolean);
-
-
-            // Step 6: Check if a forced pick row for this location already exists
-            const existingForcedPickIndex = updatedTableData.findIndex(item =>
-                item.occ_arti === articolo &&
-                item.picked_quantity === 0 && // Indicates it's a forced pick
-                item.location && // Ensure location exists
-                `${item.location.area}-${item.location.scaffale}-${item.location.colonna}-${item.location.piano}` === scaffale
-            );
-
-            if (existingForcedPickIndex !== -1) {
-                notification.error({
-                    message: 'Errore',
-                    description: 'Hai già effettuato un prelievo forzato per questa posizione.',
-                    placement: 'bottomRight',
-                    duration: 5, // Notification will close after 3 seconds
-                });
-                setForcedPickingModalVisible(false);
-                return;
             }
-
-            // Step 7: Prepare the forced picking row with available_quantity set to 0 and picked_quantity set to quantity
-            const forcedPickingRow = {
-                occ_arti: articolo,
-                occ_desc_combined: tableData.find(item => item.occ_arti === articolo)?.occ_desc_combined || '', // Get description
-                occ_qmov: quantity, // Required quantity for this picking
-                available_quantity: quantity, // All picked from this row
-                movimento: movimento,
-                location: {
-                    area,
-                    scaffale: scaffalePart,
-                    colonna,
-                    piano
-                },
-                picked_quantity: quantity, // Amount picked in this forced picking
-            };
-
-            // Step 8: Find the index to insert the new row after the scanned article
-            const scannedArticleIndex = updatedTableData.findIndex(item =>
-                item.occ_arti === articolo &&
-                item.location && // Ensure location exists
-                `${item.location.area}-${item.location.scaffale}-${item.location.colonna}-${item.location.piano}` === scaffale
-            );
-
-            // Insert the forced picking row right after the scanned article, or push it to the end if not found
-            if (scannedArticleIndex !== -1) {
-                updatedTableData.splice(scannedArticleIndex + 1, 0, forcedPickingRow);
-            } else {
-                updatedTableData.push(forcedPickingRow);
-            }
-
-            // Step 9: Update the table data and highlight the new forced picking row
-            setTableData(updatedTableData);
-            notification.success({
-                message: 'Errore',
-                description: `Articolo ${articolo} prelevato da ${scaffale}`,
-                placement: 'bottomRight',
-                duration: 5, // Notification will close after 3 seconds
-            });
-
-            // Step 10: Highlight the forced picking row
-            const newHighlightedRows = new Set(highlightedRows);
-            const newRowIndex = scannedArticleIndex !== -1 ? scannedArticleIndex + 1 : updatedTableData.length - 1;
-            newHighlightedRows.add(newRowIndex);
-            setHighlightedRows(newHighlightedRows);
-        }
-
-        // Close the modal after forced picking action
-        setForcedPickingModalVisible(false);
+        });
+        
+        return allocations;
     };
+    const calculateAvailableQuantity = (location, movimento, articolo) => {
+        const allocations = getExistingAllocations();
+        const locationKey = `${location.area}-${location.scaffale}-${location.colonna}-${location.piano}-${movimento}-${articolo}`;
+        
+        // Get allocated quantity only for this specific article
+        const existingAllocation = allocations.get(locationKey);
+        const allocatedQuantity = existingAllocation ? parseFloat(existingAllocation.quantity) : 0;
+        
+        // Calculate remaining quantity
+        return parseFloat(location.totalQta) - allocatedQuantity;
+    };
+    
 
     const handleArticoloPicking = async () => {
         // Validate inputs
@@ -1264,7 +1198,7 @@ const Picking = () => {
                 <>
                     {location.area ? (
                         <Tag color={'geekblue'} key={location} style={{ wordBreak: 'break-word', whiteSpace: 'normal' }}>
-                            <Button type="text" onClick={() => handleLocationChangeModalVisible(record.occ_arti)}>
+                            <Button type="text" onClick={() => handleLocationChangeModalVisible(record.occ_arti, record.id)}>
                                 {location.area}-{location.scaffale}-{location.colonna}-{location.piano}
                             </Button>
                         </Tag>
@@ -1275,7 +1209,7 @@ const Picking = () => {
                     )}
                 </>
             ),
-        },
+        }
     ];
     
 // Columns configuration for the main table
@@ -1341,11 +1275,26 @@ const locationColumns = [
       sorter: (a, b) => a.piano - b.piano,
     },
     {
-      title: 'Q.ta nello scaffale',
-      dataIndex: 'totalQta',
-      key: 'totalQta',
-      sorter: (a, b) => a.totalQta - b.totalQta,
+        title: 'Q.ta Disponibile',
+        dataIndex: 'totalQta',
+        key: 'availableQta',
+        render: (totalQta, record) => {
+            // Pass the article to calculateAvailableQuantity
+            const availableQty = calculateAvailableQuantity(record, record.id_mov, articleFilter);
+            
+            return (
+                <Tooltip title={
+                    <>
+                        <div>Totale: {totalQta}</div>
+                        <div>Disponibile: {availableQty}</div>
+                    </>
+                }>
+                    <span>{availableQty} / {totalQta}</span>
+                </Tooltip>
+            );
+        },
     },
+    
     {
       title: 'Descrizione',
       dataIndex: 'description', // Assuming backend concatenates descriptions
@@ -1353,8 +1302,149 @@ const locationColumns = [
       render: (text) => <span>{text}</span>,
       sorter: (a, b) => a.description.localeCompare(b.description),
     },
+    {
+        title: 'Azioni',
+        key: 'actions',
+        render: (_, record) => {
+            const availableQty = calculateAvailableQuantity(record, record.id_mov);
+            // Remove the disabled condition - allow selection even with lower quantity
+            return (
+                <Button 
+                    type="primary"
+                    onClick={() => handleLocationChange(record)}
+                    title={`Disponibili: ${availableQty}`}
+                >
+                    Seleziona Posizione
+                </Button>
+            );
+        },
+    }
     
   ];
+ 
+// Update handleLocationChange to handle any available quantity
+const handleLocationChange = (newLocation) => {
+    const availableQty = calculateAvailableQuantity(newLocation, newLocation.id_mov);
+    
+    setSelectedLocation(newLocation);
+    setMaxAvailableQuantity(availableQty);
+    // Set default quantity to the minimum between available and needed
+    setSelectedQuantity(Math.min(availableQty, quantityNeeded));
+    setChangeLocationQuantityModalVisible(true);
+};
+
+// Add function to handle the actual location change with quantity
+const handleLocationQuantityChange = () => {
+    const updatedTableData = [...tableData];
+    const rowIndex = updatedTableData.findIndex(row => row.id === selectedRowId);
+    
+    if (rowIndex === -1) {
+        notification.error({
+            message: 'Errore',
+            description: 'Riga non trovata nella tabella.',
+            placement: 'bottomRight',
+        });
+        return;
+    }
+
+    const rowToUpdate = updatedTableData[rowIndex];
+
+    try {
+        // Check if there's already a row with the same location, movimento AND article
+        const existingRowIndex = updatedTableData.findIndex(row => 
+            row.id !== selectedRowId && 
+            row.movimento === selectedLocation.id_mov &&
+            row.occ_arti === rowToUpdate.occ_arti && // Add article check
+            row.location?.area === selectedLocation.area &&
+            row.location?.scaffale === selectedLocation.scaffale &&
+            row.location?.colonna === selectedLocation.colonna &&
+            row.location?.piano === selectedLocation.piano
+        );
+
+        if (parseFloat(selectedQuantity) === parseFloat(rowToUpdate.available_quantity)) {
+            // Full quantity move
+            if (existingRowIndex !== -1) {
+                // Merge with existing row - ensure numeric addition
+                updatedTableData[existingRowIndex] = {
+                    ...updatedTableData[existingRowIndex],
+                    available_quantity: parseFloat(updatedTableData[existingRowIndex].available_quantity) + parseFloat(selectedQuantity)
+                };
+                updatedTableData.splice(rowIndex, 1); // Remove the original row
+            } else {
+                // Just update location
+                updatedTableData[rowIndex] = {
+                    ...rowToUpdate,
+                    location: {
+                        area: selectedLocation.area,
+                        scaffale: selectedLocation.scaffale,
+                        colonna: selectedLocation.colonna,
+                        piano: selectedLocation.piano
+                    },
+                    movimento: selectedLocation.id_mov,
+                };
+            }
+        } else {
+            // Partial quantity move
+            const remainingQuantity = parseFloat(rowToUpdate.available_quantity) - parseFloat(selectedQuantity);
+            
+            // Update original row with remaining quantity
+            updatedTableData[rowIndex] = {
+                ...rowToUpdate,
+                available_quantity: remainingQuantity
+            };
+
+            if (existingRowIndex !== -1) {
+                // Add to existing row - ensure numeric addition
+                updatedTableData[existingRowIndex] = {
+                    ...updatedTableData[existingRowIndex],
+                    available_quantity: parseFloat(updatedTableData[existingRowIndex].available_quantity) + parseFloat(selectedQuantity)
+                };
+            } else {
+                // Create new row for moved quantity
+                const newRow = {
+                    ...rowToUpdate,
+                    id: uuidv4(), // Generate new ID
+                    available_quantity: parseFloat(selectedQuantity),
+                    location: {
+                        area: selectedLocation.area,
+                        scaffale: selectedLocation.scaffale,
+                        colonna: selectedLocation.colonna,
+                        piano: selectedLocation.piano
+                    },
+                    movimento: selectedLocation.id_mov,
+                };
+                updatedTableData.push(newRow);
+            }
+        }
+
+        setTableData(updatedTableData);
+        
+        notification.success({
+            message: 'Successo',
+            description: `Posizione aggiornata con successo`,
+            placement: 'bottomRight',
+        });
+
+        handleChangeLocationQuantityModalClose();
+        handleLocationChangeModalClose();
+
+    } catch (error) {
+        console.error('Error updating location:', error);
+        notification.error({
+            message: 'Errore',
+            description: 'Errore durante l\'aggiornamento della posizione.',
+            placement: 'bottomRight',
+        });
+    }
+};
+
+// Add function to close the quantity modal
+const handleChangeLocationQuantityModalClose = () => {
+    setChangeLocationQuantityModalVisible(false);
+    setSelectedLocation(null);
+    setSelectedQuantity(0);
+    setMaxAvailableQuantity(0);
+};
     const fetchItems = async () => {
         try {
           //setLoading(true);
@@ -1378,6 +1468,33 @@ const locationColumns = [
           setLoading(false);
         }
       };
+
+      const groupLocations = (items) => {
+        const groupedMap = new Map();
+    
+        items.forEach(item => {
+            const key = `${item.id_mov}-${item.area}-${item.scaffale}-${item.colonna}-${item.piano}`;
+            
+            if (groupedMap.has(key)) {
+                const existing = groupedMap.get(key);
+                groupedMap.set(key, {
+                    ...existing,
+                    totalQta: parseFloat(existing.totalQta) + parseFloat(item.qta),
+                    // Preserve other properties from the first occurrence
+                });
+            } else {
+                groupedMap.set(key, {
+                    ...item,
+                    totalQta: parseFloat(item.qta)
+                });
+            }
+        });
+    
+        return Array.from(groupedMap.values());
+    };
+    
+    
+
     const rowClassName = (record) => {
         if (highlightedRows.has(record.id)) {
             return 'highlighted-row';
@@ -1409,35 +1526,109 @@ const locationColumns = [
       }));
     return (
         <Layout style={{ minHeight: '100%' }}>
- <Modal
-                title="Locazioni articolo"
-                visible={locationChangeModalVisible}
-                onOk={handleLocationChangeModalClose}
-                onCancel={handleLocationChangeModalClose}
-                okText=""
-                cancelText="Chiudi"
-            >
-                
-                {dataSource.length > 0 && (
-    <Table
-        dataSource={dataSource[0].subItems.map(subItem => ({
-            key: `${subItem.id_mov}-${subItem.area}-${subItem.scaffale}-${subItem.colonna}-${subItem.piano}`, // Unique key for subitem
-            id_mov: subItem.id_mov,
-            area: subItem.area,
-            scaffale: subItem.scaffale,
-            colonna: subItem.colonna,
-            piano: subItem.piano,
-            totalQta: subItem.qta,
-            description: `${subItem.amg_desc} ${subItem.amg_des2}`.trim(),
-        }))}
-        columns={subColumns}
-        pagination={false}
-        rowKey="key"
-        scroll={{ x: 'max-content' }}
-    />
-)}
+<Modal
+    title={
+        <div>
+            <div>Locazioni articolo</div>
+            <div style={{ 
+                fontSize: '0.9em', 
+                marginTop: '8px',
+                color: 'rgba(0, 0, 0, 0.45)'
+            }}>
+                {dataSource[0]?.description || ''}
+            </div>
+        </div>
+    }
+    visible={locationChangeModalVisible}
+    onOk={handleLocationChangeModalClose}
+    onCancel={handleLocationChangeModalClose}
+    okText=""
+    cancelText="Chiudi"
+    width="auto"
+    style={{
+        maxWidth: '90vw',
+        minWidth: '600px',
+        top: 20
+    }}
+    bodyStyle={{
+        padding: '12px',
+        maxHeight: 'calc(100vh - 200px)',
+        overflow: 'auto'
+    }}
+>
+    {dataSource.length > 0 && (
+        <Table
+            dataSource={groupLocations(dataSource[0].subItems).map(subItem => ({
+                key: `${subItem.id_mov}-${subItem.area}-${subItem.scaffale}-${subItem.colonna}-${subItem.piano}`,
+                id_mov: subItem.id_mov,
+                area: subItem.area,
+                scaffale: subItem.scaffale,
+                colonna: subItem.colonna,
+                piano: subItem.piano,
+                totalQta: subItem.totalQta,
+            }))}
+            columns={subColumns.filter(col => col.key !== 'description')}
+            pagination={false}
+            rowKey="key"
+            scroll={{ x: 'max-content' }}
+            className="striped-table"
+            size="small" // Makes the table more compact
+        />
+    )}
+</Modal>
+<Modal
+    title="Seleziona quantità"
+    visible={changeLocationQuantityModalVisible}
+    onOk={handleLocationQuantityChange}
+    onCancel={handleChangeLocationQuantityModalClose}
+    okText="Conferma"
+    cancelText="Annulla"
+>
+    <Space direction="vertical" style={{ width: '100%' }}>
+        <div>
+            <Text>Posizione selezionata: </Text>
+            <Text strong>
+                {selectedLocation ? 
+                    `${selectedLocation.area}-${selectedLocation.scaffale}-${selectedLocation.colonna}-${selectedLocation.piano}` : 
+                    ''}
+            </Text>
+        </div>
+        <div>
+            <Text>Movimento selezionato: </Text>
+            <Text strong>
+                {selectedLocation?.id_mov || ''}
+            </Text>
+        </div>
+        <div>
+            <Text>Quantità disponibile in questa posizione: </Text>
+            <Text strong>{maxAvailableQuantity}</Text>
+        </div>
+        <div>
+            <Text>Quantità ancora da prelevare: </Text>
+            <Text strong>{quantityNeeded}</Text>
+        </div>
+        {maxAvailableQuantity < quantityNeeded && (
+            <Alert
+                message="Nota"
+                description={`Questa posizione ha una quantità inferiore a quella richiesta. 
+                            Sarà necessario prelevare la quantità rimanente da un'altra posizione.`}
+                type="warning"
+                showIcon
+            />
+        )}
+        <Form.Item label="Quantità da prelevare">
+            <InputNumber
+                min={1}
+                max={maxAvailableQuantity}
+                value={selectedQuantity}
+                onChange={value => setSelectedQuantity(value)}
+                style={{ width: '100%' }}
+            />
+        </Form.Item>
+    </Space>
+</Modal>
 
-            </Modal>
+
             <Modal
             title="Conferma Quantità da Prelevare"
             visible={quantityModalVisible}

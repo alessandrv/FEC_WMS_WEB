@@ -196,10 +196,12 @@ const WarehouseGridSystem = ({
           <div
             className={getCellClassName(cell)}
             style={{
-              width: '98%',
+              width: '100%',
               height: '-webkit-fill-available',
               display: 'flex',
               alignItems: 'center',
+              textAlign:"center",
+
               justifyContent: 'center',
               transform: cell.rotateText ? 'rotate(90deg)' : 'none'
             }}
@@ -216,7 +218,8 @@ const WarehouseGridSystem = ({
               className={getCellClassName(cell)}
               onClick={() => onCellClick(cell.id)}
               style={{
-                width: '98%',
+                width: '100%',
+                textAlign:"center",
               height: '-webkit-fill-available',
                 display: 'flex',
                 alignItems: 'center',

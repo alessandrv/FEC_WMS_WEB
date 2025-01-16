@@ -1,208 +1,193 @@
-import React, { useState } from 'react';
-import { Layout, Button, Drawer, Card, Row, Col, Menu } from 'antd';
+import React, { useState, useEffect } from 'react';
+import { Layout, Button, Drawer, Card, Row, Col, Menu, Typography } from 'antd';
 import { Link } from 'react-router-dom';
 import {
   HomeOutlined,
   SwapOutlined,
   FileSearchOutlined,
   BoxPlotOutlined,
-  MenuUnfoldOutlined,
-  MenuFoldOutlined,
   MenuOutlined,
   CheckOutlined,
   CommentOutlined,
   DeliveredProcedureOutlined,
   InsertRowAboveOutlined,
-  Loading3QuartersOutlined,
   DatabaseFilled,
 } from '@ant-design/icons';
-import './CollapsibleMenu.css'; // Ensure to include your CSS file for additional styles
 
-const { Sider } = Layout;
+const { Title } = Typography;
 
 const CollapsibleMenu = () => {
-  const [collapsed, setCollapsed] = useState(false);
   const [drawerVisible, setDrawerVisible] = useState(false);
+  const [drawerWidth, setDrawerWidth] = useState('80%');
 
-  const toggleCollapsed = () => {
-    setCollapsed(!collapsed);
-  };
+  // Responsive drawer width
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth > 768) {
+        setDrawerWidth('400px');
+      } else {
+        setDrawerWidth('80%');
+      }
+    };
 
-  const showDrawer = () => {
-    setDrawerVisible(true);
-  };
+    handleResize(); // Initial check
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
-  const closeDrawer = () => {
-    setDrawerVisible(false);
-  };
+  const showDrawer = () => setDrawerVisible(true);
+  const closeDrawer = () => setDrawerVisible(false);
+
+  const SectionTitle = ({ children }) => (
+    <Title level={4} style={{ 
+      marginTop: '24px', 
+      marginBottom: '16px',
+      borderBottom: '2px solid #e62d3a',
+      paddingBottom: '8px'
+    }}>
+      {children}
+    </Title>
+  );
+
+  const MenuCard = ({ to, icon, title, onClick }) => (
+    <Link to={to} onClick={onClick}>
+      <Card
+        hoverable
+        style={{
+          textAlign: 'center',
+          height: '120px',
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'center',
+          alignItems: 'center',
+          transition: 'all 0.3s ease'
+        }}
+      >
+        {React.cloneElement(icon, { 
+          style: { 
+            fontSize: '2.5rem', 
+            marginBottom: '8px',
+            color: '#e62d3a'
+          } 
+        })}
+        <span style={{ fontSize: '1.1rem' }}>{title}</span>
+      </Card>
+    </Link>
+  );
 
   return (
     <>
-      {/* Sidebar for larger screens */}
-      <Sider
-        collapsible
-        collapsed={collapsed}
-        onCollapse={toggleCollapsed}
-        className="desktop-sider"
-      >
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'center',
-            alignItems: 'center',
-            height: '64px',
-            color: 'white',
-          }}
-        >
-          {collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
-        </div>
-        <Menu theme="dark" mode="inline">
-          <Menu.SubMenu key="sub1" title="Magazzino" icon={<HomeOutlined />}>
-            <Menu.Item key="1" icon={<HomeOutlined />}>
-              <Link to="/">Stocking</Link>
-            </Menu.Item>
-            <Menu.Item key="2" icon={<SwapOutlined />}>
-              <Link to="/trasferimenti-magazzino">Trasferimento Magazzino</Link>
-            </Menu.Item>
-            <Menu.Item key="3" icon={<FileSearchOutlined />}>
-              <Link to="/visualizza-magazzino">Articoli in Magazzino</Link>
-            </Menu.Item>
-          </Menu.SubMenu>
-          <Menu.Item key="4" icon={<BoxPlotOutlined />}>
-            <Link to="/prelievi">Prelievi</Link>
-          </Menu.Item>
-        </Menu>
-        
-      </Sider>
-
-      {/* Floating button to expand menu on mobile */}
       <Button
         className="floating-button"
         onClick={showDrawer}
         style={{
-          color: 'white',
           position: 'fixed',
           bottom: '20px',
           right: '20px',
-          zIndex: 1000, // Ensure the button is on top of other elements
+          zIndex: 1000,
+          borderRadius: '50%',
+          width: '60px',
+          height: '60px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.15)'
         }}
         size="large"
         icon={<MenuOutlined />}
         type="primary"
-      >
-        Menu
-      </Button>
+      />
 
-      {/* Drawer component for mobile */}
       <Drawer
-        title="Menu"
+        title={<span style={{ fontSize: '1.3rem', fontWeight: 'bold' }}>Menu</span>}
         placement="right"
         closable={true}
         onClose={closeDrawer}
-        visible={drawerVisible}
-        width={'50%'} // Adjust this value for the desired width
+        open={drawerVisible}
+        width={drawerWidth}
+        bodyStyle={{ padding: '12px' }}
       >
-        <Row gutter={[16, 16]} style={{ marginBottom: '16px' }}>
-        <Col span={8}>
-            <Link to="/accettazione" onClick={closeDrawer}>
-              <Card
-                hoverable
-                style={{ textAlign: 'center', fontSize: '1.5rem' }}
-                cover={<CheckOutlined style={{ fontSize: '3rem', marginTop: '20px' }} />}
-              >
-                Accettazione
-              </Card>
-            </Link>
+        <SectionTitle>Accettazione</SectionTitle>
+        <Row gutter={[16, 16]}>
+          <Col span={12}>
+            <MenuCard 
+              to="/accettazione" 
+              icon={<CheckOutlined />} 
+              title="Accettazione" 
+              onClick={closeDrawer}
+            />
+          </Col>
+          <Col span={12}>
+            <MenuCard 
+            style={{display:'flex'}}
+              to="/in-arrivo" 
+              icon={<DeliveredProcedureOutlined />} 
+              title="In arrivo" 
+              onClick={closeDrawer}
+            />
+          </Col>
+        </Row>
+
+        <SectionTitle>Magazzino</SectionTitle>
+         {/* First Row: Magazzino Section */}
+         <Row gutter={[16, 16]} style={{ marginBottom: '16px' }}>
+          <Col span={8}>
+            <MenuCard
+              to="/"
+              icon={<HomeOutlined />}
+              title="Deposito"
+              onClick={closeDrawer}
+            />
           </Col>
           <Col span={8}>
-            <Link to="/in-arrivo" onClick={closeDrawer}>
-              <Card
-                hoverable
-                style={{ textAlign: 'center', fontSize: '1.5rem' }}
-                cover={<DeliveredProcedureOutlined style={{ fontSize: '3rem', marginTop: '20px' }} />}
-              >
-                In arrivo
-              </Card>
-            </Link>
-          </Col>
-          </Row>
-        {/* First Row: Magazzino Section */}
-        <Row gutter={[16, 16]} style={{ marginBottom: '16px' }}>
-          <Col span={8}>
-            <Link to="/" onClick={closeDrawer}>
-              <Card
-                hoverable
-                style={{ textAlign: 'center', fontSize: '1.5rem' }}
-                cover={<HomeOutlined style={{ fontSize: '3rem', marginTop: '20px' }} />}
-              >
-                Immagazzinamento
-              </Card>
-            </Link>
+            <MenuCard
+              to="/trasferimenti-magazzino"
+              icon={<SwapOutlined />}
+              title="Trasferimento"
+              onClick={closeDrawer}
+            />
           </Col>
           <Col span={8}>
-            <Link to="/trasferimenti-magazzino" onClick={closeDrawer}>
-              <Card
-                hoverable
-                style={{ textAlign: 'center', fontSize: '1.5rem' }}
-                cover={<SwapOutlined style={{ fontSize: '3rem', marginTop: '20px' }} />}
-              >
-                Trasferimento
-              </Card>
-            </Link>
-          </Col>
-          <Col span={8}>
-            <Link to="/visualizza-magazzino" onClick={closeDrawer}>
-              <Card
-                hoverable
-                style={{ textAlign: 'center', fontSize: '1.5rem' }}
-                cover={<FileSearchOutlined style={{ fontSize: '3rem', marginTop: '20px' }} />}
-              >
-                Visualizza Magazzino
-              </Card>
-            </Link>
+            <MenuCard
+              to="/visualizza-magazzino"
+              icon={<FileSearchOutlined />}
+              title="Visualizza Magazzino"
+              onClick={closeDrawer}
+            />
           </Col>
         </Row>
 
         {/* Second Row: Prelievi Section */}
         <Row gutter={[16, 16]} style={{ marginBottom: '16px' }}>
           <Col span={8}>
-            <Link to="/prelievi" onClick={closeDrawer}>
-              <Card
-                hoverable
-                style={{ textAlign: 'center', fontSize: '1.5rem' }}
-                cover={<BoxPlotOutlined style={{ fontSize: '3rem', marginTop: '20px' }} />}
-              >
-                Prelievi
-              </Card>
-            </Link>
+            <MenuCard
+              to="/prelievi"
+              icon={<BoxPlotOutlined />}
+              title="Prelievi"
+              onClick={closeDrawer}
+            />
           </Col>
         </Row>
 
+        <SectionTitle>Sistema</SectionTitle>
         <Row gutter={[16, 16]}>
-        <Col span={8}>
-            <Link to="/inventario" onClick={closeDrawer}>
-              <Card
-                hoverable
-                style={{ textAlign: 'center', fontSize: '1.5rem' }}
-                cover={<InsertRowAboveOutlined style={{ fontSize: '3rem', marginTop: '20px' }} />}
-              >
-                Inventario
-              </Card>
-            </Link>
+          <Col span={8}>
+            <MenuCard
+              to="/inventario"
+              icon={<InsertRowAboveOutlined />}
+              title="Inventario"
+              onClick={closeDrawer}
+            />
           </Col>
           <Col span={8}>
-            <Link to="/logs" onClick={closeDrawer}>
-              <Card
-                hoverable
-                style={{ textAlign: 'center', fontSize: '1.5rem' }}
-                cover={<DatabaseFilled style={{ fontSize: '3rem', marginTop: '20px' }} />}
-              >
-                Log sistema
-              </Card>
-            </Link>
+            <MenuCard
+              to="/logs"
+              icon={<DatabaseFilled />}
+              title="Log sistema"
+              onClick={closeDrawer}
+            />
           </Col>
         </Row>
-        
       </Drawer>
     </>
   );
