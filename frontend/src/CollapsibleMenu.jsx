@@ -66,6 +66,10 @@ const CollapsibleMenu = () => {
         {React.cloneElement(icon, { 
           style: { 
             fontSize: '2.5rem', 
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'center',
+            alignItems: 'center',
             marginBottom: '8px',
             color: '#e62d3a'
           } 

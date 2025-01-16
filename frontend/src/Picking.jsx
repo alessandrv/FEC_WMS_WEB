@@ -1545,11 +1545,7 @@ const handleChangeLocationQuantityModalClose = () => {
     okText=""
     cancelText="Chiudi"
     width="auto"
-    style={{
-        maxWidth: '90vw',
-        minWidth: '600px',
-        top: 20
-    }}
+    style={{ maxWidth: '90vw' }}
     bodyStyle={{
         padding: '12px',
         maxHeight: 'calc(100vh - 200px)',
@@ -1572,7 +1568,6 @@ const handleChangeLocationQuantityModalClose = () => {
             rowKey="key"
             scroll={{ x: 'max-content' }}
             className="striped-table"
-            size="small" // Makes the table more compact
         />
     )}
 </Modal>

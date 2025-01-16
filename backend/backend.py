@@ -920,7 +920,7 @@ def update_pacchi():
         # Step 3: Update the volume in wms_scaffali
         
         conn.commit()
-        operation_details = f"Prelievo articolo {articolo} con {movimento} da {area}-{scaffale}-{colonna}-{piano} - QTA: {quantity}"
+        operation_details = f"Prelievo articolo {articolo} con movimento {movimento} da {area}-{scaffale}-{colonna}-{piano} - QTA: {quantity}"
 
         log_operation(
             operation_type="UPDATE",
@@ -928,6 +928,7 @@ def update_pacchi():
             user="current_user",  # Replace with actual user info if available
             ip_address=request.remote_addr
         )
+        print(operation_details)
         if new_qta == 0:
             operation_details = f"Pacco contentente {articolo} con quantitativo zero in {area}-{scaffale}-{colonna}-{piano} rimosso."
 
@@ -941,6 +942,14 @@ def update_pacchi():
 
     except pyodbc.Error as e:
         conn.rollback()
+        operation_details = f"Prelievo articolo {articolo} con movimento {movimento} da {area}-{scaffale}-{colonna}-{piano} - QTA: {quantity} - MERCE NON SCARICATA"
+        print(operation_details)
+        log_operation(
+            operation_type="ERRORE",
+            operation_details=operation_details,
+            user="current_user",  # Replace with actual user info if available
+            ip_address=request.remote_addr
+        )
         return jsonify({'error': str(e)}), 500
 
     finally:
@@ -1069,6 +1078,14 @@ def trasferimento():
         return jsonify({'success': True}), 200
 
     except pyodbc.Error as e:
+        operation_details = f"Spostamento articolo {articolo} da {area}-{scaffale}-{colonna}-{piano} a {areaDest}-{scaffaleDest}-{colonnaDest}-{pianoDest} - QTA: {quantity} - ERRORE"
+        print(operation_details)
+        log_operation(
+            operation_type="ERRORE",
+            operation_details=operation_details,
+            user="current_user",  # Replace with actual user info if available
+            ip_address=request.remote_addr
+        )
         conn.rollback()
         return jsonify({'error': str(e)}), 500
 
