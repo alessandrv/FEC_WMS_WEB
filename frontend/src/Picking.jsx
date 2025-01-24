@@ -1322,12 +1322,12 @@ const locationColumns = [
     
   ];
  
-// Update handleLocationChange to handle any available quantity
+// Update handleLocationChange to use the calculated available quantity
 const handleLocationChange = (newLocation) => {
-    const availableQty = calculateAvailableQuantity(newLocation, newLocation.id_mov);
+    const availableQty = calculateAvailableQuantity(newLocation, newLocation.id_mov, articleFilter);
     
     setSelectedLocation(newLocation);
-    setMaxAvailableQuantity(availableQty);
+    setMaxAvailableQuantity(availableQty); // Use the calculated available quantity
     // Set default quantity to the minimum between available and needed
     setSelectedQuantity(Math.min(availableQty, quantityNeeded));
     setChangeLocationQuantityModalVisible(true);
@@ -1545,7 +1545,11 @@ const handleChangeLocationQuantityModalClose = () => {
     okText=""
     cancelText="Chiudi"
     width="auto"
-    style={{ maxWidth: '90vw' }}
+    style={{
+        maxWidth: '90vw',
+        minWidth: '600px',
+        top: 20
+    }}
     bodyStyle={{
         padding: '12px',
         maxHeight: 'calc(100vh - 200px)',
@@ -1568,6 +1572,7 @@ const handleChangeLocationQuantityModalClose = () => {
             rowKey="key"
             scroll={{ x: 'max-content' }}
             className="striped-table"
+            size="small" // Makes the table more compact
         />
     )}
 </Modal>
@@ -1614,7 +1619,7 @@ const handleChangeLocationQuantityModalClose = () => {
         <Form.Item label="Quantità da prelevare">
             <InputNumber
                 min={1}
-                max={maxAvailableQuantity}
+                max={Math.min(maxAvailableQuantity, quantityNeeded)} // Use the minimum between available and needed quantity
                 value={selectedQuantity}
                 onChange={value => setSelectedQuantity(value)}
                 style={{ width: '100%' }}

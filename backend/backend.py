@@ -1277,92 +1277,79 @@ ORDER BY
             quantity_needed = occ_qmov
             remaining_quantity = quantity_needed
 
-            # Create a dictionary to group results by location
-            # Create a dictionary to group results by location
-                        # Create a dictionary to group results by location
-            location_groups = {}
+            # Create a dictionary to group results by location AND movimento
+            location_mov_groups = {}
 
             # Track how much quantity is still needed
             needed_quantity = remaining_quantity
 
- 
             for wms_row in wms_rows:
                 wms_qta = wms_row.qta
                 if needed_quantity <= 0:
-                    break  # Exit if the required quantity has been satisfied
+                    break
 
-                # Define the location key based on area, scaffale, colonna, piano
-                location_key = (wms_row.area, wms_row.scaffale, wms_row.colonna, wms_row.piano)
+                # Define the key based on location AND movimento
+                location_mov_key = (wms_row.area, wms_row.scaffale, wms_row.colonna, wms_row.piano, wms_row.id_mov)
 
                 # Ensure id_pacco is valid and contributes to fulfilling the required quantity
                 if wms_row.id_pacco and wms_qta > 0:
-                    # Initialize the group if the location is new
-                    if location_key not in location_groups:
-                        location_groups[location_key] = {
+                    # Initialize the group if the location+movimento is new
+                    if location_mov_key not in location_mov_groups:
+                        location_mov_groups[location_mov_key] = {
                             'total_available_quantity': 0,
-                            'pacchi': [],  # Change from id_pacco_list to pacchi
+                            'pacchi': [],
                             'location': {
                                 'area': wms_row.area,
                                 'scaffale': wms_row.scaffale,
                                 'colonna': wms_row.colonna,
                                 'piano': wms_row.piano,
                             },
-                            'movimento': wms_row.id_mov  # Track movimento separately
+                            'movimento': wms_row.id_mov
                         }
 
-                    # Check if adding this pacco exceeds the needed quantity
-                    if wms_qta <= needed_quantity:
-                        # Fulfill from this location as it doesn't exceed the needed quantity
-                        location_groups[location_key]['pacchi'].append({
-                            'id_pacco': wms_row.id_pacco,
-                            'quantity': wms_qta
-                        })
-                        location_groups[location_key]['total_available_quantity'] += wms_qta
-                        needed_quantity -= wms_qta  # Reduce the needed quantity
-                    else:
-                        # Only take what's needed from this location to fulfill the order
-                        location_groups[location_key]['pacchi'].append({
-                            'id_pacco': wms_row.id_pacco,
-                            'quantity': needed_quantity  # Take only the remaining needed quantity
-                        })
-                        location_groups[location_key]['total_available_quantity'] += needed_quantity
-                        needed_quantity = 0  # Fulfilled the total needed quantity
-                        break  # Exit as the order is fully satisfied
+                    # Calculate how much we can take from this pacco
+                    qty_to_take = min(wms_qta, needed_quantity)
+                    
+                    # Add this pacco's quantity to the location+movimento group
+                    location_mov_groups[location_mov_key]['pacchi'].append({
+                        'id_pacco': wms_row.id_pacco,
+                        'quantity': qty_to_take
+                    })
+                    location_mov_groups[location_mov_key]['total_available_quantity'] += qty_to_take
+                    needed_quantity -= qty_to_take
 
-            # Now process the locations and add the results
-            for location_key, group_data in location_groups.items():
-                detailed_results.append({
-                    'occ_arti': occ_arti,
-                    'movimento': group_data['movimento'],
-                    'occ_desc_combined': occ_desc_combined,
-                    'sufficient_quantity': group_data['total_available_quantity'] >= quantity_needed,
-                    'pacchi': group_data['pacchi'],  # Updated to include pacchi with quantities
-                    'location': group_data['location'],
-                    'available_quantity': str(int(group_data['total_available_quantity'])),  # Provide the available amount
-                    'needed_quantity': str(int(quantity_needed)),  # Add the originally needed quantity
-                })
+            # Now process the location+movimento groups and add the results
+            for location_mov_key, group_data in location_mov_groups.items():
+                total_qty_in_location_mov = group_data['total_available_quantity']
+                
+                if total_qty_in_location_mov > 0:  # Only add results if there's quantity to pick
+                    detailed_results.append({
+                        'occ_arti': occ_arti,
+                        'movimento': group_data['movimento'],
+                        'occ_desc_combined': occ_desc_combined,
+                        'sufficient_quantity': total_qty_in_location_mov >= quantity_needed,
+                        'pacchi': group_data['pacchi'],
+                        'location': group_data['location'],
+                        'available_quantity': str(int(total_qty_in_location_mov)),
+                        'needed_quantity': str(int(quantity_needed)),
+                    })
 
-            # If there's still remaining quantity, add a "missing" entry for the shortfall
+            # If after checking all locations+movimenti we still need quantity, add a "missing" entry
             if needed_quantity > 0:
                 detailed_results.append({
                     'occ_arti': occ_arti,
                     'occ_desc_combined': occ_desc_combined,
                     'missing': True,
-                    'pacchi': None,  # No valid pacchi available for missing items
+                    'pacchi': None,
                     'location': {
                         'area': None,
                         'scaffale': None,
                         'colonna': None,
                         'piano': None,
                     },
-                    'available_quantity': str(int(needed_quantity)),  # No more available quantity
-                    'needed_quantity': str(int(needed_quantity)),  # Indicate how much is missing
+                    'available_quantity': str(int(needed_quantity)),
+                    'needed_quantity': str(int(needed_quantity)),
                 })
-
-
-
-
-
 
         return jsonify(detailed_results), 200
 
@@ -2023,7 +2010,7 @@ def send_save_confirmation_email():
 
 if __name__ == '__main__':
     # Run with SSL context for HTTPS
-    app.run(host='172.16.16.69', port=5000, debug=True, ssl_context=(
+    app.run(host='172.16.16.66', port=5000, debug=True, ssl_context=(
         '../frontend/localhost+3.pem',  # Certificate file generated by mkcert
         '../frontend/localhost+3-key.pem'  # Key file generated by mkcert
     ))
