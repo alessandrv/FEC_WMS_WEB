@@ -30,23 +30,22 @@ const GroupedItemsTable = () => {
     const groupedItems = {};
     
     subitems.forEach(subItem => {
-      const groupKey = `${subItem.id_mov}-${subItem.area}-${subItem.scaffale}-${subItem.colonna}-${subItem.piano}`;
-      const locazione = `${subItem.area}-${subItem.scaffale}-${subItem.colonna.toString().padStart(2, '0')}-${subItem.piano}`;
-      
-      if (!groupedItems[groupKey]) {
-        groupedItems[groupKey] = {
-          id_mov: subItem.id_mov,
-          area: subItem.area,
-          scaffale: subItem.scaffale,
-          colonna: subItem.colonna,
-          piano: subItem.piano,
-          locazione: locazione,
-          totalQta: 0,
-          description: subItem.amg_desc + ' ' + subItem.amg_des2,
-        };
-      }
-      
-      groupedItems[groupKey].totalQta += subItem.qta;
+      const groupKey = `${subItem.area}-${subItem.scaffale}-${subItem.colonna}-${subItem.piano}`;
+        const locazione = `${subItem.area}-${subItem.scaffale}-${subItem.colonna.toString().padStart(2, '0')}-${subItem.piano}`;
+        
+        if (!groupedItems[groupKey]) {
+            groupedItems[groupKey] = {
+                area: subItem.area,
+                scaffale: subItem.scaffale,
+                colonna: subItem.colonna,
+                piano: subItem.piano,
+                locazione: locazione,
+                totalQta: 0,
+                description: subItem.amg_desc + ' ' + subItem.amg_des2,
+            };
+        }
+        
+        groupedItems[groupKey].totalQta += subItem.qta;
     });
 
     // Convert to array and sort by locazione
@@ -70,201 +69,216 @@ const GroupedItemsTable = () => {
     return movA.localeCompare(movB);
   };
   const layouts = {
-      1: [
-          {
-              id: 'A',
-              startRow: 0,
-              startCol: 0,
-              width: 8,
-              height: 4,
-              shelfPattern: 'regular'
-            },
-            {
-              id: 'B',
-              startRow: 7,
-              startCol: 0,
-              width: 7,
-              height: 4,
-              shelfPattern: 'regular'
-            },
-            {
-              id: 'C',
-              startRow: 11,
-              startCol: 0,
-              width: 7,
-              height: 5,
-              shelfPattern: 'regular'
-            },
-            {
-              id: 'D',
-              startRow: 19,
-              startCol: 0,
-              width: 2,
-              height: 6,
-              shelfPattern: 'regular'
-            },
-            {
-              id: 'D',
-              startRow: 19,
-              startCol: 3,
-              width: 5,
-              height: 6,
-              startingValue: 3,
-              shelfPattern: 'regular'
-            },
-            {
-              id: 'X',
-              startRow: 25,
-              startCol: 3,
-              width: 5,
-              height: 2,
-              startingValue: 1,
-              startingFloor: -1,
-              spanRow: 2,
-              spanCol: 5,
-              shelfPattern: 'regular'
-            },{
-              id: 'TEXT1',
-              type: 'customText',
-              customText: 'SCALE',
-              rotateText: false, // or false for horizontal text
-              startRow: 27,
-              startCol: 4,
-              width: 4,
-              height: 2,
-              spanRow: 3,
-              spanCol: 4
-            },
-            {
-              id: 'TEXT1',
-              type: 'customText',
-              customText: 'ENTRATA',
-              rotateText: false, // or false for horizontal text
-              startRow: 29,
-              startCol: 1,
-              width: 2,
-              height: 1,
-              spanRow: 1,
-              spanCol: 2
-            },
-            
-      ],
-      2: [
+    1: [
         {
-            id: 'E',
-            startRow: 10,
+            id: 'A',
+            startRow: 0,
             startCol: 0,
             width: 8,
+            height: 4,
+            shelfPattern: 'regular'
+          },
+          {
+            id: 'B',
+            startRow: 7,
+            startCol: 0,
+            width: 7,
+            height: 4,
+            shelfPattern: 'regular'
+          },
+          {
+            id: 'C',
+            startRow: 11,
+            startCol: 0,
+            width: 7,
             height: 5,
             shelfPattern: 'regular'
           },
           {
-            id: 'R',
-            startRow: 4,
-            startCol: 2,
-            width: 5,  // Number of columns you want
-            height: 1,
-            startingValue: 1,
-            shelfPattern: 'horizontal',  // Use 'horizontal' instead of 'regular'
-            startingFloor: 1
+            id: 'D',
+            startRow: 19,
+            startCol: 0,
+            width: 2,
+            height: 6,
+            shelfPattern: 'regular'
           },
           {
-            id: 'R',
-            startRow: 5,
-            startCol: 2,
-            width: 5,  // Number of columns you want
-            height: 1,
-            startingValue: 2,
-            shelfPattern: 'horizontal',  // Use 'horizontal' instead of 'regular'
-            startingFloor: 1
-          },
-          {
-            id: 'R',
-            startRow: 6,
-
-            startCol: 2,
-            width: 5,  // Number of columns you want
-            height: 1,
+            id: 'D',
+            startRow: 19,
+            startCol: 3,
+            width: 5,
+            height: 6,
             startingValue: 3,
-            shelfPattern: 'horizontal',  // Use 'horizontal' instead of 'regular'
-            startingFloor: 1
+            shelfPattern: 'regular'
           },
-
-          
-
           {
-            id: 'S',
-            startRow: 3,
-            startCol: 8,
-            width: 1,
-            height: 5,
-            startingFloor:-4,
-            startingValue:1,
-            spanRow: 5,
-            spanCol: 1,
+            id: 'X',
+            startRow: 25,
+            startCol: 3,
+            width: 5,
+            height: 2,
+            startingValue: 1,
+            startingFloor: -1,
+            spanRow: 2,
+            spanCol: 5,
             shelfPattern: 'regular'
           },{
             id: 'TEXT1',
             type: 'customText',
-            customText: 'RIPARAZIONI',
+            customText: 'SCALE',
             rotateText: false, // or false for horizontal text
-            startRow: 3,
-            startCol: 7,
-            width: 1,
-            height: 5,
-            spanRow: 5,
-            spanCol: 1
+            startRow: 27,
+            startCol: 4,
+            width: 4,
+            height: 2,
+            spanRow: 3,
+            spanCol: 4
           },
           {
-            id: 'TEXT2',
+            id: 'TEXT1',
             type: 'customText',
-            customText: 'ENTRATA',
+            customText: '↓ PRODUZIONE ↓',
             rotateText: false, // or false for horizontal text
-            startRow: 14,
-            startCol: 8,
-            width: 1,
-            spanCol:1,
+            startRow: 29,
+            startCol: 1,
+            width: 2,
             height: 1,
+            spanRow: 1,
+            spanCol: 2
           },
-          {
-            id: 'TEXT3',
-            type: 'customText',
-            customText: 'POS. DOMENICO',
-            rotateText: false, // or false for horizontal text
-            startRow: 0,
-            startCol: 0,
-            width: 1,
-            
-            height: 1,
-          }
-          ,
-          {
-            id: 'TEXT4',
-            type: 'customText',
-            customText: 'ENTRATA',
-            rotateText: false, // or false for horizontal text
-            startRow: 0,
-            startCol: 8,
-            width: 1,
-            
-            height: 1,
-          }
-          ,
-          {
-            id: 'TEXT5',
-            type: 'customText',
-            customText: 'POS. CECILIA',
-            rotateText: false, // or false for horizontal text
-            startRow: 0,
-            startCol: 9,
-            width: 1,
-            
-            height: 1,
-          }
-    
-     
-    ]
-    };
+          
+    ],
+    2: [
+      {
+          id: 'E',
+          startRow: 10,
+          startCol: 0,
+          width: 8,
+          height: 5,
+          shelfPattern: 'regular'
+        },
+        {
+          id: 'R',
+          startRow: 4,
+          startCol: 2,
+          width: 5,  // Number of columns you want
+          height: 1,
+          startingValue: 1,
+          shelfPattern: 'horizontal',  // Use 'horizontal' instead of 'regular'
+          startingFloor: 1
+        },
+        {
+          id: 'R',
+          startRow: 5,
+          startCol: 2,
+          width: 5,  // Number of columns you want
+          height: 1,
+          startingValue: 2,
+          shelfPattern: 'horizontal',  // Use 'horizontal' instead of 'regular'
+          startingFloor: 1
+        },
+        {
+          id: 'R',
+          startRow: 6,
+
+          startCol: 2,
+          width: 5,  // Number of columns you want
+          height: 1,
+          startingValue: 3,
+          shelfPattern: 'horizontal',  // Use 'horizontal' instead of 'regular'
+          startingFloor: 1
+        },
+
+        
+
+        {
+          id: 'S',
+          startRow: 2,
+          startCol: 9,
+          width: 1,
+          height: 11,
+          startingFloor:-10,
+          startingValue:1,
+          spanRow: 11,
+          spanCol: 1,
+          shelfPattern: 'regular'
+        },
+        {
+          id: 'R',
+          startRow: 3,
+          startCol: 7,
+          width: 1,
+          height: 5,
+          startingFloor:-4,
+          startingValue:0,
+          spanRow: 5,
+          spanCol: 1,
+          shelfPattern: 'regular'
+        },
+        
+        {
+          id: 'TEXT2',
+          type: 'customText',
+          customText: '↓ UFFICI ↓',
+          rotateText: false, // or false for horizontal text
+          startRow: 14,
+          startCol: 8,
+          width: 1,
+          spanCol:1,
+          height: 1,
+        },
+        {
+          id: 'TEXT3',
+          type: 'customText',
+          customText: 'POS. DOMENICO',
+          rotateText: false, // or false for horizontal text
+          startRow: 0,
+          startCol: 0,
+          width: 1,
+          
+          height: 1,
+        },
+        {
+          id: 'TEXT8',
+          type: 'customText',
+          customText: '↑ MAGAZZINO ↑',
+          rotateText: false, // or false for horizontal text
+          startRow: 0,
+          startCol: 1,
+          width: 1,
+          
+          height: 1,
+        }
+        , {
+          id: 'TEXT9',
+          type: 'customText',
+          customText: 'PRUDUZIONE',
+          rotateText: false, // or false for horizontal text
+          startRow: 2,
+          startCol: 0,
+          width: 1,
+          
+          height: 7,
+          spanRow: 7,
+        }
+        ,
+        {
+          id: 'TEXT4',
+          type: 'customText',
+          customText: '↑ MAGAZZINO ↑',
+          rotateText: false, // or false for horizontal text
+          startRow: 0,
+          startCol: 8,
+          width: 1,
+          
+          height: 1,
+        }
+        ,
+        
+  
+   
+  ]
+  };
     const getShelfStatus = (shelfId) => {
       if (shelfId === selectedShelf) return 'selected';
       if (occupiedShelves.has(shelfId)) return 'full';
@@ -308,6 +322,13 @@ const GroupedItemsTable = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentPage, pageSize]);
 
+  // Add this effect to handle filter changes
+  useEffect(() => {
+    if (articleFilter === '' && supplierFilter === '' && filterString === '') {
+      fetchItems(1, pageSize);
+    }
+  }, [articleFilter, supplierFilter, filterString]);
+
   // Function to apply filters and fetch data
   const applyFilters = () => {
     setCurrentPage(1); // Reset to first page when applying new filters
@@ -320,7 +341,6 @@ const GroupedItemsTable = () => {
     setSupplierFilter('');
     setFilterString('');
     setCurrentPage(1);
-    fetchItems(1, pageSize);
   };
 
   // Function to handle page change
@@ -428,12 +448,7 @@ highlightedShelves={highlightedShelves}
       sorter: (a, b) => a.locazione.localeCompare(b.locazione),
       defaultSortOrder: 'ascend',
     },
-    {
-      title: 'Movimento',
-      dataIndex: 'id_mov',
-      key: 'id_mov',
-      sorter: sortMovimento,
-    },
+
     {
       title: 'Area',
       dataIndex: 'area',
@@ -488,11 +503,11 @@ highlightedShelves={highlightedShelves}
 
   // Prepare dataSource for the main table
   const dataSource = items.map(item => ({
-    key: item.id_art, // Unique key for each row
+    key: `${item.id_art}-${item.fornitore}`, // Composite key using both id_art and fornitore
     id_art: item.id_art,
     fornitore: item.fornitore,
     totalQta: item.totalQta,
-    description: item.description, // Concatenated description from backend
+    description: item.description,
     subItems: item.subItems,
   }));
 
@@ -522,6 +537,13 @@ highlightedShelves={highlightedShelves}
       />
     ),
     rowExpandable: (record) => record.subItems.length > 0,
+  };
+
+  // Add handler for Enter key
+  const handleKeyPress = (e) => {
+    if (e.key === 'Enter') {
+      applyFilters();
+    }
   };
 
   return (
@@ -568,6 +590,7 @@ highlightedShelves={highlightedShelves}
             placeholder="Search by Codice Articolo"
             value={articleFilter}
             onChange={(e) => setArticleFilter(e.target.value)}
+            onKeyPress={handleKeyPress}
             style={{ width: 200 }}
           />
         </Col>
@@ -576,6 +599,7 @@ highlightedShelves={highlightedShelves}
             placeholder="Search by Codice Fornitore"
             value={supplierFilter}
             onChange={(e) => setSupplierFilter(e.target.value)}
+            onKeyPress={handleKeyPress}
             style={{ width: 200 }}
           />
         </Col>
@@ -584,6 +608,7 @@ highlightedShelves={highlightedShelves}
             placeholder="Filter by Area-Scaffale-Colonna-Piano (e.g., A-A-01-1)"
             value={filterString}
             onChange={(e) => setFilterString(e.target.value)}
+            onKeyPress={handleKeyPress}
             style={{ width: 300 }}
           />
         </Col>

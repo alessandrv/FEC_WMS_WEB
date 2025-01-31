@@ -16,7 +16,13 @@
   .highlighted-row:hover td{
     background-color: #54c054 !important; /* Light green background */
   }
-  
+  /* Add these styles to your existing CSS */
+.already-picked-row {
+  background-color: #d9f7be !important;
+}
+.already-picked-row:hover {
+  background-color: #b7eb8f !important;
+}
   /* styles.css */
 
   .rectangle {

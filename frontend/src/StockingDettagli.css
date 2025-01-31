@@ -8,10 +8,36 @@
   .title {
     font-size: 28px; /* Slightly smaller title */
   }
+  .deposited-row {
+    background-color: #f0f0f0 !important;
+    opacity: 0.5;
+  }
   
+
+  /* Style for disabled rows */
+  .ant-table-row-disabled > td {
+    color: rgba(0, 0, 0, 0.25) !important;
+    background-color: #f5f5f5 !important;
+    cursor: not-allowed !important;
+  }
+  
+  /* Override hover styles for disabled rows */
+
+  
+  /* Style for checkbox in disabled rows */
+  .ant-table-row-disabled .ant-checkbox-wrapper {
+    cursor: not-allowed !important;
+  }
+  
+  .ant-table-row-disabled .ant-checkbox-input {
+    cursor: not-allowed !important;
+  }
+  /* Override ant design table row hover */
+
   .alert {
     margin-bottom: 10px;
   }
+
   
   .card {
     margin-bottom: 10px;

@@ -21,7 +21,7 @@ def read_excel(file_path):
         # Read rows and skip the header
         rows = []
         for row in sheet.iter_rows(min_row=2, values_only=True):  # Skip the first row (header)
-            codice_articolo, fornitore, movimento, locazione, quantita, _ = row  # Ignore PACCO_MULTIPLO
+            codice_articolo, fornitore, movimento, locazione, quantita = row  # Ignore PACCO_MULTIPLO
             print(row)
             if codice_articolo is not None:
                 # Split the locazione into area, scaffale, colonna, and piano
@@ -41,7 +41,7 @@ def insert_data_to_db(connection, data):
 
         # Define the SQL query for the insert
         insert_query = """
-        INSERT INTO wms_items (id_art, id_mov, fornitore, area, scaffale, colonna, piano, qta, dimensione)
+        INSERT INTO wms_items2 (id_art, id_mov, fornitore, area, scaffale, colonna, piano, qta, dimensione)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
 

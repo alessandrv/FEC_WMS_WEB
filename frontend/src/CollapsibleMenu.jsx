@@ -1,6 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Layout, Button, Drawer, Card, Row, Col, Menu, Typography } from 'antd';
+import { Layout, Button, Drawer, Card, Row, Col, message, Typography } from 'antd';
 import { Link } from 'react-router-dom';
+import { QuestionCircleOutlined } from '@ant-design/icons';
+import axios from 'axios';
+
 import {
   HomeOutlined,
   SwapOutlined,
@@ -37,7 +40,19 @@ const CollapsibleMenu = () => {
 
   const showDrawer = () => setDrawerVisible(true);
   const closeDrawer = () => setDrawerVisible(false);
+// Update the help function to use the new endpoint
+const handleHelpRequest = async () => {
+  try {
+      const response = await axios.post(`${process.env.REACT_APP_API_URL}/api/send-help-request`);
 
+      if (response.status === 200) {
+          message.success('Richiesta di aiuto inviata con successo');
+      }
+  } catch (error) {
+      console.error('Error sending help request:', error);
+      message.error('Errore nell\'invio della richiesta di aiuto');
+  }
+};
   const SectionTitle = ({ children }) => (
     <Title level={4} style={{ 
       marginTop: '24px', 
@@ -113,7 +128,7 @@ const CollapsibleMenu = () => {
       >
         <SectionTitle>Accettazione</SectionTitle>
         <Row gutter={[16, 16]}>
-          <Col span={12}>
+          <Col span={8}>
             <MenuCard 
               to="/accettazione" 
               icon={<CheckOutlined />} 
@@ -121,7 +136,7 @@ const CollapsibleMenu = () => {
               onClick={closeDrawer}
             />
           </Col>
-          <Col span={12}>
+          <Col span={8}>
             <MenuCard 
             style={{display:'flex'}}
               to="/in-arrivo" 
@@ -192,6 +207,20 @@ const CollapsibleMenu = () => {
             />
           </Col>
         </Row>
+        <div style={{ 
+            position: 'absolute', 
+            top: '10px', 
+            right: '10px', 
+            zIndex: 1000 
+        }}>
+            <Button
+                type="primary"
+                icon={<QuestionCircleOutlined />}
+                onClick={handleHelpRequest}
+            >
+                Aiuto
+            </Button>
+        </div>
       </Drawer>
     </>
   );

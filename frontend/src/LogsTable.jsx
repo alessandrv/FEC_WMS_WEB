@@ -76,11 +76,7 @@ const LogsTable = () => {
       ellipsis: {
         showTitle: false,
       },
-      render: (details) => (
-        <Tooltip placement="topLeft" title={details}>
-          {details}
-        </Tooltip>
-      ),
+      
     },
     {
       title: 'IP',

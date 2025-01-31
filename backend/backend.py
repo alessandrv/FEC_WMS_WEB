@@ -178,6 +178,35 @@ def get_quantita_registrata():
             cursor.close()
         if 'conn' in locals():
             conn.close()
+
+@app.route('/api/get-articoli-movimento', methods=['GET'])
+def get_movimento_articoli():
+    movimento = request.args.get('movimento')
+    if not movimento:
+        return jsonify({'error': 'Missing codice_articolo parameter'}), 400
+
+    try:
+        conn = connect_to_db()
+        cursor = conn.cursor()
+        query = "select gim_arti, gim_desc, gim_des2, gim_qmov from mggior where gim_code = ? and gim_arti is not null"
+        cursor.execute(query, (movimento,))
+        
+        # Fetch all rows
+        rows = cursor.fetchall()
+        
+        # Convert rows to list of dictionaries
+        columns = [column[0] for column in cursor.description]
+        result = [dict(zip(columns, row)) for row in rows]
+        
+        return jsonify(result)
+
+    except pyodbc.Error as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        if 'conn' in locals():
+            conn.close()
 @app.route('/api/fornitore-ragione-sociale', methods=['GET'])
 def get_ragione_sociale_fornitore():
     codice_fornitore = request.args.get('codice_fornitore')
@@ -342,6 +371,17 @@ def get_items():
 
         # Step 3: Fetch all wms_items for the selected id_art and join with mganag for descriptions
         placeholders = ','.join(['?'] * len(id_art_list))
+        # Build location condition if filter_string exists
+        location_condition = ""
+        location_params = []
+        if filter_string:
+            try:
+                area, scaffale, colonna, piano = filter_string.split('-')
+                location_condition = " AND wi.area = ? AND wi.scaffale = ? AND wi.colonna = ? AND wi.piano = ?"
+                location_params = [area, scaffale, colonna, piano]
+            except ValueError:
+                return jsonify({'error': 'Invalid filter string format'}), 400
+
         items_query = f"""
             SELECT 
                 wi.*,               -- All fields from wms_items
@@ -353,10 +393,13 @@ def get_items():
                 mganag mg ON wi.id_art = mg.amg_code
             WHERE 
                 wi.id_art IN ({placeholders})
+                {location_condition}
             ORDER BY 
                 wi.id_art
         """
-        cursor.execute(items_query, tuple(id_art_list))
+        # Combine id_art_list with location parameters if they exist
+        query_params = tuple(id_art_list + location_params)
+        cursor.execute(items_query, query_params)
         items_rows = cursor.fetchall()
 
         # Get column names from cursor description
@@ -672,17 +715,15 @@ def get_articoli_scaffale():
     colonna = request.args.get('colonna')
     piano = request.args.get('piano')
     articolo = request.args.get('articolo')
-    fornitore = request.args.get('fornitore')
-    movimento = request.args.get('movimento')
     try:
         # Connect to the database
         conn = connect_to_db()
         cursor = conn.cursor()
         
         # Define the query to fetch shelves based on area
-        query = "select * FROM wms_items WHERE area = ? AND  scaffale = ? AND colonna= ? AND piano= ? AND id_art= ? AND fornitore = ? AND id_mov= ?"
+        query = "select * FROM wms_items WHERE area = ? AND  scaffale = ? AND colonna= ? AND piano= ? AND id_art= ?"
 
-        cursor.execute(query, (area, scaffale, colonna, piano, articolo, fornitore, movimento))
+        cursor.execute(query, (area, scaffale, colonna, piano, articolo))
         
         # Fetch all rows
         rows = cursor.fetchall()
@@ -742,7 +783,83 @@ def get_item_presence():
         if 'conn' in locals():
             conn.close()
 
+@app.route('/api/conferma-inserimento-multiplo', methods=['POST'])
+def conferma_inserimento_multiplo():
+    data = request.json
+    area = data.get('area')
+    scaffale = data.get('scaffale')
+    colonna = data.get('colonna')
+    piano = data.get('piano')
+    items = data.get('items')  # List of items to insert
+    
+    if not (area and scaffale and colonna and piano and items):
+        return jsonify({'error': 'Missing required parameters'}), 400
+    
+    try:
+        conn = connect_to_db()
+        cursor = conn.cursor()
+        conn.autocommit = False  # Start transaction
 
+        insert_query = """
+        INSERT INTO wms_items (id_art, id_mov, area, scaffale, colonna, piano, qta, dimensione) 
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """
+        
+        total_volume = 0
+        operation_details = []
+
+        # Process each item
+        for item in items:
+            codice_articolo = item.get('articoloCode')
+            codice_movimento = item.get('movimentoCode')
+            quantita = item.get('quantita')
+            dimensioni = item.get('dimensioni', 'Zero')
+            
+            cursor.execute(insert_query, (
+                codice_articolo, 
+                codice_movimento, 
+                area, 
+                scaffale, 
+                colonna, 
+                piano, 
+                quantita, 
+                dimensioni
+            ))
+            
+            # Calculate volume (you may need to adjust this based on your volume calculation logic)
+      
+            
+            operation_details.append(f"Articolo {codice_articolo}: {quantita} pezzi")
+
+        # Update shelf volume
+        update_query = """
+        UPDATE wms_scaffali 
+        SET volume_libero = volume_libero - ?
+        WHERE area = ? AND scaffale = ? AND colonna = ? AND piano = ?
+        """
+        cursor.execute(update_query, (total_volume, area, scaffale, colonna, piano))
+
+        conn.commit()
+
+        # Log the operation
+        log_operation(
+            operation_type="MULTIPLE_INSERT",
+            operation_details=", ".join(operation_details),
+            user="current_user",  # Replace with actual user info
+            ip_address=request.remote_addr
+        )
+
+        return jsonify({'success': True}), 200
+
+    except pyodbc.Error as e:
+        if conn:
+            conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        if 'conn' in locals():
+            conn.close()
 @app.route('/api/conferma-inserimento', methods=['POST'])
 def conferma_inserimento():
     data = request.json
@@ -752,13 +869,12 @@ def conferma_inserimento():
     piano = data.get('piano')
     codice_articolo = data.get('codice_articolo')
     codice_movimento = data.get('codice_movimento')
-    codice_fornitore = data.get('codice_fornitore')
     quantita = data.get('quantita')
     dimensioni = data.get('dimensioni')
     numero_pacchi = data.get('numero_pacchi')
     volume_totale = data.get('volume')
     
-    if not (area and scaffale and colonna and piano and codice_articolo and codice_movimento and codice_fornitore and quantita and dimensioni and numero_pacchi):
+    if not (area and scaffale and colonna and piano and codice_articolo and quantita and dimensioni and numero_pacchi):
         return jsonify({'error': 'Missing required parameters'}), 400
     
     try:
@@ -767,8 +883,8 @@ def conferma_inserimento():
         conn.autocommit = False  # Start transaction
 
         insert_query = """
-        INSERT INTO wms_items (id_art, id_mov, fornitore, area, scaffale, colonna, piano, qta, dimensione) 
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO wms_items (id_art, id_mov, area, scaffale, colonna, piano, qta, dimensione) 
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """
         update_query = """
         UPDATE wms_scaffali 
@@ -777,7 +893,7 @@ def conferma_inserimento():
         """
         
         for _ in range(numero_pacchi):
-            cursor.execute(insert_query, (codice_articolo, codice_movimento, codice_fornitore, area, scaffale, colonna, piano, quantita, dimensioni))
+            cursor.execute(insert_query, (codice_articolo, codice_movimento, area, scaffale, colonna, piano, quantita, dimensioni))
         cursor.execute(update_query, (volume_totale, area, scaffale, colonna, piano))
 
         conn.commit()
@@ -814,7 +930,8 @@ def update_pacchi():
     colonna = data.get('colonna')
     piano = data.get('piano')
     quantity = data.get('quantity')
-    movimento = data.get('movimento')
+    odl = data.get('odl')  # New parameter for ODL
+
     # Validate input parameters
     if not all([articolo, area, scaffale, colonna, piano, quantity]):
         return jsonify({'error': 'Missing parameters'}), 400
@@ -839,9 +956,8 @@ def update_pacchi():
           AND scaffale = ?
           AND colonna = ?
           AND piano = ?
-          AND id_mov = ?
         """
-        cursor.execute(total_quantity_query, (articolo, area, scaffale, colonna, piano, movimento))
+        cursor.execute(total_quantity_query, (articolo, area, scaffale, colonna, piano))
         result = cursor.fetchone()
 
         if not result or result.total_qta is None:
@@ -861,10 +977,9 @@ def update_pacchi():
           AND scaffale = ?
           AND colonna = ?
           AND piano = ?
-          and id_mov = ?
         ORDER BY qta ASC
         """
-        cursor.execute(pacchi_query, (articolo, area, scaffale, colonna, piano, movimento))
+        cursor.execute(pacchi_query, (articolo, area, scaffale, colonna, piano))
         pacchi = cursor.fetchall()
 
         if not pacchi:
@@ -920,7 +1035,7 @@ def update_pacchi():
         # Step 3: Update the volume in wms_scaffali
         
         conn.commit()
-        operation_details = f"Prelievo articolo {articolo} con movimento {movimento} da {area}-{scaffale}-{colonna}-{piano} - QTA: {quantity}"
+        operation_details = f"Prelievo articolo {articolo} da {area}-{scaffale}-{colonna}-{piano} - QTA: {quantity}"
 
         log_operation(
             operation_type="UPDATE",
@@ -938,11 +1053,38 @@ def update_pacchi():
                 user="current_user",  # Replace with actual user info if available
                 ip_address=request.remote_addr
             )
+         # Only insert into wms_prelievi if odl is provided
+        if odl:
+            try:
+                insert_prelievo_query = """
+                INSERT INTO wms_prelievi (odl, id_art, area, scaffale, colonna, piano, qta)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """
+                cursor.execute(insert_prelievo_query, (
+                    odl,
+                    articolo,
+                    area,
+                    scaffale,
+                    colonna,
+                    piano,
+                    int(quantity)
+                ))
+                conn.commit()  # Second commit for the prelievi insert
+            except pyodbc.Error as e:
+                # If the prelievi insert fails, log it but don't roll back the pacchi updates
+                log_operation(
+                    operation_type="ERRORE",
+                    operation_details=f"Errore nell'inserimento del prelievo in wms_prelievi: {str(e)}",
+                    user="current_user",
+                    ip_address=request.remote_addr
+                )
+                # Don't return error as the main operation succeeded
+
         return jsonify({'success': True}), 200
 
     except pyodbc.Error as e:
         conn.rollback()
-        operation_details = f"Prelievo articolo {articolo} con movimento {movimento} da {area}-{scaffale}-{colonna}-{piano} - QTA: {quantity} - MERCE NON SCARICATA"
+        operation_details = f"Prelievo articolo {articolo} da {area}-{scaffale}-{colonna}-{piano} - QTA: {quantity} - MERCE NON SCARICATA"
         print(operation_details)
         log_operation(
             operation_type="ERRORE",
@@ -957,6 +1099,93 @@ def update_pacchi():
             cursor.close()
         if 'conn' in locals():
             conn.close()
+
+@app.route('/api/prelievi-summary', methods=['GET'])
+def get_prelievi_summary():
+    try:
+        # Connect to the database
+        conn = connect_to_db()
+        cursor = conn.cursor()
+        
+        # Query to get sum of quantities grouped by ODL and article
+        query = """
+        SELECT 
+            odl,
+            id_art,
+            SUM(qta) as total_qta
+        FROM 
+            wms_prelievi
+        GROUP BY 
+            odl,
+            id_art
+        ORDER BY 
+            odl,
+            id_art
+        """
+        
+        cursor.execute(query)
+        
+        # Fetch all rows
+        rows = cursor.fetchall()
+        
+        # Convert rows to a list of dictionaries
+        columns = [column[0] for column in cursor.description]
+        result = [dict(zip(columns, row)) for row in rows]
+        
+        return jsonify(result)
+
+    except pyodbc.Error as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        if 'conn' in locals():
+            conn.close()
+
+# Optional: Add an endpoint to get summary for a specific ODL
+@app.route('/api/prelievi-summary/<odl>', methods=['GET'])
+def get_prelievi_summary_by_odl(odl):
+    try:
+        # Connect to the database
+        conn = connect_to_db()
+        cursor = conn.cursor()
+        
+        # Query to get sum of quantities for a specific ODL
+        query = """
+        SELECT 
+            odl,
+            id_art,
+            SUM(qta) as total_qta
+        FROM 
+            wms_prelievi
+        WHERE 
+            odl = ?
+        GROUP BY 
+            odl,
+            id_art
+        ORDER BY 
+            id_art
+        """
+        
+        cursor.execute(query, (odl,))
+        
+        # Fetch all rows
+        rows = cursor.fetchall()
+        
+        # Convert rows to a list of dictionaries
+        columns = [column[0] for column in cursor.description]
+        result = [dict(zip(columns, row)) for row in rows]
+        
+        return jsonify(result)
+
+    except pyodbc.Error as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        if 'conn' in locals():
+            conn.close()
+
 
 @app.route('/api/trasferimento', methods=['POST'])
 def trasferimento():
@@ -974,8 +1203,6 @@ def trasferimento():
     colonnaDest = data.get('colonnaDest')
     pianoDest = data.get('pianoDest')
 
-    movimento =data.get('movimento')
-    fornitore =data.get('fornitore')
     quantity = data.get('quantity')
 
     # Validate input parameters
@@ -1003,11 +1230,9 @@ def trasferimento():
           AND scaffale = ?
           AND colonna = ?
           AND piano = ?
-          and id_mov = ?
-          and fornitore = ?
         ORDER BY qta ASC
         """
-        cursor.execute(pacchi_query, (articolo, area, scaffale, colonna, piano, movimento, fornitore))
+        cursor.execute(pacchi_query, (articolo, area, scaffale, colonna, piano))
         pacchi = cursor.fetchall()
 
         if not pacchi:
@@ -1055,8 +1280,8 @@ def trasferimento():
             return jsonify({'error': 'No updates were made.'}), 400
         
         # Step 3: Update the volume in wms_scaffali
-        add_query = "INSERT INTO wms_items (id_art, id_mov, fornitore, area, scaffale, colonna, piano, qta, dimensione) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Zero')"
-        cursor.execute(add_query, (articolo,movimento, fornitore, areaDest, scaffaleDest, colonnaDest, pianoDest, quantity))
+        add_query = "INSERT INTO wms_items (id_art, area, scaffale, colonna, piano, qta, dimensione) VALUES (?,  ?, ?, ?, ?, ?, 'Zero')"
+        cursor.execute(add_query, (articolo, areaDest, scaffaleDest, colonnaDest, pianoDest, quantity))
         conn.commit()
         operation_details = f"Spostamento articolo {articolo} da {area}-{scaffale}-{colonna}-{piano} a {areaDest}-{scaffaleDest}-{colonnaDest}-{pianoDest} - QTA: {quantity}"
 
@@ -1232,43 +1457,43 @@ WHERE
 
             # First, check if this `occ_arti` is in `wms_proibiti`
              # Skip if occ_arti starts with 'EG' or '0S'
-            if occ_arti.startswith('EG'):
+            if occ_arti.startswith('EG') :
                 continue
 
             # Query wms_items for the current occ_arti
             query_wms = """
-           SELECT 
-    id_art, 
-    id_mov, 
-    id_pacco,  -- Track id_pacco
-    fornitore, 
-    area, 
-    scaffale, 
-    colonna, 
-    piano, 
-    SUM(qta) AS qta,
-    CASE 
-        WHEN scaffale IN ('S', 'R') THEN 1 
-        ELSE 0 
-    END AS scaffale_order -- Add the CASE expression to the SELECT list
-FROM 
-    wms_items
-WHERE 
-    id_art = ?
-GROUP BY 
-    id_art, 
-    id_mov, 
-    id_pacco,  -- Group by id_pacco
-    fornitore, 
-    area, 
-    scaffale, 
-    colonna, 
-    piano
-ORDER BY
-    scaffale_order,  -- Use the alias in the ORDER BY clause
-    id_mov ASC, 
-    id_pacco ASC;
-
+            SELECT 
+                id_art, 
+                id_pacco,
+                fornitore, 
+                area, 
+                scaffale, 
+                colonna, 
+                piano, 
+                SUM(qta) AS qta,
+                CASE 
+                    WHEN scaffale IN ('S', 'R') THEN 1 
+                    ELSE 0 
+                END AS scaffale_order
+            FROM 
+                wms_items
+            WHERE 
+                id_art = ?
+            GROUP BY 
+                id_art, 
+                id_pacco,
+                fornitore, 
+                area, 
+                scaffale, 
+                colonna, 
+                piano
+            ORDER BY
+                scaffale_order,
+                area,
+                scaffale,
+                colonna,
+                piano,
+                id_pacco ASC;
             """
             cursor.execute(query_wms, (occ_arti,))
             wms_rows = cursor.fetchall()
@@ -1277,21 +1502,18 @@ ORDER BY
             quantity_needed = occ_qmov
             remaining_quantity = quantity_needed
 
-            # Create a dictionary to group results by location
-            # Create a dictionary to group results by location
-                        # Create a dictionary to group results by location
+            # Create a dictionary to group results by location only
             location_groups = {}
 
             # Track how much quantity is still needed
             needed_quantity = remaining_quantity
 
- 
             for wms_row in wms_rows:
                 wms_qta = wms_row.qta
                 if needed_quantity <= 0:
-                    break  # Exit if the required quantity has been satisfied
+                    break
 
-                # Define the location key based on area, scaffale, colonna, piano
+                # Define the key based on location only
                 location_key = (wms_row.area, wms_row.scaffale, wms_row.colonna, wms_row.piano)
 
                 # Ensure id_pacco is valid and contributes to fulfilling the required quantity
@@ -1300,69 +1522,57 @@ ORDER BY
                     if location_key not in location_groups:
                         location_groups[location_key] = {
                             'total_available_quantity': 0,
-                            'pacchi': [],  # Change from id_pacco_list to pacchi
+                            'pacchi': [],
                             'location': {
                                 'area': wms_row.area,
                                 'scaffale': wms_row.scaffale,
                                 'colonna': wms_row.colonna,
                                 'piano': wms_row.piano,
-                            },
-                            'movimento': wms_row.id_mov  # Track movimento separately
+                            }
                         }
 
-                    # Check if adding this pacco exceeds the needed quantity
-                    if wms_qta <= needed_quantity:
-                        # Fulfill from this location as it doesn't exceed the needed quantity
-                        location_groups[location_key]['pacchi'].append({
-                            'id_pacco': wms_row.id_pacco,
-                            'quantity': wms_qta
-                        })
-                        location_groups[location_key]['total_available_quantity'] += wms_qta
-                        needed_quantity -= wms_qta  # Reduce the needed quantity
-                    else:
-                        # Only take what's needed from this location to fulfill the order
-                        location_groups[location_key]['pacchi'].append({
-                            'id_pacco': wms_row.id_pacco,
-                            'quantity': needed_quantity  # Take only the remaining needed quantity
-                        })
-                        location_groups[location_key]['total_available_quantity'] += needed_quantity
-                        needed_quantity = 0  # Fulfilled the total needed quantity
-                        break  # Exit as the order is fully satisfied
+                    # Calculate how much we can take from this pacco
+                    qty_to_take = min(wms_qta, needed_quantity)
+                    
+                    # Add this pacco's quantity to the location group
+                    location_groups[location_key]['pacchi'].append({
+                        'id_pacco': wms_row.id_pacco,
+                        'quantity': qty_to_take
+                    })
+                    location_groups[location_key]['total_available_quantity'] += qty_to_take
+                    needed_quantity -= qty_to_take
 
-            # Now process the locations and add the results
+            # Now process the location groups and add the results
             for location_key, group_data in location_groups.items():
-                detailed_results.append({
-                    'occ_arti': occ_arti,
-                    'movimento': group_data['movimento'],
-                    'occ_desc_combined': occ_desc_combined,
-                    'sufficient_quantity': group_data['total_available_quantity'] >= quantity_needed,
-                    'pacchi': group_data['pacchi'],  # Updated to include pacchi with quantities
-                    'location': group_data['location'],
-                    'available_quantity': str(int(group_data['total_available_quantity'])),  # Provide the available amount
-                    'needed_quantity': str(int(quantity_needed)),  # Add the originally needed quantity
-                })
+                total_qty_in_location = group_data['total_available_quantity']
+                
+                if total_qty_in_location > 0:  # Only add results if there's quantity to pick
+                    detailed_results.append({
+                        'occ_arti': occ_arti,
+                        'occ_desc_combined': occ_desc_combined,
+                        'sufficient_quantity': total_qty_in_location >= quantity_needed,
+                        'pacchi': group_data['pacchi'],
+                        'location': group_data['location'],
+                        'available_quantity': str(int(total_qty_in_location)),
+                        'needed_quantity': str(int(quantity_needed)),
+                    })
 
-            # If there's still remaining quantity, add a "missing" entry for the shortfall
+            # If after checking all locations we still need quantity, add a "missing" entry
             if needed_quantity > 0:
                 detailed_results.append({
                     'occ_arti': occ_arti,
                     'occ_desc_combined': occ_desc_combined,
                     'missing': True,
-                    'pacchi': None,  # No valid pacchi available for missing items
+                    'pacchi': None,
                     'location': {
                         'area': None,
                         'scaffale': None,
                         'colonna': None,
                         'piano': None,
                     },
-                    'available_quantity': str(int(needed_quantity)),  # No more available quantity
-                    'needed_quantity': str(int(needed_quantity)),  # Indicate how much is missing
+                    'available_quantity': str(int(needed_quantity)),
+                    'needed_quantity': str(int(needed_quantity)),
                 })
-
-
-
-
-
 
         return jsonify(detailed_results), 200
 
@@ -1373,7 +1583,6 @@ ORDER BY
             cursor.close()
         if 'conn' in locals():
             conn.close()
-            
 @app.route('/api/articolo-search', methods=['GET'])
 def articolo_search():
     articolo_id = request.args.get('articolo_id')
@@ -1399,10 +1608,9 @@ def articolo_search():
         else:
             occ_desc_combined = 'Descrizione non disponibile'
 
-        # Step 2: Fetch available locations ordered by movimento number
+        # Step 2: Fetch available locations grouped by location only
         query_locations = """
             SELECT 
-                id_mov AS movimento,
                 area,
                 scaffale,
                 colonna,
@@ -1414,9 +1622,9 @@ def articolo_search():
                 id_art = ?
                 AND qta > 0
             GROUP BY 
-                id_mov, area, scaffale, colonna, piano
+                area, scaffale, colonna, piano
             ORDER BY 
-                movimento ASC
+                area, scaffale, colonna, piano
         """
         cursor.execute(query_locations, (articolo_id,))
         location_rows = cursor.fetchall()
@@ -1429,8 +1637,7 @@ def articolo_search():
                 break  # Required quantity fulfilled
 
             available = row.available_quantity
-            movement = row.movimento
-
+            
             # Determine how much to pick from this location
             pick_quantity = min(available, required_quantity - accumulated_quantity)
 
@@ -1438,7 +1645,6 @@ def articolo_search():
                 'id': str(uuid.uuid4()),  # Unique identifier for React's key
                 'occ_arti': articolo_id,
                 'occ_desc_combined': occ_desc_combined,
-                'movimento': movement,
                 'available_quantity': pick_quantity,
                 'location': {
                     'area': row.area,
@@ -1459,7 +1665,6 @@ def articolo_search():
                 'id': str(uuid.uuid4()),  # Unique identifier
                 'occ_arti': articolo_id,
                 'occ_desc_combined': occ_desc_combined,
-                'movimento': None,
                 'available_quantity': required_quantity-accumulated_quantity,
                 'picked_quantity': required_quantity,
                 'location': {
@@ -1907,7 +2112,7 @@ def send_email():
         # Create email
         msg = MIMEMultipart()
         msg['From'] = SENDER_EMAIL
-        msg['To'] = 'd.fasano@fecpos.it'  # Replace with recipient email
+        msg['To'] = 'a.piccin@fecpos.it'  # Replace with recipient email
         msg['Subject'] = f"Problema ordine - {order_id}"
 
         # Attach the message
@@ -2019,13 +2224,196 @@ def send_save_confirmation_email():
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+@app.route('/api/send-help-request', methods=['POST'])
+def send_help_request():
+    try:
+        # Create email
+        msg = MIMEMultipart()
+        msg['From'] = SENDER_EMAIL
+        msg['To'] = 'a.piccin@fecpos.it, d.fasano@fecpos.it'  # Multiple recipients
+        msg['Subject'] = "Richiesta di aiuto - WMS"
 
+        # Create the message
+        text = MIMEText("Mi serve aiuto con il software WMS.")
+        msg.attach(text)
 
+        # Connect to Gmail's SMTP server and send the email
+        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+        server.starttls()  # Upgrade to a secure connection
+        server.login(SENDER_EMAIL, SENDER_PASSWORD)
+        
+        # Send to multiple recipients
+        recipients = ['a.piccin@fecpos.it', 'd.fasano@fecpos.it']
+        server.sendmail(SENDER_EMAIL, recipients, msg.as_string())
+        server.quit()
+
+        # Log the operation
+        operation_details = "Richiesta di aiuto WMS inviata"
+        log_operation(
+            operation_type="HELP",
+            operation_details=operation_details,
+            user="current_user",
+            ip_address=request.remote_addr
+        )
+
+        return jsonify({'message': 'Richiesta di aiuto inviata con successo'}), 200
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/trasferimento-multiplo', methods=['POST'])
+def bulk_transfer():
+    try:
+        transfer_items = request.get_json()
+        if not isinstance(transfer_items, list):
+            return jsonify({'error': 'Expected array of transfer items'}), 400
+
+        conn = connect_to_db()
+        cursor = conn.cursor()
+        conn.autocommit = False
+
+        # Validate all items first
+        for idx, item in enumerate(transfer_items):
+            required_fields = [
+                'articolo', 'quantity', 'area', 'scaffale', 
+                'colonna', 'piano', 'areaDest', 'scaffaleDest',
+                'colonnaDest', 'pianoDest'
+            ]
+            if not all(item.get(field) for field in required_fields):
+                raise ValueError(f"Item {idx+1}: Missing required fields")
+
+            try:
+                quantity = Decimal(item['quantity'])
+                if quantity <= 0:
+                    raise ValueError(f"Item {idx+1}: Quantity must be positive")
+            except (ValueError, InvalidOperation):
+                raise ValueError(f"Item {idx+1}: Invalid quantity value")
+
+        # Process transfers
+        for idx, item in enumerate(transfer_items):
+            process_single_transfer(cursor, item, idx+1)
+
+        conn.commit()
+        return jsonify({'success': True, 'transferred_items': len(transfer_items)}), 200
+
+    except Exception as e:
+        conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if 'cursor' in locals(): cursor.close()
+        if 'conn' in locals(): conn.close()
+
+def process_single_transfer(cursor, item, item_idx):
+    articolo = item['articolo']
+    quantity = Decimal(item['quantity'])
+    src_loc = (item['area'], item['scaffale'], item['colonna'], item['piano'])
+    dest_loc = (item['areaDest'], item['scaffaleDest'], item['colonnaDest'], item['pianoDest'])
+
+    # Verify locations exist
+    for loc, loc_type in [(src_loc, 'source'), (dest_loc, 'destination')]:
+        cursor.execute("""
+            SELECT 1 FROM wms_scaffali 
+            WHERE area=? AND scaffale=? AND colonna=? AND piano=?
+        """, loc)
+        if not cursor.fetchone():
+            raise ValueError(f"Item {item_idx}: {loc_type} location {loc} not found")
+
+    # Retrieve pacchi
+    cursor.execute("""
+        SELECT id_pacco, qta, dimensione
+        FROM wms_items
+        WHERE id_art=? AND area=? AND scaffale=? AND colonna=? AND piano=?
+        ORDER BY qta ASC
+    """, (articolo, *src_loc))
+    pacchi = cursor.fetchall()
+
+    if not pacchi:
+        raise ValueError(f"Item {item_idx}: No items found at {src_loc}")
+
+    remaining = quantity
+    for pacco in pacchi:
+        if remaining <= 0: break
+        
+        qta = Decimal(pacco.qta)
+        transfer_qty = min(qta, remaining)
+        new_qta = qta - transfer_qty
+
+        # Update source
+        if new_qta == 0:
+            cursor.execute("DELETE FROM wms_items WHERE id_pacco=?", pacco.id_pacco)
+        else:
+            cursor.execute("UPDATE wms_items SET qta=? WHERE id_pacco=?", (new_qta, pacco.id_pacco))
+
+        # Create destination
+        cursor.execute("""
+            INSERT INTO wms_items 
+            (id_art, area, scaffale, colonna, piano, qta, dimensione)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (articolo, *dest_loc, transfer_qty, pacco.dimensione))
+
+        remaining -= transfer_qty
+
+    if remaining > 0:
+        raise ValueError(f"Item {item_idx}: Insufficient quantity (missing {remaining})")
+
+@app.route('/api/movimento-location-items', methods=['GET'])
+def get_movimento_location_items():
+    movimento = request.args.get('movimento')
+    area = request.args.get('area')
+    scaffale = request.args.get('scaffale')
+    colonna = request.args.get('colonna')
+    piano = request.args.get('piano')
+    
+    if not all([movimento, area, scaffale, colonna, piano]):
+        return jsonify({'error': 'Missing required parameters'}), 400
+
+    try:
+        conn = connect_to_db()
+        cursor = conn.cursor()
+        
+        # First get movimento items
+        movimento_query = """SELECT gim_arti FROM mggior 
+                          WHERE gim_code = ? AND gim_arti IS NOT NULL"""
+        cursor.execute(movimento_query, (movimento,))
+        movimento_items = [row.gim_arti for row in cursor.fetchall()]
+        
+        if not movimento_items:
+            return jsonify([]), 200
+
+        # Get items in location that match movimento items
+        placeholders = ','.join(['?'] * len(movimento_items))
+        location_query = f"""SELECT wi.* 
+                           FROM wms_items wi
+                           WHERE wi.area = ? 
+                             AND wi.scaffale = ?
+                             AND wi.colonna = ?
+                             AND wi.piano = ?
+                             AND wi.id_art IN ({placeholders})"""
+        
+        params = [area, scaffale, colonna, piano] + movimento_items
+        cursor.execute(location_query, params)
+        
+        # Convert results to JSON
+        columns = [column[0] for column in cursor.description]
+        result = [dict(zip(columns, row)) for row in cursor.fetchall()]
+        
+        return jsonify(result)
+
+    except pyodbc.Error as e:
+        app.logger.error(f"Database error: {str(e)}")
+        return jsonify({'error': 'Database error occurred.'}), 500
+    except Exception as ex:
+        app.logger.error(f"Unexpected error: {str(ex)}")
+        return jsonify({'error': 'An unexpected error occurred.'}), 500
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        if 'conn' in locals():
+            conn.close()
+            
 if __name__ == '__main__':
     # Run with SSL context for HTTPS
-    app.run(host='172.16.16.69', port=5000, debug=True, ssl_context=(
-        '../frontend/localhost+3.pem',  # Certificate file generated by mkcert
-        '../frontend/localhost+3-key.pem'  # Key file generated by mkcert
-    ))
+    app.run(host='172.16.16.66', port=5000, debug=True, 
+    )
 
 
