@@ -1381,18 +1381,11 @@ const locationColumns = [
  
 // Update handleLocationChange to use the calculated available quantity
 const handleLocationChange = (newLocation) => {
-<<<<<<< HEAD
     const availableQty = calculateAvailableQuantity(newLocation, articleFilter);
     
     setSelectedLocation(newLocation);
     setMaxAvailableQuantity(availableQty);
-=======
-    const availableQty = calculateAvailableQuantity(newLocation, newLocation.id_mov, articleFilter);
-    
-    setSelectedLocation(newLocation);
-    setMaxAvailableQuantity(availableQty); // Use the calculated available quantity
-    // Set default quantity to the minimum between available and needed
->>>>>>> d9737cbffaa62089b3310b34a9e330817ac14bde
+
     setSelectedQuantity(Math.min(availableQty, quantityNeeded));
     setChangeLocationQuantityModalVisible(true);
 };
