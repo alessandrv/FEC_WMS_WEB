@@ -1379,7 +1379,6 @@ def process_ordine_lavoro():
         # Extract gol_octi, gol_occo, gol_ocri values from the found row
 
         # Third query: Find rows in ocordic between gol_ocri (included) and gol_ocri_new (excluded)
-        print(prossimo_ordine)
         query3 = """
 SELECT 
     m.mpl_figlio AS occ_arti,
@@ -1430,6 +1429,11 @@ WHERE
         WHERE m.mpl_padre = p.occ_arti
     );
         """
+        # Find the minimum gol_ocri greater than current gol_ocri
+        next_ocri_values = [row.gol_ocri for row in rows if row.gol_ocri > gol_ocri]
+        prossimo_ordine = min(next_ocri_values) if next_ocri_values else 999999999  # Use a large number
+
+        # Modify the query parameters to handle the "no next row" case
         params = (
             gol_octi, gol_occo, gol_ocri,  # First block
             gol_octi, gol_occo, gol_ocri,  # Subquery in first block
@@ -1458,7 +1462,7 @@ WHERE
 
             # First, check if this `occ_arti` is in `wms_proibiti`
              # Skip if occ_arti starts with 'EG' or '0S'
-            if occ_arti and occ_arti.startswith('EG'):
+            if occ_arti and (occ_arti.startswith('EG') or occ_arti.startswith('CONAI')):
                 continue
 
             # Query wms_items for the current occ_arti
