@@ -38,7 +38,12 @@ const WarehouseGridSystem = ({
           customText,
           rotateText = false,
           type = 'shelf',
-          direction = 'vertical' // New prop for shelf direction
+          direction = 'vertical',
+          showText = true,
+          borderTop = true,
+          borderBottom = true,
+          borderLeft = true,
+          borderRight = true
         } = section;
         
         boundaries[id] = {
@@ -116,8 +121,12 @@ const WarehouseGridSystem = ({
                     isBottomEdge: Math.floor(r / spanRow) === Math.floor((height - 1) / spanRow),
                     isLeftEdge: Math.floor(c / spanCol) === 0,
                     isRightEdge: Math.floor(c / spanCol) === Math.floor((width - 1) / spanCol),
-                    rotateText: rotateText
-        
+                    rotateText: rotateText,
+                    showText,
+                    borderTop,
+                    borderBottom,
+                    borderLeft,
+                    borderRight
                   };
                 } else {
                   newGrid[gridRow][gridCol] = {
@@ -167,10 +176,10 @@ const WarehouseGridSystem = ({
           classNames.push('highlighted');
         }
 
-        if (cell.isTopEdge) classNames.push('border-top');
-        if (cell.isBottomEdge) classNames.push('border-bottom');
-        if (cell.isLeftEdge) classNames.push('border-left');
-        if (cell.isRightEdge) classNames.push('border-right');
+        if (cell.borderTop) classNames.push('border-top');
+        if (cell.borderBottom) classNames.push('border-bottom');
+        if (cell.borderLeft) classNames.push('border-left');
+        if (cell.borderRight) classNames.push('border-right');
         
         return classNames.join(' ');
       }
@@ -215,25 +224,22 @@ const WarehouseGridSystem = ({
 
       if (cell?.type === 'shelf') {
         return (
-          
-            <div
-              className={getCellClassName(cell)}
-              onClick={() => onCellClick(cell.id)}
-              style={{
-                width: '100%',
-                textAlign:"center",
+          <div
+            className={getCellClassName(cell)}
+            onClick={() => onCellClick(cell.id)}
+            style={{
+              width: '100%',
+              textAlign:"center",
               height: '-webkit-fill-available',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                cursor: 'pointer',
-                writingMode: cell.rotateText ? 'vertical-rl' : 'none'
-
-              }}
-            >
-              {cell.id}
-            </div>
-          
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              writingMode: cell.rotateText ? 'vertical-rl' : 'none'
+            }}
+          >
+            {cell.showText && cell.id}
+          </div>
         );
       }
 
@@ -281,7 +287,9 @@ const WarehouseGridSystem = ({
           .shelf-cell {
             background: #e6f7ff;
             border: 0;
-          }
+            box-sizing: border-box;
+    margin: 0px 1px -1px 1px;
+              }
           .shelf-cell.available {
             background: white;
           }
@@ -295,16 +303,16 @@ const WarehouseGridSystem = ({
             background: #ffeb3b;
           }
           .shelf-cell.border-top {
-            border-top: 2px solid #000;
+            border-top: 1px solid #000;
           }
           .shelf-cell.border-bottom {
-            border-bottom: 2px solid #000;
+            border-bottom: 1px solid #000;
           }
           .shelf-cell.border-left {
-            border-left: 2px solid #000;
+            border-left: 1px solid #000;
           }
           .shelf-cell.border-right {
-            border-right: 2px solid #000;
+            border-right: 1px solid #000;
           }
           .custom-text-cell {
             background: #f0f0f0;
