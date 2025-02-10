@@ -293,7 +293,7 @@ def get_items():
         article_filter = request.args.get('articleFilter', default='', type=str)
         supplier_filter = request.args.get('supplierFilter', default='', type=str)
         filter_string = request.args.get('filterString', default='', type=str)
-        
+        description_string = request.args.get("descriptionFilter", default='', type=str)
         # Validate page and limit
         if page < 1:
             return jsonify({'error': 'Page number must be greater than 0.'}), 400
@@ -349,11 +349,11 @@ def get_items():
         if supplier_filter:
             id_art_query += " AND fornitore LIKE ?"
             id_art_params.append(f"%{supplier_filter}%")
+        
         if filter_string:
             id_art_query += " AND EXISTS (SELECT 1 FROM wms_items AS wi2 WHERE wi2.id_art = wms_items.id_art AND wi2.area = ? AND wi2.scaffale = ? AND wi2.colonna = ? AND wi2.piano = ?)"
             id_art_params.extend(filter_string.split('-'))
-
-        id_art_query += " GROUP BY id_art ORDER BY id_art "
+           
 
         cursor.execute(id_art_query, tuple(id_art_params))
         id_art_rows = cursor.fetchall()
@@ -1355,12 +1355,18 @@ def process_ordine_lavoro():
         """
         cursor.execute(query2, (gol_octi, gol_occo))
         rows = cursor.fetchall()
-
+        esci = False
         # Find the row after the known gol_ocri value
         found_row = None
+        next_row = None
+        
         for row in rows:
             if row.gol_ocri > gol_ocri:
                 found_row = row
+                esci = True
+            if esci:
+                next_row = row
+                print(next_row)
                 break
 
                 # If no subsequent row is found, set gol_ocri_new to a large number (e.g., max int)
@@ -1368,11 +1374,12 @@ def process_ordine_lavoro():
             gol_ocri_new = float('inf')  # No next row found, so consider all subsequent rows
         else:
             # Extract gol_octi, gol_occo, gol_ocri values from the found row
-            gol_octi_new, gol_occo_new, gol_ocri_new = found_row.gol_octi, found_row.gol_occo, found_row.gol_ocri
+            gol_octi_new, gol_occo_new, gol_ocri_new, prossimo_ordine = found_row.gol_octi, found_row.gol_occo, found_row.gol_ocri, next_row.gol_ocri
 
         # Extract gol_octi, gol_occo, gol_ocri values from the found row
 
         # Third query: Find rows in ocordic between gol_ocri (included) and gol_ocri_new (excluded)
+        print(prossimo_ordine)
         query3 = """
 SELECT 
     m.mpl_figlio AS occ_arti,
@@ -1415,14 +1422,8 @@ WHERE
     p.occ_tipo = ?
     AND p.occ_code = ? 
     AND p.occ_riga >= ?
-    AND p.occ_riga < (
-        SELECT MIN(p1.occ_riga)
-        FROM ocordic p1
-        WHERE p1.occ_arti IS NULL
-          AND p1.occ_tipo = ?
-          AND p1.occ_code = ?
-          AND p1.occ_riga >= ?
-    )
+    AND p.occ_riga < ?
+    
     AND NOT EXISTS (
         SELECT 1 
         FROM mplegami m 
@@ -1432,8 +1433,8 @@ WHERE
         params = (
             gol_octi, gol_occo, gol_ocri,  # First block
             gol_octi, gol_occo, gol_ocri,  # Subquery in first block
-            gol_octi, gol_occo, gol_ocri,  # Second block
-            gol_octi, gol_occo, gol_ocri   # Subquery in second block
+            gol_octi, gol_occo, gol_ocri,  # Subquery in second block
+            prossimo_ordine
         )
 
         cursor.execute(query3, params)
@@ -1457,7 +1458,7 @@ WHERE
 
             # First, check if this `occ_arti` is in `wms_proibiti`
              # Skip if occ_arti starts with 'EG' or '0S'
-            if occ_arti.startswith('EG') :
+            if occ_arti and occ_arti.startswith('EG'):
                 continue
 
             # Query wms_items for the current occ_arti

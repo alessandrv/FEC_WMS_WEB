@@ -115,7 +115,9 @@ const WarehouseGridSystem = ({
                     isTopEdge: Math.floor(r / spanRow) === 0,
                     isBottomEdge: Math.floor(r / spanRow) === Math.floor((height - 1) / spanRow),
                     isLeftEdge: Math.floor(c / spanCol) === 0,
-                    isRightEdge: Math.floor(c / spanCol) === Math.floor((width - 1) / spanCol)
+                    isRightEdge: Math.floor(c / spanCol) === Math.floor((width - 1) / spanCol),
+                    rotateText: rotateText
+        
                   };
                 } else {
                   newGrid[gridRow][gridCol] = {
@@ -213,7 +215,7 @@ const WarehouseGridSystem = ({
 
       if (cell?.type === 'shelf') {
         return (
-          <Tooltip title={tooltipContent(cell.id)}>
+          
             <div
               className={getCellClassName(cell)}
               onClick={() => onCellClick(cell.id)}
@@ -224,12 +226,14 @@ const WarehouseGridSystem = ({
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                cursor: 'pointer'
+                cursor: 'pointer',
+                writingMode: cell.rotateText ? 'vertical-rl' : 'none'
+
               }}
             >
               {cell.id}
             </div>
-          </Tooltip>
+          
         );
       }
 
@@ -245,7 +249,7 @@ const WarehouseGridSystem = ({
     }, [getCellClassName, onCellClick, tooltipContent]);
   
     return (
-      <div style={{ width: '100%', height: '80vh', overflow: 'auto' }}>
+      <div style={{ width: '100%', height: '80vh'}}>
         <div 
           style={{ 
             display: 'grid',

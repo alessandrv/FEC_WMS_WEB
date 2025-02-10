@@ -122,7 +122,9 @@ const [multiplePartialQuantity, setMultiplePartialQuantity] = useState(0);
 
       // Movimento API call
       const movimentoResponse = await axios.get(`${process.env.REACT_APP_API_URL}/api/movimento-coerenza?codice_articolo=${articoloCode}&codice_movimento=${movimentoCode}&codice_fornitore=${fornitoreCode}`);
-      if (movimentoResponse.data.coerenza) {
+      
+      // Check if movimentoResponse.data is not null or undefined
+      if (movimentoResponse.data && movimentoResponse.data.coerenza) {
         message.success('Informazioni coerenti');
         setIsDataConsistent(true);
         if (quantitaRef.current) {
@@ -712,7 +714,7 @@ const [multiplePartialQuantity, setMultiplePartialQuantity] = useState(0);
         footer={null}
         width="90%"
         maskClosable={false} // Prevent closing when clicking outside
-
+        style={{ top: '50%', transform: 'translateY(-50%)' }}
       >
        <ViewMagazzino
   onClose={() => setShowWarehouseModal(false)}

@@ -13,6 +13,7 @@ const GroupedItemsTable = () => {
   const [articleFilter, setArticleFilter] = useState('');
   const [supplierFilter, setSupplierFilter] = useState('');
   const [filterString, setFilterString] = useState('');
+  const [descriptionFilter, setDescriptionFilter] = useState('');
 
   // Pagination states
   const [currentPage, setCurrentPage] = useState(1);
@@ -151,132 +152,132 @@ const GroupedItemsTable = () => {
     2: [
       {
           id: 'E',
-          startRow: 10,
+          startRow: 11,
           startCol: 0,
-          width: 8,
+          width: 16,
           height: 5,
-          shelfPattern: 'regular'
+          shelfPattern: 'regular',
+          spanCol: 2
         },
         {
           id: 'R',
-          startRow: 4,
-          startCol: 2,
-          width: 5,  // Number of columns you want
-          height: 1,
+          startRow: 3,
+          startCol: 9,
+          width: 5,
+          height: 2,
           startingValue: 1,
-          shelfPattern: 'horizontal',  // Use 'horizontal' instead of 'regular'
-          startingFloor: 1
+          shelfPattern: 'horizontal',
+          startingFloor: 1,
+          rotateText: true,
+          spanRow:2
         },
         {
-          id: 'R',
+          id: 'R', 
           startRow: 5,
-          startCol: 2,
-          width: 5,  // Number of columns you want
-          height: 1,
+          startCol: 9,
+          width: 5,
+          height: 2,
           startingValue: 2,
-          shelfPattern: 'horizontal',  // Use 'horizontal' instead of 'regular'
-          startingFloor: 1
+          shelfPattern: 'horizontal',
+          startingFloor: 1,
+          rotateText: true,
+          spanRow:2
+
         },
         {
           id: 'R',
-          startRow: 6,
-
-          startCol: 2,
-          width: 5,  // Number of columns you want
-          height: 1,
+          startRow: 7,
+          startCol: 9,
+          width: 5,
+          height: 2,
           startingValue: 3,
-          shelfPattern: 'horizontal',  // Use 'horizontal' instead of 'regular'
-          startingFloor: 1
+          shelfPattern: 'horizontal',
+          startingFloor: 1,
+          rotateText: true,
+          spanRow:2
+
+          
         },
-
-        
-
         {
           id: 'S',
           startRow: 2,
-          startCol: 9,
-          width: 1,
+          startCol: 18,
+          width: 2,
           height: 11,
           startingFloor:-10,
           startingValue:1,
           spanRow: 11,
-          spanCol: 1,
+          spanCol: 2,
           shelfPattern: 'regular'
         },
         {
           id: 'R',
           startRow: 3,
-          startCol: 7,
-          width: 1,
-          height: 5,
+          startCol: 14,
+          width: 2,
+          height: 6,
           startingFloor:-4,
           startingValue:0,
-          spanRow: 5,
-          spanCol: 1,
-          shelfPattern: 'regular'
+          spanRow: 6,
+          spanCol: 2,
+          shelfPattern: 'regular',
         },
-        
         {
           id: 'TEXT2',
           type: 'customText',
           customText: '↓ UFFICI ↓',
-          rotateText: false, // or false for horizontal text
-          startRow: 14,
-          startCol: 8,
-          width: 1,
-          spanCol:1,
+          rotateText: false,
+          startRow: 15,
+          startCol: 16,
+          width: 2,
+          spanCol: 2,
           height: 1,
         },
         {
           id: 'TEXT3',
           type: 'customText',
           customText: 'POS. DOMENICO',
-          rotateText: false, // or false for horizontal text
+          rotateText: false,
           startRow: 0,
           startCol: 0,
-          width: 1,
-          
+          width: 2,
+          spanCol: 2,
           height: 1,
         },
         {
           id: 'TEXT8',
           type: 'customText',
           customText: '↑ MAGAZZINO ↑',
-          rotateText: false, // or false for horizontal text
+          rotateText: false,
           startRow: 0,
-          startCol: 1,
-          width: 1,
-          
+          startCol: 2,
+          width: 2,
+          spanCol: 2,
           height: 1,
-        }
-        , {
+        },
+        {
           id: 'TEXT9',
           type: 'customText',
-          customText: 'PRUDUZIONE',
-          rotateText: false, // or false for horizontal text
+          customText: 'PRODUZIONE',
+          rotateText: false,
           startRow: 2,
           startCol: 0,
-          width: 1,
-          
+          width: 2,
+          spanCol: 2,
           height: 7,
           spanRow: 7,
-        }
-        ,
+        },
         {
           id: 'TEXT4',
           type: 'customText',
           customText: '↑ MAGAZZINO ↑',
-          rotateText: false, // or false for horizontal text
+          rotateText: false,
           startRow: 0,
-          startCol: 8,
-          width: 1,
-          
+          startCol: 16,
+          width: 2,
+          spanCol: 2,
           height: 1,
         }
-        ,
-        
-  
-   
   ]
   };
     const getShelfStatus = (shelfId) => {
@@ -295,6 +296,7 @@ const GroupedItemsTable = () => {
           articleFilter,
           supplierFilter,
           filterString,
+          descriptionFilter,
         },
       });
 
@@ -324,10 +326,10 @@ const GroupedItemsTable = () => {
 
   // Add this effect to handle filter changes
   useEffect(() => {
-    if (articleFilter === '' && supplierFilter === '' && filterString === '') {
+    if (articleFilter === '' && supplierFilter === '' && filterString === '' && descriptionFilter === '') {
       fetchItems(1, pageSize);
     }
-  }, [articleFilter, supplierFilter, filterString]);
+  }, [articleFilter, supplierFilter, filterString, descriptionFilter]);
 
   // Function to apply filters and fetch data
   const applyFilters = () => {
@@ -340,6 +342,7 @@ const GroupedItemsTable = () => {
     setArticleFilter('');
     setSupplierFilter('');
     setFilterString('');
+    setDescriptionFilter('');
     setCurrentPage(1);
   };
 
@@ -398,8 +401,8 @@ else if (currentPage2 === 2) {
     return (
 <div>
 <WarehouseGridSystem
-GRID_ROWS = {15}
-GRID_COLS = {11}
+GRID_ROWS = {16}
+GRID_COLS = {22}
 warehouseLayout={layouts[2]}
 onCellClick={handleShelfClick}
 getShelfStatus={getShelfStatus}
@@ -555,8 +558,10 @@ highlightedShelves={highlightedShelves}
   onCancel={() => cancelModal()}
   footer={null}
   width="80%"
+  style={{top: '50%', transform: 'translateY(-50%)' }}
+
 >
-  <div style={{ maxHeight: '100%', overflowY: 'auto' }}>
+  <div style={{ maxHeight: '100%' }}>
     <div className="grid-container">
       {renderWarehouseSection()}
     </div>
@@ -599,6 +604,15 @@ highlightedShelves={highlightedShelves}
             placeholder="Search by Codice Fornitore"
             value={supplierFilter}
             onChange={(e) => setSupplierFilter(e.target.value)}
+            onKeyPress={handleKeyPress}
+            style={{ width: 200 }}
+          />
+        </Col>
+        <Col>
+          <Input
+            placeholder="Search by Descrizione"
+            value={descriptionFilter}
+            onChange={(e) => setDescriptionFilter(e.target.value)}
             onKeyPress={handleKeyPress}
             style={{ width: 200 }}
           />

@@ -125,132 +125,132 @@ const ViewMagazzino = ({
     2: [
       {
           id: 'E',
-          startRow: 10,
+          startRow: 11,
           startCol: 0,
-          width: 8,
+          width: 16,
           height: 5,
-          shelfPattern: 'regular'
+          shelfPattern: 'regular',
+          spanCol: 2
         },
         {
           id: 'R',
-          startRow: 4,
-          startCol: 2,
-          width: 5,  // Number of columns you want
-          height: 1,
+          startRow: 3,
+          startCol: 9,
+          width: 5,
+          height: 2,
           startingValue: 1,
-          shelfPattern: 'horizontal',  // Use 'horizontal' instead of 'regular'
-          startingFloor: 1
+          shelfPattern: 'horizontal',
+          startingFloor: 1,
+          rotateText: true,
+          spanRow:2
         },
         {
-          id: 'R',
+          id: 'R', 
           startRow: 5,
-          startCol: 2,
-          width: 5,  // Number of columns you want
-          height: 1,
+          startCol: 9,
+          width: 5,
+          height: 2,
           startingValue: 2,
-          shelfPattern: 'horizontal',  // Use 'horizontal' instead of 'regular'
-          startingFloor: 1
+          shelfPattern: 'horizontal',
+          startingFloor: 1,
+          rotateText: true,
+          spanRow:2
+
         },
         {
           id: 'R',
-          startRow: 6,
-
-          startCol: 2,
-          width: 5,  // Number of columns you want
-          height: 1,
+          startRow: 7,
+          startCol: 9,
+          width: 5,
+          height: 2,
           startingValue: 3,
-          shelfPattern: 'horizontal',  // Use 'horizontal' instead of 'regular'
-          startingFloor: 1
+          shelfPattern: 'horizontal',
+          startingFloor: 1,
+          rotateText: true,
+          spanRow:2
+
+          
         },
-
-        
-
         {
           id: 'S',
           startRow: 2,
-          startCol: 9,
-          width: 1,
+          startCol: 18,
+          width: 2,
           height: 11,
           startingFloor:-10,
           startingValue:1,
           spanRow: 11,
-          spanCol: 1,
+          spanCol: 2,
           shelfPattern: 'regular'
         },
         {
           id: 'R',
           startRow: 3,
-          startCol: 7,
-          width: 1,
-          height: 5,
+          startCol: 14,
+          width: 2,
+          height: 6,
           startingFloor:-4,
           startingValue:0,
-          spanRow: 5,
-          spanCol: 1,
-          shelfPattern: 'regular'
+          spanRow: 6,
+          spanCol: 2,
+          shelfPattern: 'regular',
         },
-        
         {
           id: 'TEXT2',
           type: 'customText',
           customText: '↓ UFFICI ↓',
-          rotateText: false, // or false for horizontal text
-          startRow: 14,
-          startCol: 8,
-          width: 1,
-          spanCol:1,
+          rotateText: false,
+          startRow: 15,
+          startCol: 16,
+          width: 2,
+          spanCol: 2,
           height: 1,
         },
         {
           id: 'TEXT3',
           type: 'customText',
           customText: 'POS. DOMENICO',
-          rotateText: false, // or false for horizontal text
+          rotateText: false,
           startRow: 0,
           startCol: 0,
-          width: 1,
-          
+          width: 2,
+          spanCol: 2,
           height: 1,
         },
         {
           id: 'TEXT8',
           type: 'customText',
           customText: '↑ MAGAZZINO ↑',
-          rotateText: false, // or false for horizontal text
+          rotateText: false,
           startRow: 0,
-          startCol: 1,
-          width: 1,
-          
+          startCol: 2,
+          width: 2,
+          spanCol: 2,
           height: 1,
-        }
-        , {
+        },
+        {
           id: 'TEXT9',
           type: 'customText',
-          customText: 'PRUDUZIONE',
-          rotateText: false, // or false for horizontal text
+          customText: 'PRODUZIONE',
+          rotateText: false,
           startRow: 2,
           startCol: 0,
-          width: 1,
-          
+          width: 2,
+          spanCol: 2,
           height: 7,
           spanRow: 7,
-        }
-        ,
+        },
         {
           id: 'TEXT4',
           type: 'customText',
           customText: '↑ MAGAZZINO ↑',
-          rotateText: false, // or false for horizontal text
+          rotateText: false,
           startRow: 0,
-          startCol: 8,
-          width: 1,
-          
+          startCol: 16,
+          width: 2,
+          spanCol: 2,
           height: 1,
         }
-        ,
-        
-  
-   
   ]
   };
   
@@ -282,8 +282,8 @@ else if (currentPage === 2) {
     return (
 <div>
 <WarehouseGridSystem
-GRID_ROWS = {15}
-GRID_COLS = {11}
+GRID_ROWS = {16}
+GRID_COLS = {22}
 warehouseLayout={layouts[2]}
 onCellClick={handleShelfClick}
 getShelfStatus={getShelfStatus}
@@ -378,7 +378,6 @@ const postMultipleShelfData = async (data) => {
   const handleBarcodeScan = (event) => {
     if (event.key === 'Enter') {
       const scannedValue = event.target.value.trim();
-  
       const [area, scaffale, colonna, piano] = scannedValue.split('-');
       const shelfData = shelvesData.find(s =>
         s.area === area &&
@@ -386,22 +385,22 @@ const postMultipleShelfData = async (data) => {
         s.colonna === colonna &&
         s.piano === piano.toString()
       );
-  
+
       if (!shelfData) {
         message.error(`Scaffale scansionato non presente nel database: ${scannedValue}`);
         event.target.value = '';
         return;
       }
-  
+
       const hasEnoughSpace = (shelfData.volume_libero - totalVolumeRequired) > 0;
-  
+
       if (!hasEnoughSpace) {
         message.error(`Lo scaffale ${scannedValue} risulta pieno.`);
         event.target.value = '';
         return;
       }
       setHighlightedShelf(scannedValue);
-  
+
       const confirmPlacement = () => {
         // Group items by articoloCode and keep original items
         const groupedItems = selectedItems.reduce((acc, item) => {
@@ -476,7 +475,6 @@ const postMultipleShelfData = async (data) => {
                   <p><strong>Articoli da depositare:</strong></p>
                   <ul style={{ 
                     maxHeight: '300px', 
-                    overflowY: 'auto',
                     listStyle: 'none',
                     padding: 0
                   }}>
