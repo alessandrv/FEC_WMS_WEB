@@ -1324,10 +1324,7 @@ const handleMovimentoLocationSearch = async () => {
     }, []);
 
     setLocationItems(groupedItems);
-    if (groupedItems.length < 1){
-      message.error(`Trovati ${groupedItems.length} articoli per il movimento e locazioni inseriti`);
-
-    }
+ 
   } catch (error) {
     console.error('Search error:', error);
     message.error('Errore nella ricerca');
@@ -1802,13 +1799,7 @@ return (
         Trasferisci selezionati ({selectedRows.length})
       </Button>
       
-      <Button
-        type="primary"
-        onClick={() => handleTransferInitiation(true)}
-        disabled={selectedRows.length === 0}
-      >
-        Trasferimento parziale
-      </Button>
+      
     </div>
   )}
 />
