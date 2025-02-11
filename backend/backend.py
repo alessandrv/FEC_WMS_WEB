@@ -2415,6 +2415,39 @@ def get_movimento_location_items():
             cursor.close()
         if 'conn' in locals():
             conn.close()
+
+@app.route('/api/item-locations', methods=['GET'])
+def get_item_locations():
+    articolo = request.args.get('articolo')
+    
+    try:
+        conn = connect_to_db()
+        cursor = conn.cursor()
+        
+        query = """
+        SELECT 
+            area, scaffale, colonna, piano, SUM(qta) as total_qta
+        FROM wms_items
+        WHERE id_art = ?
+        GROUP BY area, scaffale, colonna, piano
+        ORDER BY
+            CASE WHEN scaffale IN ('S', 'R') THEN 1 ELSE 0 END,
+            area,
+            scaffale,
+            colonna,
+            piano
+        """
+        cursor.execute(query, (articolo,))
+        rows = cursor.fetchall()
+        
+        return jsonify([dict(row) for row in rows]), 200
+        
+    except pyodbc.Error as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if 'cursor' in locals(): cursor.close()
+        if 'conn' in locals(): conn.close()
+
 if __name__ == '__main__':
     # Run with SSL context for HTTPS
     app.run(host='172.16.16.66', port=5000, debug=True, 

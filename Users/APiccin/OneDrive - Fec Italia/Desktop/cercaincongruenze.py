@@ -153,5 +153,68 @@ def check_quantity_differences():
             connection.close()
             print("\nDatabase connection closed.")
 
+def compare_inventory_files(old_file, new_file):
+    """Compare two inventory files and exclude matching location quantities"""
+    try:
+        # Read first file and collect location quantities
+        existing_combinations = set()
+        with open(old_file, 'r') as f:
+            reader = csv.DictReader(f)
+            if not reader.fieldnames or 'Location_Qty/WMS_Total' not in reader.fieldnames:
+                raise ValueError("Invalid first file format - missing required columns")
+            
+            for row in reader:
+                # Create unique key with article + location + quantity
+                combo_key = (row['Article_ID'], 
+                           row['Location'],
+                           row['Location_Qty/WMS_Total'].split('/')[0])
+                existing_combinations.add(combo_key)
+
+        # Process second file and filter results
+        filtered_rows = []
+        with open(new_file, 'r') as f:
+            reader = csv.DictReader(f)
+            if not reader.fieldnames or 'Location_Qty/WMS_Total' not in reader.fieldnames:
+                raise ValueError("Invalid second file format - missing required columns")
+            
+            fieldnames = reader.fieldnames
+            for row in reader:
+                current_qty = row['Location_Qty/WMS_Total'].split('/')[0]
+                current_key = (row['Article_ID'], row['Location'], current_qty)
+                
+                # Only keep rows that don't exist in first file
+                if current_key not in existing_combinations:
+                    filtered_rows.apppend(row)
+
+        # Generate output filename
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_file = f'filtered_comparison_{timestamp}.csv'
+        
+        # Write filtered results
+        if filtered_rows:
+            with open(output_file, 'w', newline='') as f:
+                writer = csv.DictWriter(f, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(filtered_rows)
+            
+            print(f"\nFiltered file created: {output_file}")
+            print(f"Original rows: {len(filtered_rows) + len(existing_combinations)}")
+            print(f"New unique rows: {len(filtered_rows)}")
+            print(f"Duplicates removed: {len(existing_combinations) - (len(filtered_rows) + len(existing_combinations) - len(existing_combinations))}")
+        else:
+            print("No new unique entries found in second file")
+
+    except Exception as e:
+        print(f"Error comparing files: {str(e)}")
+
 if __name__ == "__main__":
-    check_quantity_differences()
+    
+        
+    
+        check_quantity_differences()
+        file1 = input("Allineamento nuovo: ")
+        file2 = input("Allineamento vecchio: ")
+        compare_inventory_files(file1, file2)
+
+
+        

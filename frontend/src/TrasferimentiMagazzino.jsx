@@ -1,16 +1,17 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Input, Tabs, Typography, Button, message, Modal, Table, Tooltip, InputNumber, Spin, Pagination, Card, Form, Alert } from 'antd';
+import { Input, Tabs, Typography, Button, message, Modal,notification, Table, Tooltip,Tag, InputNumber,Row, Space, Col, Spin, Pagination, Card, Form, Alert } from 'antd';
 import axios from 'axios';
-import {InfoCircleOutlined } from '@ant-design/icons';
+import {InfoCircleOutlined, CloseCircleOutlined } from '@ant-design/icons';
 
 import WarehouseGrid from './GridComponent';
 import './App.css'; // Make sure to import your CSS
 import WarehouseGridSystem from './WarehouseGridSystem';
 import { LoadingOutlined } from '@ant-design/icons';
 import ViewMagazzino from './ViewMagazzino';
-const { Title } = Typography;
-
+const { Text } = Typography;
 const App = () => {
+  const [activeTab, setActiveTab] = useState('1');
+
   const [otp, setOtp] = useState(['', '', '', '']);
   const inputRefs = [useRef(), useRef(), useRef(), useRef()];
   const articoloRef = useRef(null);
@@ -19,7 +20,19 @@ const App = () => {
   const [fornitoreCode, setFornitoreCode] = useState('');
   const [movimentoCode, setMovimentoCode] = useState('');
   const [transferQuantity, setTransferQuantity] = useState(1);
-  
+  const [reservedQuantities, setReservedQuantities] = useState({}); // Format: { 'articleCode-location': quantity }
+  const [magazziniArticles, setMagazziniArticles] = useState([]);
+  const [magazziniLoading, setMagazziniLoading] = useState(false);
+  const [articleLocations, setArticleLocations] = useState({});
+  const [locationChangeModalVisible, setLocationChangeModalVisible] = useState(false);
+const [changeLocationQuantityModalVisible, setChangeLocationQuantityModalVisible] = useState(false);
+const [selectedLocation, setSelectedLocation] = useState(null);
+const [selectedQuantity, setSelectedQuantity] = useState(0);
+const [maxAvailableQuantity, setMaxAvailableQuantity] = useState(0);
+const [selectedRowId, setSelectedRowId] = useState(null);
+const [articleFilter, setArticleFilter] = useState('');
+const [locationData, setLocationData] = useState([]); // Renamed from dataSource
+const [highlightedRows] = useState(new Set());
   const[isTransferConfirmationOpen, setIsTransferConfirmationOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -56,7 +69,473 @@ const App = () => {
   const [transferConfirmationVisible, setTransferConfirmationVisible] = useState(false);
   const [pendingTransferData, setPendingTransferData] = useState(null);
   const [partialQuantity, setPartialQuantity] = useState(0);
+  const [selectedTransferItems, setSelectedTransferItems] = useState([]);
 
+
+  const handleLocationChangeMagazzini = (location) => {
+    if (!selectedRowId) {
+      message.error('Nessuna riga selezionata');
+      return;
+    }
+  
+    const selectedArticle = magazziniArticles.find(article => article.id === selectedRowId);
+    if (!selectedArticle) {
+      message.error('Articolo non trovato');
+      return;
+    }
+  
+    // Make sure we're using the correct properties from the location object
+    const locationData = {
+      area: location.area,
+      scaffale: location.scaffale,
+      colonna: location.colonna,
+      piano: location.piano,
+      qta: location.qta || location.totalQta // Handle both possible property names
+    };
+  
+    setSelectedLocation(locationData);
+    setMaxAvailableQuantity(parseFloat(locationData.qta));
+    setSelectedQuantity(Math.min(parseFloat(locationData.qta), parseFloat(selectedArticle.gim_qmov)));
+    setChangeLocationQuantityModalVisible(true);
+    setLocationChangeModalVisible(false);
+  };
+
+  const fetchLocations = async (articleCode) => {
+    try {
+      setLoading(true);
+      const response = await axios.get(`${process.env.REACT_APP_API_URL}/api/get-items`, {
+        params: {
+          articleFilter: articleCode
+        },
+      });
+  
+      if (response.data && response.data.items) {
+        setLocationData(response.data.items);
+      } else {
+        setLocationData([]);
+      }
+    } catch (error) {
+      console.error('Error fetching locations:', error);
+      message.error('Errore nel caricamento delle locazioni');
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  const groupLocations = (subItems, articleCode) => {
+    if (!subItems) return [];
+    
+    const groupedMap = new Map();
+  
+    subItems.forEach(item => {
+      const key = `${item.area}-${item.scaffale}-${item.colonna}-${item.piano}`;
+      
+      if (groupedMap.has(key)) {
+        const existing = groupedMap.get(key);
+        groupedMap.set(key, {
+          ...existing,
+          qta: parseInt(existing.qta || 0) + parseInt(item.qta || 0)
+        });
+      } else {
+        groupedMap.set(key, {
+          area: item.area,
+          scaffale: item.scaffale,
+          colonna: item.colonna,
+          piano: item.piano,
+          qta: parseInt(item.qta || 0),
+          key
+        });
+      }
+    });
+  
+    // Calculate available quantities considering reservations per article
+    const locations = Array.from(groupedMap.values()).map(location => {
+      const locationKey = `${articleCode}-${location.area}-${location.scaffale}-${location.colonna}-${location.piano}`;
+      const reservedQty = reservedQuantities[locationKey] || 0;
+      const availableQty = Math.max(0, location.qta - reservedQty);
+      
+      return {
+        ...location,
+        totalQta: location.qta,
+        qta: availableQty,
+        reserved: reservedQty
+      };
+    });
+  
+    return locations.sort((a, b) => {
+      const locA = `${a.area}-${a.scaffale}-${a.colonna}-${a.piano}`;
+      const locB = `${b.area}-${b.scaffale}-${b.colonna}-${b.piano}`;
+      return locA.localeCompare(locB);
+    });
+  };
+  
+  const locationColumns = [
+    {
+      title: 'Posizione',
+      key: 'location',
+      width: '60%',
+      render: (_, record) => `${record.area}-${record.scaffale}-${record.colonna}-${record.piano}`,
+      sorter: (a, b) => {
+        const locA = `${a.area}-${a.scaffale}-${a.colonna}-${a.piano}`;
+        const locB = `${b.area}-${b.scaffale}-${b.colonna}-${b.piano}`;
+        return locA.localeCompare(locB);
+      }
+    },
+    {
+      title: 'Quantità',
+      key: 'qta',
+      width: '20%',
+      render: (_, record) => (
+        <span>
+          {record.qta}/{record.totalQta}
+          {record.reserved > 0 && (
+            <Tag color="orange" style={{ marginLeft: 8 }}>
+              {record.reserved} riservati
+            </Tag>
+          )}
+        </span>
+      )
+    },
+    {
+      title: 'Azioni',
+      key: 'actions',
+      width: '20%',
+      render: (_, record) => (
+        <Button
+          type="primary"
+          size="small"
+          onClick={() => handleLocationChangeMagazzini(record)}
+          disabled={record.qta === 0}
+        >
+          Seleziona
+        </Button>
+      ),
+    }
+  ];
+
+
+  const handleChangeLocationQuantityModalClose = () => {
+    setChangeLocationQuantityModalVisible(false);
+    setSelectedLocation(null);
+    setSelectedQuantity(0);
+  };
+  const handleLocationQuantityChange = () => {
+    try {
+      let updatedTableData = [...magazziniArticles];
+      const rowToUpdate = updatedTableData.find(row => row.id === selectedRowId);
+      const locationKey = `${selectedLocation.area}-${selectedLocation.scaffale}-${selectedLocation.colonna}-${selectedLocation.piano}`;
+  
+      const isFullQuantity = parseInt(selectedQuantity, 10) === parseInt(rowToUpdate.gim_qmov, 10);
+  
+      if (isFullQuantity) {
+        // Full quantity move logic
+        if (rowToUpdate.location) {
+          const oldLocationKey = `${rowToUpdate.location.area}-${rowToUpdate.location.scaffale}-${rowToUpdate.location.colonna}-${rowToUpdate.location.piano}`;
+          setReservedQuantities(prev => ({
+            ...prev,
+            [oldLocationKey]: Math.max(0, (prev[oldLocationKey] || 0) - (rowToUpdate.reservedQuantity || 0))
+          }));
+        }
+  
+        const existingRows = updatedTableData.filter(row => 
+          row.location && 
+          row.gim_arti === rowToUpdate.gim_arti &&
+          row.location.area === selectedLocation.area &&
+          row.location.scaffale === selectedLocation.scaffale &&
+          row.location.colonna === selectedLocation.colonna &&
+          row.location.piano === selectedLocation.piano &&
+          row.id !== rowToUpdate.id
+        );
+  
+        if (existingRows.length > 0) {
+          // Free up reserved quantities for all rows being merged
+          existingRows.forEach(row => {
+            const rowLocationKey = `${row.location.area}-${row.location.scaffale}-${row.location.colonna}-${row.location.piano}`;
+            setReservedQuantities(prev => ({
+              ...prev,
+              [rowLocationKey]: Math.max(0, (prev[rowLocationKey] || 0) - (row.reservedQuantity || 0))
+            }));
+          });
+  
+          // Merge with existing rows
+          const existingRowIndex = updatedTableData.indexOf(existingRows[0]);
+          const totalQuantity = existingRows.reduce((sum, row) =>
+            sum + parseInt(row.gim_qmov, 10), 0) + parseInt(selectedQuantity, 10);
+  
+          updatedTableData[existingRowIndex] = {
+            ...existingRows[0],
+            gim_qmov: totalQuantity,
+            reservedQuantity: totalQuantity
+          };
+  
+          // Remove other rows
+          const rowsToRemove = new Set([
+            ...existingRows.slice(1).map(row => row.id),
+            rowToUpdate.id
+          ]);
+          updatedTableData = updatedTableData.filter(row => !rowsToRemove.has(row.id));
+  
+          // Update reserved quantities for the merged location
+          setReservedQuantities(prev => ({
+            ...prev,
+            [locationKey]: totalQuantity
+          }));
+        } else {
+          // Just update location
+          const rowIndex = updatedTableData.indexOf(rowToUpdate);
+          updatedTableData[rowIndex] = {
+            ...rowToUpdate,
+            location: selectedLocation,
+            reservedQuantity: parseInt(selectedQuantity, 10)
+          };
+  
+          // Update reserved quantities
+          setReservedQuantities(prev => ({
+            ...prev,
+            [locationKey]: (prev[locationKey] || 0) + parseInt(selectedQuantity, 10)
+          }));
+        }
+      } else {
+        // Partial quantity move logic
+        const remainingQuantity = parseInt(rowToUpdate.gim_qmov, 10) - parseInt(selectedQuantity, 10);
+        const rowIndex = updatedTableData.indexOf(rowToUpdate);
+  
+        if (rowToUpdate.location) {
+          // If the row already had a location, update its reserved quantity
+          const oldLocationKey = `${rowToUpdate.location.area}-${rowToUpdate.location.scaffale}-${rowToUpdate.location.colonna}-${rowToUpdate.location.piano}`;
+          
+          if (oldLocationKey === locationKey) {
+            // If selecting the same location, don't modify reserved quantities
+            // They will be updated at the end
+          } else {
+            // If selecting a different location, reduce the reserved quantity by the amount being moved
+            setReservedQuantities(prev => ({
+              ...prev,
+              [oldLocationKey]: Math.max(0, (prev[oldLocationKey] || 0) - parseInt(selectedQuantity, 10))
+            }));
+          }
+        }
+        
+        // Update original row with remaining quantity
+        updatedTableData[rowIndex] = {
+          ...rowToUpdate,
+          gim_qmov: remainingQuantity,
+          reservedQuantity: remainingQuantity
+        };
+  
+        // Check for existing rows with same location
+        const existingRows = updatedTableData.filter(row => 
+          row.location && 
+          row.gim_arti === rowToUpdate.gim_arti &&
+          row.location.area === selectedLocation.area &&
+          row.location.scaffale === selectedLocation.scaffale &&
+          row.location.colonna === selectedLocation.colonna &&
+          row.location.piano === selectedLocation.piano &&
+          row.id !== rowToUpdate.id
+        );
+  
+        if (existingRows.length > 0) {
+          // Add to existing row
+          const existingRowIndex = updatedTableData.indexOf(existingRows[0]);
+          const totalQuantity = existingRows.reduce((sum, row) =>
+            sum + parseInt(row.gim_qmov, 10), 0) + parseInt(selectedQuantity, 10);
+  
+          updatedTableData[existingRowIndex] = {
+            ...existingRows[0],
+            gim_qmov: totalQuantity,
+            reservedQuantity: totalQuantity
+          };
+  
+          // Remove other existing rows
+          const rowsToRemove = new Set(existingRows.slice(1).map(row => row.id));
+          updatedTableData = updatedTableData.filter(row => !rowsToRemove.has(row.id));
+  
+          // Update reserved quantities for the merged location
+          setReservedQuantities(prev => ({
+            ...prev,
+            [locationKey]: (prev[locationKey] || 0) + parseInt(selectedQuantity, 10)
+          }));
+        } else {
+          // Create new row
+          const newRow = {
+            ...rowToUpdate,
+            id: generateUUID(),
+            gim_qmov: parseInt(selectedQuantity, 10),
+            location: selectedLocation,
+            reservedQuantity: parseInt(selectedQuantity, 10)
+          };
+          updatedTableData.splice(rowIndex + 1, 0, newRow);
+  
+          // Update reserved quantities
+          setReservedQuantities(prev => ({
+            ...prev,
+            [locationKey]: (prev[locationKey] || 0) + parseInt(selectedQuantity, 10)
+          }));
+        }
+      }
+  
+      setMagazziniArticles(updatedTableData);
+      
+      notification.success({
+        message: 'Successo',
+        description: 'Posizione aggiornata con successo',
+        placement: 'bottomRight',
+      });
+  
+      handleChangeLocationQuantityModalClose();
+      handleLocationChangeModalClose();
+    } catch (error) {
+      console.error('Error updating location:', error);
+      notification.error({
+        message: 'Errore',
+        description: 'Errore durante l\'aggiornamento della posizione.',
+        placement: 'bottomRight',
+      });
+    }
+  };
+  const handleLocationChangeModalClose = () => {
+    setLocationChangeModalVisible(false);
+    setChangeLocationQuantityModalVisible(false);
+  };
+
+  
+
+// Add handler for warehouse map selection
+const handleMagazziniTransferComplete = (destLocation) => {
+  setHighlightedShelf(destLocation);
+  setIsLocationWarehouseMapOpen(false);
+  
+  const [scaffaleDest, colonnaDest, pianoDest] = destLocation.split('-');
+  const areaDest = 'A';
+
+  // Create the transfer data structure
+  const transferItems = selectedTransferItems.map(item => ({
+    articolo: item.gim_arti,
+    quantity: transferQuantity,
+    source: `${item.location.area}-${item.location.scaffale}-${item.location.colonna}-${item.location.piano}`,
+    destination: `${areaDest}-${scaffaleDest}-${colonnaDest}-${pianoDest}`,
+    fornitore: item.gim_forn || ''
+  }));
+
+  setPendingTransferData({
+    destLocation: {
+      areaDest,
+      scaffaleDest,
+      colonnaDest,
+      pianoDest
+    },
+    items: transferItems,
+    sourceLocations: selectedTransferItems.map(item => item.location)
+  });
+
+  setTransferConfirmationVisible(true);
+};
+
+// Add the transfer confirmation modal
+
+
+  const handleMagazziniSearch = async (movimentoCode) => {
+  setReservedQuantities({});
+    setMagazziniLoading(true);
+    try {
+      // First fetch articles for the movimento
+      const movimentoResponse = await axios.get(`${process.env.REACT_APP_API_URL}/api/get-articoli-movimento`, {
+        params: { movimento: movimentoCode }
+      });
+  
+      if (!movimentoResponse.data || !Array.isArray(movimentoResponse.data)) {
+        throw new Error('Invalid API response format');
+      }
+  
+      const articles = movimentoResponse.data.map(item => ({
+        id: generateUUID(),
+        gim_arti: item.gim_arti || '',
+        gim_desc: item.gim_desc || '',
+        gim_des2: item.gim_des2 || '',
+        gim_qmov: item.gim_qmov || 0
+      }));
+  
+      setMagazziniArticles(articles);
+  
+      // Then fetch locations for each article
+      const locationsMap = {};
+    
+  
+      setArticleLocations(locationsMap);
+    } catch (error) {
+      console.error('Error fetching movimento articles:', error);
+      message.error('Errore durante la ricerca. Riprova.');
+    } finally {
+      setMagazziniLoading(false);
+    }
+  };
+  const magazziniColumns = [
+    {
+      title: 'Codice Articolo',
+      dataIndex: 'gim_arti',
+      key: 'gim_arti',
+    },
+    {
+      title: 'Descrizione',
+      dataIndex: 'gim_desc',
+      key: 'gim_desc',
+    },
+    {
+      title: 'Quantità',
+      dataIndex: 'gim_qmov',
+      key: 'gim_qmov',
+      render: (text) => parseInt(text, 10) // Convert to integer
+    },
+    {
+      title: 'Posizione',
+      key: 'location',
+      render: (_, record) => (
+        <Tag 
+          color={record.location ? 'geekblue' : 'red'} 
+          style={{ 
+            cursor: record.transferred ? 'not-allowed' : 'pointer',
+            opacity: record.transferred ? 0.6 : 1
+          }}
+          onClick={() => !record.transferred && handleLocationChangeModalVisible(record.gim_arti, record.id)}
+        >
+          {record.location ? (
+            <Space>
+              {`${record.location.area}-${record.location.scaffale}-${record.location.colonna}-${record.location.piano}`}
+              {!record.transferred && (
+                <CloseCircleOutlined 
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleRemoveLocation(record);
+                  }}
+                />
+              )}
+            </Space>
+          ) : record.transferred ? 'Trasferito' : 'Seleziona Posizione'}
+        </Tag>
+      ),
+    }
+  ];
+  
+  const handleRemoveLocation = (record) => {
+    const locationKey = `${record.location.area}-${record.location.scaffale}-${record.location.colonna}-${record.location.piano}`;
+    
+    setReservedQuantities(prev => ({
+      ...prev,
+      [locationKey]: Math.max(0, (prev[locationKey] || 0) - (record.reservedQuantity || 0))
+    }));
+  
+    const updatedTableData = [...magazziniArticles];
+    const rowIndex = updatedTableData.findIndex(row => row.id === record.id);
+    
+    if (rowIndex !== -1) {
+      updatedTableData[rowIndex] = {
+        ...record,
+        location: null,
+        reservedQuantity: 0
+      };
+      setMagazziniArticles(updatedTableData);
+    }
+  };
   const generateUUID = () => {
     return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
       const r = Math.random() * 16 | 0;
@@ -76,13 +555,7 @@ const App = () => {
     return selectedItems.every(item => item?.gim_qmov === firstQuantity);
   };
   
-  const handleMultiplePartialDeposit = () => {
-    const selectedItem = articoliMovimento.find(item => item.id === selectedRows[0]);
-    if (selectedItem) {
-      setMultiplePartialQuantity(selectedItem.gim_qmov);
-      setShowMultiplePartialDepositModal(true);
-    }
-  };
+
   
   const handleShelfClick = (shelf) => {
     setHighlightedShelf(shelf);
@@ -384,7 +857,6 @@ const handleMovimentoInputConfirm = async () => {
     setLoadingArticoli(false);
   }
 };
-
 const handleTransfer = async (quantity) => {
   setLoading(true);
   try {
@@ -396,7 +868,6 @@ const handleTransfer = async (quantity) => {
       articolo: articoloCode,
       quantity: quantity,
     };
-
     const response = await fetch(`${process.env.REACT_APP_API_URL}/api/initiate-transfer`, {
       method: 'POST',
       headers: {
@@ -404,11 +875,9 @@ const handleTransfer = async (quantity) => {
       },
       body: JSON.stringify(payload),
     });
-
     if (!response.ok) {
       throw new Error('Network response was not ok');
     }
-
     message.success('Trasferimento avviato con successo');
     setIsModalOpen(false);
   } catch (error) {
@@ -418,6 +887,7 @@ const handleTransfer = async (quantity) => {
     setLoading(false);
   }
 };
+
 
 const renderWarehouseSection = () => {
   if (currentPage === 1) {
@@ -437,8 +907,8 @@ else if (currentPage === 2) {
     return (
 <div>
 <WarehouseGridSystem
-GRID_ROWS = {16}
-GRID_COLS = {22}
+GRID_ROWS = {15}
+GRID_COLS = {11}
 warehouseLayout={layouts[2]}
 onCellClick={handleShelfClick}
 getShelfStatus={getShelfStatus}
@@ -541,6 +1011,7 @@ quantity : transferQuantity,
   } finally {
     setLoading(false);
   }
+  
 };
   
 const getTooltipContent = (shelf) => {
@@ -853,7 +1324,10 @@ const handleMovimentoLocationSearch = async () => {
     }, []);
 
     setLocationItems(groupedItems);
-    message.success(`Trovati ${groupedItems.length} articoli`);
+    if (groupedItems.length < 1){
+      message.error(`Trovati ${groupedItems.length} articoli per il movimento e locazioni inseriti`);
+
+    }
   } catch (error) {
     console.error('Search error:', error);
     message.error('Errore nella ricerca');
@@ -898,18 +1372,17 @@ const checkLocationRowsQuantity = () => {
   
 };
 
-const handleLocationMultiplePartial = async () => {
+const handleLocationMultiplePartial = () => {
   if (selectedLocationRows.length === 0) return;
   
   const minQuantity = Math.min(...selectedLocationRows.map(id => {
     const item = locationItems.find(i => i.id === id);
     return item ? item.qta : 0;
   }));
-
-  await setMultiplePartialQuantity(minQuantity);
+  
+  setMultiplePartialQuantity(minQuantity);
   setShowMultiplePartialDepositModal(true);
 };
-
 const handleLocationTransferComplete = (destLocation) => {
   setHighlightedShelf(destLocation);
   setIsLocationWarehouseMapOpen(false);
@@ -917,30 +1390,61 @@ const handleLocationTransferComplete = (destLocation) => {
   setPendingTransferData(prev => {
     const [scaffaleDest, colonnaDest, pianoDest] = destLocation.split('-');
     const areaDest = 'A';
-    const [srcArea, srcScaffale, srcColonna, srcPiano] = locationOTP;
 
-    const items = selectedLocationRows.map(id => {
-      const item = locationItems.find(i => i.id === id);
-      return item ? {
-        articolo: item.id_art,
-        quantity: multiplePartialQuantity > 0 
-          ? Math.min(multiplePartialQuantity, item.qta)
-          : item.qta,
-        source: `${srcArea}-${srcScaffale}-${srcColonna}-${srcPiano}`,
+    // Handle Trasferimento da Movimento (tab "2")
+    if (activeTab === '2') {
+      const [srcArea, srcScaffale, srcColonna, srcPiano] = locationOTP;
+
+      const items = selectedLocationRows.map(id => {
+        const item = locationItems.find(i => i.id === id);
+        return item ? {
+          articolo: item.id_art,
+          quantity: multiplePartialQuantity > 0 
+            ? Math.min(multiplePartialQuantity, item.qta)
+            : item.qta,
+          source: `${srcArea}-${srcScaffale}-${srcColonna}-${srcPiano}`,
+          destination: `${areaDest}-${scaffaleDest}-${colonnaDest}-${pianoDest}`
+        } : null;
+      }).filter(Boolean);
+
+      return {
+        destLocation: {
+          areaDest,
+          scaffaleDest,
+          colonnaDest,
+          pianoDest
+        },
+        items,
+        sourceLocation: locationOTP
+      };
+    }
+    
+    // Handle Trasferimento tra Magazzini (tab "3")
+    else if (activeTab === '3') {
+      const items = selectedTransferItems.map(item => ({
+        articolo: item.gim_arti,
+        quantity: parseInt(item.gim_qmov, 10), // Use each item's specific quantity
+        source: item.location ? `${item.location.area}-${item.location.scaffale}-${item.location.colonna}-${item.location.piano}` : '',
         destination: `${areaDest}-${scaffaleDest}-${colonnaDest}-${pianoDest}`
-      } : null;
-    }).filter(Boolean);
+      }));
+  
+      return {
+        destLocation: {
+          areaDest,
+          scaffaleDest,
+          colonnaDest,
+          pianoDest
+        },
+        items,
+        sourceLocations: selectedTransferItems.map(item => item.location)
+      };
+    }
 
-    return {
-      destLocation: {
-        areaDest,
-        scaffaleDest,
-        colonnaDest,
-        pianoDest
-      },
-      items,
-      sourceLocation: locationOTP
-    };
+    // Handle Trasferimento Singolo (tab "1") if needed
+    else {
+      // Add logic for tab "1" if necessary
+      return prev;
+    }
   });
 
   setTransferConfirmationVisible(true);
@@ -971,82 +1475,75 @@ const MultiplePartialTransferModal = () => {
     const item = locationItems.find(i => i.id === id);
     return Math.min(min, item?.qta || 0);
   }, Infinity);
-
-  return (
-    <Modal
-      title="Trasferimento Parziale Multiplo"
-      visible={showMultiplePartialDepositModal}
-      onCancel={() => setShowMultiplePartialDepositModal(false)}
-      onOk={handleMultiplePartialConfirm}
-      okText="Procedi con trasferimento"
-      cancelText="Annulla"
-    >
-      <div>
-        <p><strong>Articoli selezionati:</strong> {selectedLocationRows.length}</p>
-        <p>
-          <strong>Quantità trasferibile:</strong> {minQuantity}
-          <Tooltip title="Quantità massima trasferibile impostata in base all'articolo selezionato con quantità minore">
-            <InfoCircleOutlined style={{ marginLeft: '8px' }} />
-          </Tooltip>
-        </p>
-        
-        <Form.Item
-          label="Quantità da trasferire per ogni articolo"
-          help={`Massimo trasferibile: ${minQuantity}`}
-        >
-          <InputNumber
-            min={1}
-            max={minQuantity}
-            value={multiplePartialQuantity}
-            onChange={value => setMultiplePartialQuantity(value)}
-            style={{ width: '100%' }}
-          />
-        </Form.Item>
-
-        <Alert
-          message="Questa operazione trasferirà la quantità specificata da ogni articolo selezionato mantenendo le quantità residue nella posizione originale."
-          type="info"
-          showIcon
-          style={{ marginTop: '16px' }}
-        />
-      </div>
-    </Modal>
-  );
+ 
+  
 };
 
+
+// Add the transfer confirmation modal
 const TransferConfirmationModal = () => (
   <Modal
     title="Conferma Trasferimento"
     visible={transferConfirmationVisible}
     onOk={async () => {
+      if (!pendingTransferData?.items?.length) {
+        message.error('Nessun dato di trasferimento disponibile');
+        return;
+      }
+
       setTransferConfirmationVisible(false);
       setLoading(true);
       
       try {
-        const response = await axios.post(
-          `${process.env.REACT_APP_API_URL}/api/trasferimento-multiplo`,
-          pendingTransferData.items.map(item => ({
-            ...item,
-            quantity: item.quantity.toString(),
-            area: pendingTransferData.sourceLocation[0],
-            scaffale: pendingTransferData.sourceLocation[1],
-            colonna: pendingTransferData.sourceLocation[2],
-            piano: pendingTransferData.sourceLocation[3],
-            ...pendingTransferData.destLocation
-          }))
-        );
-
-        if (response.data.success) {
-          message.success(`Trasferiti ${pendingTransferData.items.length} articoli`);
-          handleMovimentoLocationSearch();
+        for (const item of pendingTransferData.items) {
+          await axios.post(
+            `${process.env.REACT_APP_API_URL}/api/trasferimento`,
+            {
+              articolo: item.articolo,
+              quantity: parseInt(item.quantity, 10),
+              // Source location
+              area: item.source.split('-')[0],
+              scaffale: item.source.split('-')[1],
+              colonna: item.source.split('-')[2],
+              piano: item.source.split('-')[3],
+              // Destination location
+              areaDest: pendingTransferData.destLocation.areaDest,
+              scaffaleDest: pendingTransferData.destLocation.scaffaleDest,
+              colonnaDest: pendingTransferData.destLocation.colonnaDest,
+              pianoDest: pendingTransferData.destLocation.pianoDest
+            }
+          );
         }
+
+        // Update UI based on active tab
+        if (activeTab === '2') {
+          const updatedItems = locationItems.map(item => {
+            if (selectedLocationRows.includes(item.id)) {
+              return { ...item, transferred: true };
+            }
+            return item;
+          });
+          setLocationItems(updatedItems);
+          setSelectedLocationRows([]);
+          handleMovimentoLocationSearch();
+        } else if (activeTab === '3') {
+          const updatedArticles = magazziniArticles.map(article => {
+            if (selectedRows.includes(article.id)) {
+              return { ...article, transferred: true };
+            }
+            return article;
+          });
+          setMagazziniArticles(updatedArticles);
+          setSelectedRows([]);
+        }
+
+        message.success(`Trasferiti ${pendingTransferData.items.length} articoli`);
+        
       } catch (error) {
         console.error('Transfer error:', error);
-        message.error(error.response?.data?.error || 'Errore durante il trasferimento');
+        message.error(error.response?.data?.message || 'Errore durante il trasferimento');
       } finally {
         setLoading(false);
-        setSelectedLocationRows([]);
-        setMultiplePartialQuantity(0);
       }
     }}
     onCancel={() => setTransferConfirmationVisible(false)}
@@ -1054,79 +1551,85 @@ const TransferConfirmationModal = () => (
     cancelText="Annulla"
     width={800}
   >
-    <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
-      <h4>Dettagli Trasferimento</h4>
-      <p>
-        Da: {pendingTransferData?.sourceLocation.join('-')}<br />
-        A: {pendingTransferData?.destLocation.areaDest}-{
-          pendingTransferData?.destLocation.scaffaleDest}-{
-          pendingTransferData?.destLocation.colonnaDest}-{
-          pendingTransferData?.destLocation.pianoDest}
-      </p>
-      
-      <Table
-        dataSource={pendingTransferData?.items}
-        pagination={false}
-        columns={[
-          {
-            title: 'Articolo',
-            dataIndex: 'articolo',
-            key: 'articolo'
-          },
-          {
-            title: 'Quantità',
-            dataIndex: 'quantity',
-            key: 'quantity'
-          },
-          {
-            title: 'Da',
-            dataIndex: 'source',
-            key: 'source'
-          },
-          {
-            title: 'A',
-            dataIndex: 'destination',
-            key: 'destination'
-          }
-        ]}
-      />
-    </div>
+  
+    {pendingTransferData && pendingTransferData.items && pendingTransferData.items.length > 0 ? (
+      <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
+        <h4>Dettagli Trasferimento</h4>
+        <Table
+          dataSource={pendingTransferData.items}
+          pagination={false}
+          columns={[
+            {
+              title: 'Articolo',
+              dataIndex: 'articolo',
+              key: 'articolo'
+            },
+            {
+              title: 'Quantità',
+              dataIndex: 'quantity',
+              key: 'quantity'
+            },
+            {
+              title: 'Da',
+              dataIndex: 'source',
+              key: 'source'
+            },
+            {
+              title: 'A',
+              dataIndex: 'destination',
+              key: 'destination'
+            }
+          ]}
+        />
+      </div>
+    ) : (
+      <div>Nessun dato di trasferimento disponibile</div>
+    )}
   </Modal>
 );
 
 const handleRowSelection = (selectedRowKeys, selectedRows) => {
-  const quantities = selectedRows.map(row => row.gim_qmov);
-  const minQuantity = Math.min(...quantities);
-  
-  setSelectedRows(selectedRowKeys);
-  setPartialQuantity(minQuantity);
+  const validRows = selectedRows.filter(row => 
+    row.location && !row.transferred
+  );
+  setSelectedRows(validRows);
+  setSelectedTransferItems(validRows);
+};
+const handleLocationChangeModalVisible = (articleCode, rowId) => {
+console.log("QUI")
+  setArticleFilter(articleCode);
+  setSelectedRowId(rowId);
+  fetchLocations(articleCode);
+  setLocationChangeModalVisible(true);
 };
 
 const handleTransferInitiation = (isPartial) => {
-  if (selectedRows.length === 0) {
+  if (selectedTransferItems.length === 0) {
     message.error('Seleziona almeno un articolo');
     return;
   }
 
-  const selectedItems = selectedRows.map(id => 
-    articoliMovimento.find(item => item.id === id)
-  );
+  // Validate all selected items have locations
+  const itemsWithoutLocation = selectedTransferItems.filter(item => !item.location);
+  if (itemsWithoutLocation.length > 0) {
+    message.error('Tutti gli articoli devono avere una posizione assegnata');
+    return;
+  }
   
-  const minQuantity = Math.min(...selectedItems.map(item => item.gim_qmov));
+  const minQuantity = Math.min(...selectedTransferItems.map(item => item.gim_qmov));
   
   if (isPartial) {
-    setPartialDepositQuantity(minQuantity);
-    setPartialQuantity(minQuantity);
+    setTransferQuantity(minQuantity);
     setShowPartialDepositModal(true);
   } else {
-    handleTransfer(minQuantity);
+    setTransferQuantity(minQuantity);
+    setIsLocationWarehouseMapOpen(true);
   }
 };
-
 return (
   <div style={{display:"flex", justifyContent: 'center', alignItems: 'center', flexWrap: 'wrap !important',}}>
-  <Tabs defaultActiveKey="1" style={{ width: '100%', padding: '20px' }}>
-    <Tabs.TabPane tab="Trasferimento Singolo" key="1">
+  <Tabs defaultActiveKey="1" onChange={setActiveTab} style={{ width: '100%', padding: '20px' }}>
+     <Tabs.TabPane tab="Trasferimento Singolo" key="1">
       <div style={containerStyle}>
       <Card title="Trasferimenti" style={cardStyle}>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
@@ -1233,6 +1736,7 @@ return (
                       message.warning('Seleziona almeno un articolo');
                       return;
                     }
+                    setMultiplePartialQuantity(0);
                     setIsLocationWarehouseMapOpen(true);
                   }}
                   disabled={selectedLocationRows.length === 0}
@@ -1253,70 +1757,65 @@ return (
         )}
       </Card>
     </Tabs.TabPane>
-    <Tabs.TabPane tab="Trasferimento tra Magazzini" disabled key="3">
-      <Card>
-        <Form layout="vertical">
+     <Tabs.TabPane tab="Trasferimento tra Magazzini" key="3">
+  <Card>
+    <Form layout="vertical">
+      <Row gutter={16}>
+        <Col span={12}>
           <Form.Item label="Codice Movimento">
-            <Input
+            <Input.Search
               placeholder="Inserisci il codice movimento"
-              value={movimentoInput}
-              onChange={(e) => setMovimentoInput(e.target.value)}
-              onPressEnter={handleMovimentoInputConfirm}
-              style={{ marginBottom: 16 }}
+              onSearch={handleMagazziniSearch}
+              loading={magazziniLoading}
+              enterButton
             />
-            <Button 
-              type="primary" 
-              onClick={handleMovimentoInputConfirm}
-              loading={loadingArticoli}
-            >
-              Cerca Movimento
-            </Button>
           </Form.Item>
-        </Form>
-
-        {articoliMovimento.length > 0 && (
-          <Table
-            rowSelection={{
-              type: 'checkbox',
-              selectedRowKeys: selectedRows,
-              onChange: handleRowSelection,
-            }}
-            columns={columns}
-            dataSource={articoliMovimento}
-            rowKey={(record) => record.id}
-            rowClassName={(record) => 
-              depositedArticoli.includes(record.id) ? 'deposited-row' : ''
-            }
-            pagination={false}
-            footer={() => (
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <Button
-                  type="primary"
-                  onClick={() => {
-                    if (selectedRows.length === 0) {
-                      message.warning('Seleziona almeno un articolo');
-                      return;
-                    }
-                    setIsWarehouseMapOpen(true);
-                  }}
-                  disabled={selectedRows.length === 0}
-                >
-                  Trasferisci articoli selezionati ({selectedRows.length})
-                </Button>
-                
-                <Button
-                  type="primary"
-                  onClick={() => handleTransferInitiation(true)}
-                  disabled={!checkSelectedRowsQuantity()}
-                >
-                  Trasferimento Parziale
-                </Button>
-              </div>
-            )}
-          />
-        )}
-      </Card>
-    </Tabs.TabPane>
+        </Col>
+      </Row>
+      
+      {magazziniArticles.length > 0 && (
+       <Table
+  rowSelection={{
+    selectedRowKeys: selectedRows,
+    onChange: (selectedRowKeys, selectedRows) => {
+      setSelectedRows(selectedRowKeys);
+      setSelectedTransferItems(selectedRows);
+    },
+    getCheckboxProps: (record) => ({
+      disabled: !record.location || record.transferred,
+      className: record.transferred ? 'transferred-checkbox' : ''
+    })
+  }}
+  rowClassName={(record) => record.transferred ? 'transferred-row' : ''}
+  columns={magazziniColumns}
+  dataSource={magazziniArticles}
+  rowKey="id"
+  loading={magazziniLoading}
+  pagination={false}
+  footer={() => (
+    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+      <Button
+        type="primary"
+        onClick={() => handleTransferInitiation(false)}
+        disabled={selectedRows.length === 0}
+      >
+        Trasferisci selezionati ({selectedRows.length})
+      </Button>
+      
+      <Button
+        type="primary"
+        onClick={() => handleTransferInitiation(true)}
+        disabled={selectedRows.length === 0}
+      >
+        Trasferimento parziale
+      </Button>
+    </div>
+  )}
+/>
+      )}
+    </Form>
+  </Card>
+</Tabs.TabPane>
    
   </Tabs>
      <Modal
@@ -1385,36 +1884,6 @@ footer={[
     <p><strong>Quantità:</strong> {transferQuantity}</p>
   </div>
 </Modal>
-<Modal
-  title="Seleziona la posizione di destinazione"
-  visible={isWarehouseMapOpen}
-  onCancel={() => setIsWarehouseMapOpen(false)}
-  footer={null}
-  width={1000}
->
-  {loading ? (
-    <Spin indicator={<LoadingOutlined style={{ fontSize: 48 }} spin />} />
-  ) : (
-    <div className="warehouse-map-container">
-      <WarehouseGridSystem
-        warehouseLayout={layouts[currentPage]}
-        GRID_ROWS={30}
-        GRID_COLS={9}
-        onCellClick={handleShelfClick}
-        getShelfStatus={getShelfStatus}
-        tooltipContent={getTooltipContent}
-      />
-      <Pagination
-        current={currentPage}
-        total={Object.keys(layouts).length}
-        pageSize={1}
-        onChange={(page) => setCurrentPage(page)}
-        showSizeChanger={false}
-        simple
-      />
-    </div>
-  )}
-</Modal>
 
 
     <Modal
@@ -1451,21 +1920,21 @@ footer={[
         style={{top: '50%', transform: 'translateY(-50%)' }}
 
       >
-       <div style={{ maxHeight: '100%'}}>
-        <div className="grid-container">
-          {renderWarehouseSection()}
-        </div>
-        <div className="pagination-container" >
-          <Pagination
-            current={currentPage}
-            total={2}
-            pageSize={1}
-            onChange={handlePageChange}
-            showSizeChanger={false}
-            simple
-          />
-        </div>
-      </div>
+        <WarehouseGridSystem
+          warehouseLayout={layouts[currentPage]}
+          GRID_ROWS={30}
+          GRID_COLS={9}
+          onCellClick={handleLocationTransferComplete}
+
+         
+          getShelfStatus={(cell) => {
+            if (!cell) return 'available';
+            return 'available';
+          }}
+          tooltipContent={getTooltipContent}
+          currentPage={1}
+          onPageChange={() => {}}
+        />
       </Modal>
     )}
 
@@ -1495,6 +1964,132 @@ footer={[
         Quantità massima disponibile: {partialDepositQuantity}
       </div>
     </Modal>
+     <Modal
+  title={
+    <div>
+      <div>Locazioni disponibili</div>
+      <div style={{
+        fontSize: '0.9em',
+        marginTop: '8px',
+        color: 'rgba(0, 0, 0, 0.45)'
+      }}>
+        {locationData[0]?.description || ''}
+      </div>
+    </div>
+  }
+  visible={locationChangeModalVisible}
+  onCancel={handleLocationChangeModalClose}
+  footer={null}
+  width={800} // Reduced width since we have fewer columns
+>
+  {locationData.length > 0 ? (
+    <Table
+      dataSource={groupLocations(locationData[0]?.subItems || [])}
+      columns={locationColumns}
+      pagination={false}
+      rowKey="key"
+      scroll={{ y: 400 }}
+      size="small"
+    />
+  ) : (
+    <div style={{ textAlign: 'center', padding: '20px' }}>
+      Nessuna locazione contentente l'articolo selezionato
+    </div>
+  )}
+</Modal>
+ <Modal
+  title="Seleziona quantità"
+  visible={changeLocationQuantityModalVisible}
+  onOk={handleLocationQuantityChange}
+  onCancel={handleChangeLocationQuantityModalClose}
+  okText="Conferma"
+  cancelText="Annulla"
+>
+  <Space direction="vertical" style={{ width: '100%' }}>
+    <div>
+      <Text>Posizione selezionata: </Text>
+      <Text strong>
+        {selectedLocation ? 
+          `${selectedLocation.area}-${selectedLocation.scaffale}-${selectedLocation.colonna}-${selectedLocation.piano}` : 
+          ''}
+      </Text>
+    </div>
+    <div>
+      <Text>Quantità disponibile in questa posizione: </Text>
+      <Text strong>{parseInt(maxAvailableQuantity, 10)}</Text>
+    </div>
+    <div>
+      <Text>Quantità da spostare: </Text>
+      <InputNumber
+        min={1}
+        max={parseInt(selectedQuantity, 10)}
+        value={selectedQuantity}
+        onChange={value => setSelectedQuantity(value)}
+        style={{ width: '100%' }}
+        precision={0} // Forces integer values
+      />
+    </div>
+  </Space>
+</Modal>
+<Modal
+  title="Trasferimento Parziale Multiplo"
+  visible={showMultiplePartialDepositModal}
+  onCancel={() => setShowMultiplePartialDepositModal(false)}
+  onOk={() => {
+    const minQty = Math.min(...selectedLocationRows.map(id => {
+      const item = locationItems.find(i => i.id === id);
+      return item ? item.qta : 0;
+    }));
+    
+    if (multiplePartialQuantity > 0 && multiplePartialQuantity <= minQty) {
+      setIsLocationWarehouseMapOpen(true);
+      setShowMultiplePartialDepositModal(false);
+    } else {
+      message.error(`La quantità deve essere tra 1 e ${minQty}`);
+    }
+  }}
+  okText="Procedi con trasferimento"
+  cancelText="Annulla"
+>
+  <div>
+    <p><strong>Articoli selezionati:</strong> {selectedLocationRows.length}</p>
+    <p>
+      <strong>Quantità trasferibile:</strong> {Math.min(...selectedLocationRows.map(id => {
+        const item = locationItems.find(i => i.id === id);
+        return item?.qta || 0;
+      }))}
+      <Tooltip title="Quantità massima trasferibile impostata in base all'articolo selezionato con quantità minore">
+        <InfoCircleOutlined style={{ marginLeft: '8px' }} />
+      </Tooltip>
+    </p>
+    
+    <Form.Item
+      label="Quantità da trasferire per ogni articolo"
+      help={`Massimo trasferibile: ${Math.min(...selectedLocationRows.map(id => {
+        const item = locationItems.find(i => i.id === id);
+        return item?.qta || 0;
+      }))}`}
+    >
+      <InputNumber
+        min={1}
+        max={Math.min(...selectedLocationRows.map(id => {
+          const item = locationItems.find(i => i.id === id);
+          return item?.qta || 0;
+        }))}
+        value={multiplePartialQuantity}
+        onChange={value => setMultiplePartialQuantity(value)}
+        style={{ width: '100%' }}
+      />
+    </Form.Item>
+
+    <Alert
+      message="Questa operazione trasferirà la quantità specificata da ogni articolo selezionato mantenendo le quantità residue nella posizione originale."
+      type="info"
+      showIcon
+      style={{ marginTop: '16px' }}
+    />
+  </div>
+</Modal>
   </div>
 );
 };
