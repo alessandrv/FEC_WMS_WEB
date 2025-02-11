@@ -516,26 +516,44 @@ const handleMagazziniTransferComplete = (destLocation) => {
     }
   ];
   
-  const handleRemoveLocation = (record) => {
-    const locationKey = `${record.location.area}-${record.location.scaffale}-${record.location.colonna}-${record.location.piano}`;
-    
-    setReservedQuantities(prev => ({
-      ...prev,
-      [locationKey]: Math.max(0, (prev[locationKey] || 0) - (record.reservedQuantity || 0))
-    }));
-  
-    const updatedTableData = [...magazziniArticles];
-    const rowIndex = updatedTableData.findIndex(row => row.id === record.id);
-    
-    if (rowIndex !== -1) {
-      updatedTableData[rowIndex] = {
-        ...record,
-        location: null,
-        reservedQuantity: 0
-      };
-      setMagazziniArticles(updatedTableData);
+  // Update the handleRemoveLocation function
+const handleRemoveLocation = (record) => {
+  // First, uncheck the row by removing it from selectedRows
+  setSelectedRows(prev => prev.filter(id => id !== record.id));
+  setSelectedTransferItems(prev => prev.filter(item => item.id !== record.id));
+
+  // Find any unselected row with the same article that doesn't have a location
+  const unselectedMatch = magazziniArticles.find(item => 
+    item.gim_arti === record.gim_arti && 
+    !item.location && 
+    !selectedRows.includes(item.id)
+  );
+
+  // Update the articles list
+  setMagazziniArticles(prev => {
+    const updatedArticles = prev.map(item => {
+      if (item.id === record.id) {
+        // Remove location from current record
+        return { ...item, location: null };
+      }
+      if (unselectedMatch && item.id === unselectedMatch.id) {
+        // If there's an unselected match, merge the quantities
+        return { 
+          ...item, 
+          gim_qmov: item.gim_qmov + record.gim_qmov 
+        };
+      }
+      return item;
+    });
+
+    // If we found a match to merge with, remove the original record
+    if (unselectedMatch) {
+      return updatedArticles.filter(item => item.id !== record.id);
     }
-  };
+
+    return updatedArticles;
+  });
+};
   const generateUUID = () => {
     return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
       const r = Math.random() * 16 | 0;
