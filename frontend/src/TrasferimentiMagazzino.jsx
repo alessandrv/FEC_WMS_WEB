@@ -965,8 +965,8 @@ else if (currentPage === 2) {
     return (
 <div>
 <WarehouseGridSystem
-GRID_ROWS = {15}
-GRID_COLS = {11}
+  GRID_ROWS={16}
+  GRID_COLS={22}
 warehouseLayout={layouts[2]}
 onCellClick={handleShelfClick}
 getShelfStatus={getShelfStatus}
