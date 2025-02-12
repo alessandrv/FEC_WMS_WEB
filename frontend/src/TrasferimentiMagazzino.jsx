@@ -579,7 +579,7 @@ const handleRemoveLocation = (record) => {
     setHighlightedShelf(shelf);
     console.log(shelf)
     setIsWarehouseMapOpen(false);
-    
+    setIsLocationWarehouseMapOpen(false);
     setIsTransferConfirmationOpen(true);
   };
 
