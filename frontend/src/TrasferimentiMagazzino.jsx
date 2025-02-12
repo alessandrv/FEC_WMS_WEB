@@ -579,7 +579,7 @@ const handleRemoveLocation = (record) => {
     setHighlightedShelf(shelf);
     console.log(shelf)
     setIsWarehouseMapOpen(false);
-    setIsLocationWarehouseMapOpen(false);
+    
     setIsTransferConfirmationOpen(true);
   };
 
@@ -906,36 +906,74 @@ const handleTransfer = async (quantity) => {
   }
 };
 
+const renderWarehouseSection2 = () => {
+  if (currentPage === 1) {
+      return (
+  <div> <WarehouseGridSystem
+  warehouseLayout={layouts[currentPage]}
+  GRID_ROWS={30}
+  GRID_COLS={9}
+  onCellClick={handleLocationTransferComplete}
+
+ 
+  getShelfStatus={(cell) => {
+    if (!cell) return 'available';
+    return 'available';
+  }}
+  tooltipContent={getTooltipContent}
+  currentPage={1}
+  onPageChange={() => {}}
+/>
+</div>)}
+else if (currentPage === 2) {
+    return (
+<div>
+<WarehouseGridSystem
+          warehouseLayout={layouts[currentPage]}
+          GRID_ROWS={16}
+          GRID_COLS={22}
+          onCellClick={handleLocationTransferComplete}
+
+         
+          getShelfStatus={(cell) => {
+            if (!cell) return 'available';
+            return 'available';
+          }}
+          tooltipContent={getTooltipContent}
+          currentPage={1}
+          onPageChange={() => {}}
+        />
+</div>)}
+};
+
 
 const renderWarehouseSection = () => {
   if (currentPage === 1) {
       return (
-          <div>
-              <WarehouseGridSystem
-                  warehouseLayout={layouts[1]}
-                  GRID_ROWS={30}
-                  GRID_COLS={9}
-                  onCellClick={handleShelfClick}
-                  getShelfStatus={getShelfStatus}
-                  tooltipContent={getTooltipContent}
+  <div>
+  <WarehouseGridSystem
+  warehouseLayout={layouts[1]}
+  GRID_ROWS = {30}
+  GRID_COLS = {9}
+  onCellClick={handleShelfClick}
+  getShelfStatus={getShelfStatus}
+  tooltipContent={getTooltipContent}
 
-              />
-          </div>)
-  }
-  else if (currentPage === 2) {
-      return (
-          <div>
-              <WarehouseGridSystem
-                  GRID_ROWS={16}
-                  GRID_COLS={22}
-                  warehouseLayout={layouts[2]}
-                  onCellClick={handleShelfClick}
-                  getShelfStatus={getShelfStatus}
-                  tooltipContent={getTooltipContent}
+/>
+</div>)}
+else if (currentPage === 2) {
+    return (
+<div>
+<WarehouseGridSystem
+GRID_ROWS = {15}
+GRID_COLS = {11}
+warehouseLayout={layouts[2]}
+onCellClick={handleShelfClick}
+getShelfStatus={getShelfStatus}
+tooltipContent={getTooltipContent}
 
-              />
-          </div>)
-  }
+/>
+</div>)}
 };
 
 const openWarehouseMap = () => {
@@ -1931,9 +1969,9 @@ footer={[
         style={{top: '50%', transform: 'translateY(-50%)' }}
 
       >
-        <div style={{ maxHeight: '100%', overflowY: 'auto' }}>
+  <div style={{ maxHeight: '100%', overflowY: 'auto' }}>
         <div className="grid-container">
-          {renderWarehouseSection()}
+          {renderWarehouseSection2()}
         </div>
         <div className="pagination-container" style={{ marginTop: '20px', textAlign: 'center' }}>
           <Pagination
