@@ -23,7 +23,7 @@ const GroupedItemsTable = () => {
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [selectedRecord, setSelectedRecord] = useState(null);
   
-  const [pageSize] = useState(10); // Fixed page size as per requirement
+  const [pageSize] = useState(20); // Fixed page size as per requirement
   const [totalItems, setTotalItems] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
   const [selectedLayout, setSelectedLayout] = useState('simple');
