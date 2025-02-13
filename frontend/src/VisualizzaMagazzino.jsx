@@ -351,23 +351,18 @@ const locationInputRefs = [useRef(), useRef(), useRef(), useRef()];
   const fetchItems = async (page = 1, limit = 10) => {
     try {
       setLoading(true);
+      // Create filterParts with proper hyphen placement
       
-      // Create filterString with only the filled location components
-      const filledLocations = locationFilter.map((value, index) => {
-        // For empty values at the end, use empty string
-        if (!value && locationFilter.slice(index + 1).every(v => !v)) {
-          return '';
-        }
-        // For empty values in the middle, use '-' to maintain position
-        return value || '-';
-      });
-      
-      // Remove trailing empty values
-      while (filledLocations.length > 0 && filledLocations[filledLocations.length - 1] === '') {
-        filledLocations.pop();
-      }
   
-      const filterStringParam = filledLocations.length > 0 ? filledLocations.join('-') : '';
+      // Ensure exactly 4 components
+      let filterStringParam = locationFilter.join('-');
+
+      const parts = filterStringParam.split('-').slice(0, 4);
+      while (parts.length < 4) parts.push('');
+      filterStringParam = parts.join('-');
+
+      // Clear filter if all empty
+      if (parts.every(part => !part)) filterStringParam = '';
   
       const response = await axios.get(`${process.env.REACT_APP_API_URL}/api/get-items`, {
         params: {
@@ -380,7 +375,7 @@ const locationInputRefs = [useRef(), useRef(), useRef(), useRef()];
         },
       });
   
-      if (response.data && response.data.items) {
+      if (response.data?.items) {
         setItems(response.data.items);
         setTotalItems(response.data.total);
         setTotalPages(response.data.totalPages);
