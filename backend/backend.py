@@ -294,11 +294,6 @@ def check_fornitore_coerenza():
 
 @app.route('/api/get-items', methods=['GET'])
 def get_items():
-    """
-    Retrieves paginated items from wms_items grouped by id_art along with their descriptions from mganag.
-    Accepts 'page', 'limit', 'articleFilter', 'supplierFilter', and 'filterString' as query parameters.
-    Returns a JSON object with grouped items and pagination metadata.
-    """
     try:
         # Parse query parameters with default values
         page = request.args.get('page', default=1, type=int)
@@ -307,6 +302,7 @@ def get_items():
         supplier_filter = request.args.get('supplierFilter', default='', type=str)
         filter_string = request.args.get('filterString', default='', type=str)
         description_string = request.args.get("descriptionFilter", default='', type=str)
+
         # Validate page and limit
         if page < 1:
             return jsonify({'error': 'Page number must be greater than 0.'}), 400
@@ -320,60 +316,81 @@ def get_items():
         conn = connect_to_db()
         cursor = conn.cursor()
 
-        # Step 1: Count total distinct id_art with applied filters
-        count_query = "SELECT COUNT(DISTINCT id_art) FROM wms_items WHERE 1=1"
-        params = []
-
-        # Apply filters
-        if article_filter:
-            # Cast id_art to VARCHAR for LIKE comparison
-            count_query += " AND CAST(id_art AS VARCHAR(20)) LIKE ?"
-            params.append(f"%{article_filter}%")
-        if supplier_filter:
-            count_query += " AND fornitore LIKE ?"
-            params.append(f"%{supplier_filter}%")
+        # Handle partial location filtering
+        location_condition = ""
+        location_params = []
         if filter_string:
-            # Expected format: Area-Scaffale-Colonna-Piano (e.g., A-A-01-1)
-            try:
-                area, scaffale, colonna, piano = filter_string.split('-')
-                count_query += " AND EXISTS (SELECT 1 FROM wms_items AS wi2 WHERE wi2.id_art = wms_items.id_art AND wi2.area = ? AND wi2.scaffale = ? AND wi2.colonna = ? AND wi2.piano = ?)"
-                params.extend([area, scaffale, colonna, piano])
-            except ValueError:
-                # Invalid filter string format
-                return jsonify({'error': 'Invalid filter string format. Expected format: Area-Scaffale-Colonna-Piano (e.g., A-A-01-1).'}), 400
+            location_parts = filter_string.split('-')
+            location_fields = ['area', 'scaffale', 'colonna', 'piano']
+            
+            # Build conditions only for non-empty location parts
+            conditions = []
+            for i, value in enumerate(location_parts):
+                if value.strip():  # Only add condition if value is not empty
+                    conditions.append(f"wi.{location_fields[i]} = ?")
+                    location_params.append(value.strip())
+            
+            if conditions:
+                location_condition = " AND " + " AND ".join(conditions)
 
-        cursor.execute(count_query, tuple(params))
-        total_distinct_id_art = cursor.fetchone()[0]
-
-        # Step 2: Fetch distinct id_art for the current page with CAST and LIKE
-        id_art_query = """
-            SELECT SKIP ? FIRST ? id_art
-            FROM wms_items
+        # Step 1: Count total distinct id_art with applied filters
+        count_query = """
+            SELECT COUNT(DISTINCT wi.id_art) 
+            FROM wms_items wi
+            LEFT JOIN mganag mg ON wi.id_art = mg.amg_code
             WHERE 1=1
         """
-        # Initialize id_art_params with offset and limit first
+        count_params = []
+
+        if article_filter:
+            count_query += " AND CAST(wi.id_art AS VARCHAR(20)) LIKE ?"
+            count_params.append(f"%{article_filter}%")
+        if supplier_filter:
+            count_query += " AND wi.fornitore LIKE ?"
+            count_params.append(f"%{supplier_filter}%")
+        if description_string:
+            count_query += """ AND (
+                UPPER(mg.amg_desc) LIKE UPPER(?) 
+                OR UPPER(mg.amg_des2) LIKE UPPER(?)
+            )"""
+            count_params.extend([f"%{description_string}%", f"%{description_string}%"])
+        if location_condition:
+            count_query += location_condition
+            count_params.extend(location_params)
+
+        cursor.execute(count_query, tuple(count_params))
+        total_distinct_id_art = cursor.fetchone()[0]
+
+        # Step 2: Fetch distinct id_art for the current page
+        id_art_query = """
+            SELECT SKIP ? FIRST ? DISTINCT wi.id_art
+            FROM wms_items wi
+            LEFT JOIN mganag mg ON wi.id_art = mg.amg_code
+            WHERE 1=1
+        """
         id_art_params = [offset, limit]
 
-        # Apply same filters as count_query
         if article_filter:
-            id_art_query += " AND CAST(id_art AS VARCHAR(20)) LIKE ?"
+            id_art_query += " AND CAST(wi.id_art AS VARCHAR(20)) LIKE ?"
             id_art_params.append(f"%{article_filter}%")
-            
         if supplier_filter:
-            id_art_query += " AND fornitore LIKE ?"
+            id_art_query += " AND wi.fornitore LIKE ?"
             id_art_params.append(f"%{supplier_filter}%")
-        
-        if filter_string:
-            id_art_query += " AND EXISTS (SELECT 1 FROM wms_items AS wi2 WHERE wi2.id_art = wms_items.id_art AND wi2.area = ? AND wi2.scaffale = ? AND wi2.colonna = ? AND wi2.piano = ?)"
-            id_art_params.extend(filter_string.split('-'))
-           
+        if description_string:
+            id_art_query += """ AND (
+                UPPER(mg.amg_desc) LIKE UPPER(?) 
+                OR UPPER(mg.amg_des2) LIKE UPPER(?)
+            )"""
+            id_art_params.extend([f"%{description_string}%", f"%{description_string}%"])
+        if location_condition:
+            id_art_query += location_condition
+            id_art_params.extend(location_params)
 
         cursor.execute(id_art_query, tuple(id_art_params))
         id_art_rows = cursor.fetchall()
         id_art_list = [row[0] for row in id_art_rows]
 
         if not id_art_list:
-            # No items found for the given page
             return jsonify({
                 'items': [],
                 'total': total_distinct_id_art,
@@ -384,17 +401,6 @@ def get_items():
 
         # Step 3: Fetch all wms_items for the selected id_art and join with mganag for descriptions
         placeholders = ','.join(['?'] * len(id_art_list))
-        # Build location condition if filter_string exists
-        location_condition = ""
-        location_params = []
-        if filter_string:
-            try:
-                area, scaffale, colonna, piano = filter_string.split('-')
-                location_condition = " AND wi.area = ? AND wi.scaffale = ? AND wi.colonna = ? AND wi.piano = ?"
-                location_params = [area, scaffale, colonna, piano]
-            except ValueError:
-                return jsonify({'error': 'Invalid filter string format'}), 400
-
         items_query = f"""
             SELECT 
                 wi.*,               -- All fields from wms_items
@@ -410,9 +416,10 @@ def get_items():
             ORDER BY 
                 wi.id_art
         """
-        # Combine id_art_list with location parameters if they exist
-        query_params = tuple(id_art_list + location_params)
-        cursor.execute(items_query, query_params)
+        
+        # Combine id_art_list with location parameters
+        query_params = id_art_list + location_params
+        cursor.execute(items_query, tuple(query_params))
         items_rows = cursor.fetchall()
 
         # Get column names from cursor description
@@ -460,17 +467,14 @@ def get_items():
         }), 200
 
     except pyodbc.Error as e:
-        # Log the error details (optional)
         app.logger.error(f"Database error: {str(e)}")
         return jsonify({'error': 'Database error occurred.'}), 500
 
     except Exception as ex:
-        # Log the error details (optional)
         app.logger.error(f"Unexpected error: {str(ex)}")
         return jsonify({'error': 'An unexpected error occurred.'}), 500
 
     finally:
-        # Ensure that the cursor and connection are closed properly
         if 'cursor' in locals():
             cursor.close()
         if 'conn' in locals():

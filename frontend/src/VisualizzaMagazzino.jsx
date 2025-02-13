@@ -1,7 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef  } from 'react';
 import { Table, Spin, Input, Button, Pagination, Row, Col, message, Modal } from 'antd';
 import axios from 'axios';
-import { LoadingOutlined, ReloadOutlined } from '@ant-design/icons';
+import { LoadingOutlined, ReloadOutlined, FullscreenOutlined } from '@ant-design/icons';
 import WarehouseGrid from './GridComponent';
 import './GridComponent.css';
 import WarehouseGridSystem from './WarehouseGridSystem';
@@ -14,6 +14,8 @@ const GroupedItemsTable = () => {
   const [supplierFilter, setSupplierFilter] = useState('');
   const [filterString, setFilterString] = useState('');
   const [descriptionFilter, setDescriptionFilter] = useState('');
+  const [isWarehouseMapOpen, setIsWarehouseMapOpen] = useState(false);
+  const [highlightedShelf, setHighlightedShelf] = useState('');
 
   // Pagination states
   const [currentPage, setCurrentPage] = useState(1);
@@ -27,6 +29,10 @@ const GroupedItemsTable = () => {
   const [selectedLayout, setSelectedLayout] = useState('simple');
   const [selectedShelf, setSelectedShelf] = useState(null);
   const [occupiedShelves, setOccupiedShelves] = useState(new Set());
+  
+  const [locationFilter, setLocationFilter] = useState(['', '', '', '']); // [area, scaffale, colonna, piano]
+const locationInputRefs = [useRef(), useRef(), useRef(), useRef()];
+
   const groupSubitemsByLocationAndMovement = (subitems) => {
     const groupedItems = {};
     
@@ -69,6 +75,21 @@ const GroupedItemsTable = () => {
     // Fall back to string comparison if not both numbers
     return movA.localeCompare(movB);
   };
+  const handleShelfClickSelection = (shelf) => {
+    setHighlightedShelf(shelf);
+    
+    // Parse the shelf string (format: "C-01-1")
+    const [scaffale, colonna, piano] = shelf.split('-');
+    
+    // Set values based on which tab is active
+    setLocationFilter(['A', scaffale, colonna, piano]);
+    
+    
+    setIsWarehouseMapOpen(false);
+  };
+
+
+
   const layouts = {
     1: [
         {
@@ -330,35 +351,71 @@ const GroupedItemsTable = () => {
   const fetchItems = async (page = 1, limit = 10) => {
     try {
       setLoading(true);
+      
+      // Create filterString with only the filled location components
+      const filledLocations = locationFilter.map((value, index) => {
+        // For empty values at the end, use empty string
+        if (!value && locationFilter.slice(index + 1).every(v => !v)) {
+          return '';
+        }
+        // For empty values in the middle, use '-' to maintain position
+        return value || '-';
+      });
+      
+      // Remove trailing empty values
+      while (filledLocations.length > 0 && filledLocations[filledLocations.length - 1] === '') {
+        filledLocations.pop();
+      }
+  
+      const filterStringParam = filledLocations.length > 0 ? filledLocations.join('-') : '';
+  
       const response = await axios.get(`${process.env.REACT_APP_API_URL}/api/get-items`, {
         params: {
           page,
           limit,
           articleFilter,
           supplierFilter,
-          filterString,
           descriptionFilter,
+          filterString: filterStringParam
         },
       });
-
+  
       if (response.data && response.data.items) {
         setItems(response.data.items);
-        console.log(items)
         setTotalItems(response.data.total);
         setTotalPages(response.data.totalPages);
-      } else {
-        setItems([]);
-        setTotalItems(0);
-        setTotalPages(1);
       }
     } catch (error) {
       console.error('Error fetching items:', error);
-      message.error('Failed to fetch items. Please try again.');
+      message.error('Failed to fetch items');
     } finally {
       setLoading(false);
     }
   };
+  
+  // Update the handleLocationFilterChange function
+  const handleLocationFilterChange = (index, value) => {
+    const newLocationFilter = [...locationFilter];
+    newLocationFilter[index] = value.toUpperCase();
+    setLocationFilter(newLocationFilter);
+  
+    // Auto-focus logic
+    if (value.length === (index === 2 ? 2 : 1)) {
+      if (index < 3) {
+        locationInputRefs[index + 1].current?.focus();
+      }
+    }
+    
+    // Don't automatically fetch here - wait for apply filters button
+  };
 
+  
+  // Handle backspace in location inputs
+  const handleLocationFilterKeyDown = (index, e) => {
+    if (e.key === 'Backspace' && !locationFilter[index] && index > 0) {
+      locationInputRefs[index - 1].current?.focus();
+    }
+  };
   // Fetch items on component mount and when currentPage changes
   useEffect(() => {
     fetchItems(currentPage, pageSize);
@@ -366,11 +423,15 @@ const GroupedItemsTable = () => {
   }, [currentPage, pageSize]);
 
   // Add this effect to handle filter changes
-  useEffect(() => {
-    if (articleFilter === '' && supplierFilter === '' && filterString === '' && descriptionFilter === '') {
-      fetchItems(1, pageSize);
-    }
-  }, [articleFilter, supplierFilter, filterString, descriptionFilter]);
+ useEffect(() => {
+  // Only fetch if all filters are empty (for initial load and clear filters)
+  if (articleFilter === '' && 
+      supplierFilter === '' && 
+      locationFilter.every(f => f === '') && 
+      descriptionFilter === '') {
+    fetchItems(1, pageSize);
+  }
+}, [articleFilter, supplierFilter, descriptionFilter, locationFilter]);
 
   // Function to apply filters and fetch data
   const applyFilters = () => {
@@ -382,8 +443,8 @@ const GroupedItemsTable = () => {
   const clearFilters = () => {
     setArticleFilter('');
     setSupplierFilter('');
-    setFilterString('');
     setDescriptionFilter('');
+    setLocationFilter(['', '', '', '']);
     setCurrentPage(1);
   };
 
@@ -468,12 +529,7 @@ highlightedShelves={highlightedShelves}
       render: (text) => <span>{text}</span>,
       sorter: (a, b) => a.description.localeCompare(b.description),
     },
-    {
-      title: 'Codice Fornitore',
-      dataIndex: 'fornitore',
-      key: 'fornitore',
-      sorter: (a, b) => a.fornitore.localeCompare(b.fornitore),
-    },
+    
     {
       title: 'Q.ta in magazzino',
       dataIndex: 'totalQta',
@@ -547,12 +603,12 @@ highlightedShelves={highlightedShelves}
 
   // Prepare dataSource for the main table
   const dataSource = items.map(item => ({
-    key: `${item.id_art}-${item.fornitore}`, // Composite key using both id_art and fornitore
+    key: `${item.id_art}-${item.fornitore}`,
     id_art: item.id_art,
     fornitore: item.fornitore,
     totalQta: item.totalQta,
     description: item.description,
-    subItems: item.subItems,
+    subItems: item.subItems, // Make sure this exists in your data
   }));
 
   const cancelModal = (subItem) => {
@@ -561,27 +617,30 @@ highlightedShelves={highlightedShelves}
   setIsModalVisible(false);
   
   };
-  const expandableConfig = {
-    expandedRowRender: (record) => (
-      <Table
-        dataSource={groupSubitemsByLocationAndMovement(record.subItems).map(item => ({
-          key: `${item.id_mov}-${item.locazione}`,
-          id_mov: item.id_mov,
-          area: item.area,
-          scaffale: item.scaffale,
-          colonna: item.colonna,
-          piano: item.piano,
-          locazione: item.locazione,
-          totalQta: item.totalQta,
-          description: item.description,
-        }))}
-        columns={subColumns}
-        pagination={false}
-        rowKey="key"
-      />
-    ),
-    rowExpandable: (record) => record.subItems.length > 0,
-  };
+ // Then update the expandable configuration
+const expandableConfig = {
+  expandedRowRender: (record) => (
+    <Table
+      dataSource={record.subItems ? groupSubitemsByLocationAndMovement(record.subItems).map(item => ({
+        key: `${item.id_mov}-${item.locazione}`,
+        id_mov: item.id_mov,
+        area: item.area,
+        scaffale: item.scaffale,
+        colonna: item.colonna,
+        piano: item.piano,
+        locazione: item.locazione,
+        totalQta: item.totalQta,
+        description: item.description,
+      })) : []}
+      columns={subColumns}
+      pagination={false}
+      rowKey="key"
+    />
+  ),
+  rowExpandable: (record) => {
+    return record && record.subItems && record.subItems.length > 0;
+  }
+};
 
   // Add handler for Enter key
   const handleKeyPress = (e) => {
@@ -590,6 +649,34 @@ highlightedShelves={highlightedShelves}
     }
   };
 
+  const renderWarehouseSectionSelection = () => {
+    if (currentPage === 1) {
+        return (
+    <div>
+    <WarehouseGridSystem
+    warehouseLayout={layouts[1]}
+    GRID_ROWS = {30}
+    GRID_COLS = {9}
+    onCellClick={handleShelfClickSelection}
+    getShelfStatus={getShelfStatus}
+    tooltipContent={getTooltipContent}
+  
+  />
+  </div>)}
+  else if (currentPage === 2) {
+      return (
+  <div>
+  <WarehouseGridSystem
+    GRID_ROWS={16}
+    GRID_COLS={22}
+  warehouseLayout={layouts[2]}
+  onCellClick={handleShelfClickSelection}
+  getShelfStatus={getShelfStatus}
+  tooltipContent={getTooltipContent}
+  
+  />
+  </div>)}
+  };
   return (
 
     <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', height: '95vh' }}>
@@ -621,58 +708,71 @@ highlightedShelves={highlightedShelves}
 </Modal>
       <h2>Articoli in magazzino</h2>
       {/* Filter Inputs and Buttons */}
-      <Row gutter={16} style={{ marginBottom: '20px' }}>
-        <Col>
-          <Button
-            type="primary"
-            icon={<ReloadOutlined />}
-            onClick={applyFilters}
-          >
-            Applica Filtri
-          </Button>
-        </Col>
-        <Col>
+      <Row gutter={16} style={{ marginBottom: '20px', alignItems:'flex-end' }}>
+  <Col>
+    <Button
+      type="primary"
+      icon={<ReloadOutlined />}
+      onClick={applyFilters}
+    >
+      Applica Filtri
+    </Button>
+  </Col>
+  <Col>
+    <Input
+      placeholder="Cerca per Codice Articolo"
+      value={articleFilter}
+      onChange={(e) => setArticleFilter(e.target.value)}
+      onKeyPress={handleKeyPress}
+      style={{ width: 200 }}
+    />
+  </Col>
+  
+  <Col>
+    <Input
+      placeholder="Cerca per Descrizione"
+      value={descriptionFilter}
+      onChange={(e) => setDescriptionFilter(e.target.value)}
+      onKeyPress={handleKeyPress}
+      style={{ width: 200 }}
+    />
+  </Col>
+  <Col>
+    <div style={{ display: 'flex', alignItems: 'flex-end' }}>
+      {['AREA', 'SCAFFALE', 'COLONNA', 'PIANO'].map((label, index) => (
+        <div key={index} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+          <span style={{ marginBottom: '4px' }}>{label}</span>
           <Input
-            placeholder="Search by Codice Articolo"
-            value={articleFilter}
-            onChange={(e) => setArticleFilter(e.target.value)}
-            onKeyPress={handleKeyPress}
-            style={{ width: 200 }}
+            ref={locationInputRefs[index]}
+            value={locationFilter[index]}
+            onChange={(e) => handleLocationFilterChange(index, e.target.value)}
+            onKeyDown={(e) => handleLocationFilterKeyDown(index, e)}
+            maxLength={index === 2 ? 2 : 1}
+            style={{
+              width: '60px',
+              textAlign: 'center',
+              marginRight: '8px'
+            }}
           />
-        </Col>
-        <Col>
-          <Input
-            placeholder="Search by Codice Fornitore"
-            value={supplierFilter}
-            onChange={(e) => setSupplierFilter(e.target.value)}
-            onKeyPress={handleKeyPress}
-            style={{ width: 200 }}
-          />
-        </Col>
-        <Col>
-          <Input
-            placeholder="Search by Descrizione"
-            value={descriptionFilter}
-            onChange={(e) => setDescriptionFilter(e.target.value)}
-            onKeyPress={handleKeyPress}
-            style={{ width: 200 }}
-          />
-        </Col>
-        <Col>
-          <Input
-            placeholder="Filter by Area-Scaffale-Colonna-Piano (e.g., A-A-01-1)"
-            value={filterString}
-            onChange={(e) => setFilterString(e.target.value)}
-            onKeyPress={handleKeyPress}
-            style={{ width: 300 }}
-          />
-        </Col>
-        <Col>
-          <Button onClick={clearFilters}>
-            Pulisci filtri
-          </Button>
-        </Col>
-      </Row>
+        </div>
+      ))}
+      
+      <Button 
+        icon={<FullscreenOutlined />}
+        onClick={() => {
+          setCurrentPage(1);
+          setIsWarehouseMapOpen(true);
+        }}
+        style={{ marginLeft: '10px' }}
+      />
+    </div>
+  </Col>
+  <Col>
+    <Button onClick={clearFilters}>
+      Pulisci filtri
+    </Button>
+  </Col>
+</Row>
       {/* Main Table */}
       <div style={{ flex: 1, overflowY: 'auto' }}>
         {loading ? (
@@ -686,10 +786,10 @@ highlightedShelves={highlightedShelves}
           </div>
         ) : (
           <Table
-          dataSource={dataSource}
+          dataSource={items} // Use items directly instead of dataSource
           columns={columns}
           expandable={expandableConfig}
-          rowKey="id_art"
+          rowKey="id_art" // Use id_art as the key since that's what the API returns
           pagination={false}
           scroll={{ x: 'max-content' }}
         />
@@ -706,6 +806,32 @@ highlightedShelves={highlightedShelves}
           showQuickJumper // Allow jumping to a specific page
         />
       </div>
+
+      <Modal
+      title="Selezionare scaffale di partenza"
+      visible={isWarehouseMapOpen}
+      onCancel={() => setIsWarehouseMapOpen(false)}
+      footer={null}
+      style={{top: '50%', transform: 'translateY(-50%)' }}
+
+      width="80%"
+    >
+      <div style={{ maxHeight: '100%', overflowY: 'auto' }}>
+        <div className="grid-container">
+          {renderWarehouseSectionSelection()}
+        </div>
+        <div className="pagination-container" style={{ marginTop: '20px', textAlign: 'center' }}>
+          <Pagination
+            current={currentPage}
+            total={2}
+            pageSize={1}
+            onChange={handlePageChange}
+            showSizeChanger={false}
+            simple
+          />
+        </div>
+      </div>
+    </Modal>
     </div>
   );
 };
