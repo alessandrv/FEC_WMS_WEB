@@ -1835,7 +1835,7 @@ return (
       </div>
     </Tabs.TabPane>
 
-    <Tabs.TabPane  tab="Trasferimento da Movimento" key="2">
+    <Tabs.TabPane  tab="Trasferimento con Movimento" key="2">
     <Card>
         <Form layout="vertical">
           <Form.Item label="Codice Movimento">

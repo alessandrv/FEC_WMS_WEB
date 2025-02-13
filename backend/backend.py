@@ -25,41 +25,52 @@ def connect_to_db():
         raise Exception(f"Unable to connect to the database: {str(e)}")
     
 # Endpoint to fetch logs
-# Endpoint to fetch logs
 @app.route('/api/operation-logs', methods=['GET'])
 def get_operation_logs():
-    """
-    Fetches operation logs from the database.
-    Supports pagination and filtering by operation type and timestamp range.
-    """
     try:
         # Get query parameters for filtering
         page = int(request.args.get('page', 1))
         limit = int(request.args.get('limit', 10))
         operation_type = request.args.get('operation_type')
-        start_date = request.args.get('start_date')  # Optional start date
-        end_date = request.args.get('end_date')  # Optional end date
+        operation_details = request.args.get('operation_details')
+        start_date = request.args.get('start_date')
+        end_date = request.args.get('end_date')
+        user_ip = request.remote_addr  # Get the current user's IP
 
         offset = (page - 1) * limit
 
         conn = connect_to_db()
         cursor = conn.cursor()
 
-        # Base query
+        # Base query - modified to include conditional IP display
         query = """
-        SELECT {skip} {first} id, timestamp, operation_type, operation_details, user, ip_address
+        SELECT {skip} {first} 
+            id, 
+            timestamp, 
+            operation_type, 
+            operation_details, 
+            user,
+            CASE 
+                WHEN ip_address = ? THEN ip_address || ' (TU)'
+                ELSE ip_address 
+            END as ip_address
         FROM wms_log
         WHERE 1=1
         """.format(
             skip=f"SKIP {offset}" if offset > 0 else "",
             first=f"FIRST {limit}"
         )
-        params = []
+        
+        # Add user_ip as the first parameter
+        params = [user_ip]
 
         # Add filters
         if operation_type:
             query += " AND operation_type = ?"
             params.append(operation_type)
+        if operation_details:
+            query += " AND UPPER(operation_details) LIKE UPPER(?)"
+            params.append(f"%{operation_details}%")
         if start_date:
             query += " AND timestamp >= ?"
             params.append(datetime.strptime(start_date, "%Y-%m-%d"))
@@ -79,13 +90,16 @@ def get_operation_logs():
         # Convert rows to list of dictionaries
         logs = [dict(zip(columns, row)) for row in rows]
 
-        # Get total count for pagination
+        # Get total count for pagination with the same filters
         count_query = "SELECT COUNT(*) FROM wms_log WHERE 1=1"
         count_params = []
 
         if operation_type:
             count_query += " AND operation_type = ?"
             count_params.append(operation_type)
+        if operation_details:
+            count_query += " AND UPPER(operation_details) LIKE UPPER(?)"
+            count_params.append(f"%{operation_details}%")
         if start_date:
             count_query += " AND timestamp >= ?"
             count_params.append(datetime.strptime(start_date, "%Y-%m-%d"))
@@ -105,7 +119,6 @@ def get_operation_logs():
 
     except pyodbc.Error as e:
         return jsonify({'error': str(e)}), 500
-
     finally:
         if 'cursor' in locals():
             cursor.close()
