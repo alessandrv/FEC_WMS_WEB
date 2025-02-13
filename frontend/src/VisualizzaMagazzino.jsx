@@ -30,7 +30,7 @@ const GroupedItemsTable = () => {
   const [selectedShelf, setSelectedShelf] = useState(null);
   const [occupiedShelves, setOccupiedShelves] = useState(new Set());
   
-  const [locationFilter, setLocationFilter] = useState(['', '', '', '']); // [area, scaffale, colonna, piano]
+  const [locationFilter, setLocationFilter] = useState(['A', '', '', '']); // [area, scaffale, colonna, piano]
 const locationInputRefs = [useRef(), useRef(), useRef(), useRef()];
 
   const groupSubitemsByLocationAndMovement = (subitems) => {
