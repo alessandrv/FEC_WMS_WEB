@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Input, Tabs, Typography, Button, message, Modal,notification, Table, Tooltip,Tag, InputNumber,Row, Space, Col, Spin, Pagination, Card, Form, Alert } from 'antd';
 import axios from 'axios';
-import {InfoCircleOutlined, CloseCircleOutlined } from '@ant-design/icons';
+import {InfoCircleOutlined, CloseCircleOutlined, FullscreenOutlined  } from '@ant-design/icons';
 
 import WarehouseGrid from './GridComponent';
 import './App.css'; // Make sure to import your CSS
@@ -577,11 +577,29 @@ const handleRemoveLocation = (record) => {
   
   const handleShelfClick = (shelf) => {
     setHighlightedShelf(shelf);
+
     console.log(shelf)
     setIsWarehouseMapOpen(false);
     
     setIsTransferConfirmationOpen(true);
   };
+
+// Update the handleShelfClickSelection function to work with both tabs
+const handleShelfClickSelection = (shelf) => {
+  setHighlightedShelf(shelf);
+  
+  // Parse the shelf string (format: "C-01-1")
+  const [scaffale, colonna, piano] = shelf.split('-');
+  
+  // Set values based on which tab is active
+  if (activeTab === '1') {
+    setOtp(['A', scaffale, colonna, piano]);
+  } else if (activeTab === '2') {
+    setLocationOTP(['A', scaffale, colonna, piano]);
+  }
+  
+  setIsWarehouseMapOpen(false);
+};
 
   const layouts = {
     1: [
@@ -976,8 +994,42 @@ tooltipContent={getTooltipContent}
 </div>)}
 };
 
-const openWarehouseMap = () => {
+
+
+
+const renderWarehouseSectionSelection = () => {
+  if (currentPage === 1) {
+      return (
+  <div>
+  <WarehouseGridSystem
+  warehouseLayout={layouts[1]}
+  GRID_ROWS = {30}
+  GRID_COLS = {9}
+  onCellClick={handleShelfClickSelection}
+  getShelfStatus={getShelfStatus}
+  tooltipContent={getTooltipContent}
+
+/>
+</div>)}
+else if (currentPage === 2) {
+    return (
+<div>
+<WarehouseGridSystem
+  GRID_ROWS={16}
+  GRID_COLS={22}
+warehouseLayout={layouts[2]}
+onCellClick={handleShelfClickSelection}
+getShelfStatus={getShelfStatus}
+tooltipContent={getTooltipContent}
+
+/>
+</div>)}
+};
+const openWarehouseMapToSelect = () => {
   setIsWarehouseMapOpen(true);
+};
+const openWarehouseMap = () => {
+  setIsLocationWarehouseMapOpen(true);
 };
 
 useEffect(() => {
@@ -1105,7 +1157,7 @@ const performTransfer = async (destinationShelf) => {
     
     message.success('Transfer successful!');
     
-    setIsWarehouseMapOpen(false);
+    setIsLocationWarehouseMapOpen(false);
     setIsModalOpen(false);
     setSelectedPackages([]);
     setTotalVolume(0);
@@ -1145,7 +1197,9 @@ const columns = [
   {
     title: 'Quantità',
     dataIndex: 'gim_qmov',
-    key: 'gim_qmov'
+    key: 'gim_qmov',
+    render: (text) => parseInt(text, 10) // Convert to integer
+
   }
 ];
 
@@ -1196,7 +1250,7 @@ const handleKeyDownArticolo = ( e) => {
 
   if (e.key === 'Enter') {
     
-      fornitoreRef.current.focus();
+    handleConfirm();
     
     
   }
@@ -1336,9 +1390,24 @@ useEffect(() => {
 }, [selectedPackages, calculateTotalVolume]);
 
 const handleLocationChange = (index, value) => {
-  const newOtp = [...locationOTP];
-  newOtp[index] = value.toUpperCase();
-  setLocationOTP(newOtp);
+  const newLocationOTP = [...locationOTP];
+  
+  // Convert to uppercase for consistency
+  newLocationOTP[index] = value.toUpperCase();
+  setLocationOTP(newLocationOTP);
+
+  // Auto-focus logic
+  if (value.length === (index === 2 ? 2 : 1)) { // Colonna accepts 2 characters
+    if (index < 3) { // If not the last input
+      locationInputRefs[index + 1].current?.focus();
+    }
+  }
+};
+
+const handleLocationKeyDown = (index, e) => {
+  if (e.key === 'Backspace' && !locationOTP[index] && index > 0) {
+    locationInputRefs[index - 1].current?.focus();
+  }
 };
 
 const handleMovimentoLocationSearch = async () => {
@@ -1405,7 +1474,9 @@ const movimentoLocationColumns = [
   {
     title: 'Quantità',
     dataIndex: 'qta',
-    key: 'qta'
+    key: 'qta',
+    render: (text) => parseInt(text, 10) // Convert to integer
+
   },
   {
     title: 'Dimensione',
@@ -1446,8 +1517,29 @@ const handleLocationTransferComplete = (destLocation) => {
     const [scaffaleDest, colonnaDest, pianoDest] = destLocation.split('-');
     const areaDest = 'A';
 
+    // Handle Trasferimento Singolo (tab "1")
+    if (activeTab === '1') {
+      const items = [{
+        articolo: articoloCode,
+        quantity: transferQuantity,
+        source: `${otp[0]}-${otp[1]}-${otp[2]}-${otp[3]}`,
+        destination: `${areaDest}-${scaffaleDest}-${colonnaDest}-${pianoDest}`
+      }];
+
+      return {
+        destLocation: {
+          areaDest,
+          scaffaleDest,
+          colonnaDest,
+          pianoDest
+        },
+        items,
+        sourceLocation: otp
+      };
+    }
+    
     // Handle Trasferimento da Movimento (tab "2")
-    if (activeTab === '2') {
+    else if (activeTab === '2') {
       const [srcArea, srcScaffale, srcColonna, srcPiano] = locationOTP;
 
       const items = selectedLocationRows.map(id => {
@@ -1478,11 +1570,11 @@ const handleLocationTransferComplete = (destLocation) => {
     else if (activeTab === '3') {
       const items = selectedTransferItems.map(item => ({
         articolo: item.gim_arti,
-        quantity: parseInt(item.gim_qmov, 10), // Use each item's specific quantity
+        quantity: item.gim_qmov,
         source: item.location ? `${item.location.area}-${item.location.scaffale}-${item.location.colonna}-${item.location.piano}` : '',
         destination: `${areaDest}-${scaffaleDest}-${colonnaDest}-${pianoDest}`
       }));
-  
+
       return {
         destLocation: {
           areaDest,
@@ -1495,11 +1587,7 @@ const handleLocationTransferComplete = (destLocation) => {
       };
     }
 
-    // Handle Trasferimento Singolo (tab "1") if needed
-    else {
-      // Add logic for tab "1" if necessary
-      return prev;
-    }
+    return prev;
   });
 
   setTransferConfirmationVisible(true);
@@ -1571,7 +1659,12 @@ const TransferConfirmationModal = () => (
         }
 
         // Update UI based on active tab
-        if (activeTab === '2') {
+        if (activeTab === '1') {
+          setArticoloCode('');
+          setOtp(['', '', '', '']);
+          setTransferQuantity(0);
+        }
+        else if (activeTab === '2') {
           const updatedItems = locationItems.map(item => {
             if (selectedLocationRows.includes(item.id)) {
               return { ...item, transferred: true };
@@ -1581,7 +1674,8 @@ const TransferConfirmationModal = () => (
           setLocationItems(updatedItems);
           setSelectedLocationRows([]);
           handleMovimentoLocationSearch();
-        } else if (activeTab === '3') {
+        }
+        else if (activeTab === '3') {
           const updatedArticles = magazziniArticles.map(article => {
             if (selectedRows.includes(article.id)) {
               return { ...article, transferred: true };
@@ -1606,7 +1700,6 @@ const TransferConfirmationModal = () => (
     cancelText="Annulla"
     width={800}
   >
-  
     {pendingTransferData && pendingTransferData.items && pendingTransferData.items.length > 0 ? (
       <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
         <h4>Dettagli Trasferimento</h4>
@@ -1622,7 +1715,9 @@ const TransferConfirmationModal = () => (
             {
               title: 'Quantità',
               dataIndex: 'quantity',
-              key: 'quantity'
+              key: 'quantity',
+              render: (text) => parseInt(text, 10) // Convert to integer
+
             },
             {
               title: 'Da',
@@ -1642,6 +1737,13 @@ const TransferConfirmationModal = () => (
     )}
   </Modal>
 );
+const locationInputRefs = [
+  useRef(null),
+  useRef(null),
+  useRef(null),
+  useRef(null)
+];
+
 
 const handleRowSelection = (selectedRowKeys, selectedRows) => {
   const validRows = selectedRows.filter(row => 
@@ -1687,7 +1789,7 @@ return (
      <Tabs.TabPane tab="Trasferimento Singolo" key="1">
       <div style={containerStyle}>
       <Card title="Trasferimenti" style={cardStyle}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px', alignItems: 'flex-end' }}>
       {['AREA', 'SCAFFALE', 'COLONNA', 'PIANO'].map((label, index) => (
         <div key={index} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
           <span style={{ marginBottom: '4px' }}>{label}</span>
@@ -1701,10 +1803,14 @@ return (
           />
           
         </div>
-
-      )
-      )
-      }
+      ))}
+      
+      <Button 
+              icon={<FullscreenOutlined />}
+              onClick={openWarehouseMapToSelect}
+        style={{ marginLeft: '10px' }}
+      ></Button>
+      
       </div>
 
       <Form layout="vertical">
@@ -1741,19 +1847,35 @@ return (
           </Form.Item>
           
           <Form.Item label="Posizione">
-            <div style={{ display: 'flex', gap: '8px' }}>
-              {['Area', 'Scaffale', 'Colonna', 'Piano'].map((label, index) => (
-                <Input
-                  key={index}
-                  value={locationOTP[index]}
-                  onChange={(e) => handleLocationChange(index, e.target.value)}
-                  placeholder={label}
-                  style={{ width: '80px' }}
-                  maxLength={index === 2 ? 2 : 1}
-                />
-              ))}
-            </div>
-          </Form.Item>
+  <div style={{ display: 'flex', marginBottom: '20px', alignItems: 'flex-end' }}>
+    {['AREA', 'SCAFFALE', 'COLONNA', 'PIANO'].map((label, index) => (
+      <div key={index} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+        <span style={{ marginBottom: '4px' }}>{label}</span>
+        <Input
+          ref={locationInputRefs[index]}
+          value={locationOTP[index]}
+          onChange={(e) => handleLocationChange(index, e.target.value)}
+          onKeyDown={(e) => handleLocationKeyDown(index, e)}
+          maxLength={index === 2 ? 2 : 1}
+          style={{
+            width: '60px',
+            textAlign: 'center',
+            marginRight: '8px'
+          }}
+        />
+      </div>
+    ))}
+    
+    <Button 
+      icon={<FullscreenOutlined />}
+      onClick={() => {
+        setCurrentPage(1);
+        setIsWarehouseMapOpen(true);
+      }}
+      style={{ marginLeft: '10px' }}
+    />
+  </div>
+</Form.Item>
 
           <Button
             type="primary"
@@ -1878,7 +2000,7 @@ footer={[
   </Button>,
   <Button
   type="primary"
-  onClick={() => setIsWarehouseMapOpen(true)}
+  onClick={() => setIsLocationWarehouseMapOpen(true)}
   disabled={transferQuantity <= 0 || transferQuantity > shelfInfo.totalQuantity}
 
 >
@@ -1936,15 +2058,17 @@ footer={[
 
 
     <Modal
-      title="Selezionare scaffale di destinazione"
+      title="Selezionare scaffale di partenza"
       visible={isWarehouseMapOpen}
       onCancel={() => setIsWarehouseMapOpen(false)}
       footer={null}
+      style={{top: '50%', transform: 'translateY(-50%)' }}
+
       width="80%"
     >
       <div style={{ maxHeight: '100%', overflowY: 'auto' }}>
         <div className="grid-container">
-          {renderWarehouseSection()}
+          {renderWarehouseSectionSelection()}
         </div>
         <div className="pagination-container" style={{ marginTop: '20px', textAlign: 'center' }}>
           <Pagination
