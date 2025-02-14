@@ -1513,6 +1513,7 @@ WHERE
     p.occ_tipo = ?
     AND p.occ_code = ?
     AND p.occ_riga >= ?
+    AND (m.mpl_dafi >= TODAY or m.mpl_dafi is null)
     AND p.occ_riga <= (
         SELECT MIN(p1.occ_riga)
         FROM ocordic p1
