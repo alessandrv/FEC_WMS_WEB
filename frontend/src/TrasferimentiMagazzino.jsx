@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Input, Tabs, Typography, Button, message, Modal,notification, Table, Tooltip,Tag, InputNumber,Row, Space, Col, Spin, Pagination, Card, Form, Alert } from 'antd';
+import { Input, Tabs, Typography, Button, message, Modal, notification, Table, Tooltip, Tag, InputNumber, Row, Space, Col, Spin, Pagination, Card, Form, Alert } from 'antd';
 import axios from 'axios';
-import {InfoCircleOutlined, CloseCircleOutlined, FullscreenOutlined  } from '@ant-design/icons';
+import { InfoCircleOutlined, CloseCircleOutlined, FullscreenOutlined } from '@ant-design/icons';
 
 import WarehouseGrid from './GridComponent';
 import './App.css'; // Make sure to import your CSS
@@ -25,15 +25,15 @@ const App = () => {
   const [magazziniLoading, setMagazziniLoading] = useState(false);
   const [articleLocations, setArticleLocations] = useState({});
   const [locationChangeModalVisible, setLocationChangeModalVisible] = useState(false);
-const [changeLocationQuantityModalVisible, setChangeLocationQuantityModalVisible] = useState(false);
-const [selectedLocation, setSelectedLocation] = useState(null);
-const [selectedQuantity, setSelectedQuantity] = useState(0);
-const [maxAvailableQuantity, setMaxAvailableQuantity] = useState(0);
-const [selectedRowId, setSelectedRowId] = useState(null);
-const [articleFilter, setArticleFilter] = useState('');
-const [locationData, setLocationData] = useState([]); // Renamed from dataSource
-const [highlightedRows] = useState(new Set());
-  const[isTransferConfirmationOpen, setIsTransferConfirmationOpen] = useState(false);
+  const [changeLocationQuantityModalVisible, setChangeLocationQuantityModalVisible] = useState(false);
+  const [selectedLocation, setSelectedLocation] = useState(null);
+  const [selectedQuantity, setSelectedQuantity] = useState(0);
+  const [maxAvailableQuantity, setMaxAvailableQuantity] = useState(0);
+  const [selectedRowId, setSelectedRowId] = useState(null);
+  const [articleFilter, setArticleFilter] = useState('');
+  const [locationData, setLocationData] = useState([]); // Renamed from dataSource
+  const [highlightedRows] = useState(new Set());
+  const [isTransferConfirmationOpen, setIsTransferConfirmationOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [tableData, setTableData] = useState([]);
@@ -74,13 +74,21 @@ const [highlightedRows] = useState(new Set());
 
   const handleLocationChangeMagazzini = (location) => {
     if (!selectedRowId) {
-      message.error('Nessuna riga selezionata');
+      notification.error({
+        message: 'Nessuna riga selezionata',
+        placement: 'bottomRight',
+        duration: 5,
+      });
       return;
     }
   
     const selectedArticle = magazziniArticles.find(article => article.id === selectedRowId);
     if (!selectedArticle) {
-      message.error('Articolo non trovato');
+      notification.error({
+        message: 'Articolo non trovato',
+        placement: 'bottomRight',
+        duration: 5,
+      });
       return;
     }
   
@@ -116,7 +124,11 @@ const [highlightedRows] = useState(new Set());
       }
     } catch (error) {
       console.error('Error fetching locations:', error);
-      message.error('Errore nel caricamento delle locazioni');
+      notification.error({
+        message: 'Errore nel caricamento delle locazioni',
+        placement: 'bottomRight',
+        duration: 5,
+      });
     } finally {
       setLoading(false);
     }
@@ -380,6 +392,7 @@ const [highlightedRows] = useState(new Set());
         message: 'Successo',
         description: 'Posizione aggiornata con successo',
         placement: 'bottomRight',
+        duration: 5,
       });
   
       handleChangeLocationQuantityModalClose();
@@ -390,6 +403,7 @@ const [highlightedRows] = useState(new Set());
         message: 'Errore',
         description: 'Errore durante l\'aggiornamento della posizione.',
         placement: 'bottomRight',
+        duration: 5,
       });
     }
   };
@@ -464,7 +478,12 @@ const handleMagazziniTransferComplete = (destLocation) => {
       setArticleLocations(locationsMap);
     } catch (error) {
       console.error('Error fetching movimento articles:', error);
-      message.error('Errore durante la ricerca. Riprova.');
+      notification.error({
+        message: 'Errore durante la ricerca',
+        description: 'Riprova.',
+        placement: 'bottomRight',
+        duration: 5,
+      });
     } finally {
       setMagazziniLoading(false);
     }
@@ -863,7 +882,11 @@ const handlePageChange = (page) => {
 };
 const handleMovimentoInputConfirm = async () => {
   if (!movimentoInput) {
-    message.error('Inserisci un codice movimento');
+    notification.error({
+      message: 'Inserisci un codice movimento',
+      placement: 'bottomRight',
+      duration: 5,
+    });
     return;
   }
   setSelectedRows([]);
@@ -888,7 +911,11 @@ const handleMovimentoInputConfirm = async () => {
     setArticoliMovimento(articoliMovimento);
   } catch (error) {
     console.error('Errore dettagliato:', error);
-    message.error(`Errore nel caricamento: ${error.response?.data?.error || error.message}`);
+    notification.error({
+      message: `Errore nel caricamento: ${error.response?.data?.error || error.message}`,
+      placement: 'bottomRight',
+      duration: 5,
+    });
   } finally {
     setLoadingArticoli(false);
   }
@@ -914,10 +941,18 @@ const handleTransfer = async (quantity) => {
     if (!response.ok) {
       throw new Error('Network response was not ok');
     }
-    message.success('Trasferimento avviato con successo');
+    notification.success({
+      message: 'Trasferimento avviato con successo',
+      placement: 'bottomRight',
+      duration: 5,
+    });
     setIsModalOpen(false);
   } catch (error) {
-    message.error('Errore durante il trasferimento');
+    notification.error({
+      message: 'Errore durante il trasferimento',
+      placement: 'bottomRight',
+      duration: 5,
+    });
     console.error('Error:', error);
   } finally {
     setLoading(false);
@@ -1112,14 +1147,21 @@ pianoDest : pianoDest,
 fornitore :fornitoreCode,
 quantity : transferQuantity,
     });
-    message.success('Trasferimento completato con successo!');
+    notification.success({
+      message: 'Trasferimento completato con successo!',
+      placement: 'bottomRight',
+      duration: 5,
+    });
     setIsTransferConfirmationOpen(false);
     setIsModalOpen(false)
+    
   } catch (error) {
     console.error('Error confirming transfer:', error);
-    message.error('Errore nel trasferimento.');
-  } finally {
-    setLoading(false);
+    notification.error({
+      message: 'Errore nel trasferimento.',
+      placement: 'bottomRight',
+      duration: 5,
+    });
   }
   
 };
@@ -1155,7 +1197,11 @@ const performTransfer = async (destinationShelf) => {
     
     await axios.post(`${process.env.REACT_APP_API_URL}/api/transfer-packages`, transferData);
     
-    message.success('Transfer successful!');
+    notification.success({
+      message: 'Transfer successful!',
+      placement: 'bottomRight',
+      duration: 5,
+    });
     
     setIsLocationWarehouseMapOpen(false);
     setIsModalOpen(false);
@@ -1165,9 +1211,17 @@ const performTransfer = async (destinationShelf) => {
     console.error('Error performing transfer:', error);
     
     if (error.response && error.response.data && error.response.data.error) {
-      message.error(`Transfer failed: ${error.response.data.error}`);
+      notification.error({
+        message: `Transfer failed: ${error.response.data.error}`,
+        placement: 'bottomRight',
+        duration: 5,
+      });
     } else {
-      message.error('Transfer failed.');
+      notification.error({
+        message: 'Transfer failed.',
+        placement: 'bottomRight',
+        duration: 5,
+      });
     }
   }
 };
@@ -1227,7 +1281,11 @@ const handleKeyDown = (index, e) => {
     if (!emptyFields) {
       articoloRef.current.focus();
     } else {
-      message.error('Inserisci la locazione completa.');
+      notification.error({
+        message: 'Inserisci la locazione completa.',
+        placement: 'bottomRight',
+        duration: 5,
+      });
     }
     
   }
@@ -1309,12 +1367,20 @@ const validateFields = () => {
 
   if (articoloCode.trim() === '') {
     console.log('Codice Articolo is empty');
-    message.error('Codice Articolo is obbligatorio.');
+    notification.error({
+      message: 'Codice Articolo is obbligatorio.',
+      placement: 'bottomRight',
+      duration: 5,
+    });
     return false;
   }
 
   if (emptyOtpFields.length > 0) {
-    message.error('Compila tutti i campi di posizione.');
+    notification.error({
+      message: 'Compila tutti i campi di posizione.',
+      placement: 'bottomRight',
+      duration: 5,
+    });
     return false;
   }
 
@@ -1354,7 +1420,11 @@ const handleConfirm = async () => {
     });
     setIsModalOpen(true);
   } catch (error) {
-    message.error('Errore di connessione o di scansione');
+    notification.error({
+      message: 'Errore di connessione o di scansione',
+      placement: 'bottomRight',
+      duration: 5,
+    });
     console.error('Error:', error);
   } finally {
     setLoading(false);
@@ -1413,7 +1483,11 @@ const handleLocationKeyDown = (index, e) => {
 const handleMovimentoLocationSearch = async () => {
   const [area, scaffale, colonna, piano] = locationOTP;
   if (!movimentoTransfer || locationOTP.some(field => !field)) {
-    message.error('Compila tutti i campi del movimento e della posizione');
+    notification.error({
+      message: 'Compila tutti i campi del movimento e della posizione',
+      placement: 'bottomRight',
+      duration: 5,
+    });
     return;
   }
 
@@ -1454,7 +1528,11 @@ const handleMovimentoLocationSearch = async () => {
  
   } catch (error) {
     console.error('Search error:', error);
-    message.error('Errore nella ricerca');
+    notification.error({
+      message: 'Errore nella ricerca',
+      placement: 'bottomRight',
+      duration: 5,
+    });
   } finally {
     setLoadingLocationItems(false);
   }
@@ -1589,7 +1667,7 @@ const handleLocationTransferComplete = (destLocation) => {
 
     return prev;
   });
-
+  
   setTransferConfirmationVisible(true);
 };
 
@@ -1603,7 +1681,11 @@ const handleMultiplePartialConfirm = () => {
     setIsLocationWarehouseMapOpen(true);
     setShowMultiplePartialDepositModal(false);
   } else {
-    message.error(`La quantità deve essere tra 1 e ${minQty}`);
+    notification.error({
+      message: `La quantità deve essere tra 1 e ${minQty}`,
+      placement: 'bottomRight',
+      duration: 5,
+    });
   }
 };
 
@@ -1630,10 +1712,13 @@ const TransferConfirmationModal = () => (
     visible={transferConfirmationVisible}
     onOk={async () => {
       if (!pendingTransferData?.items?.length) {
-        message.error('Nessun dato di trasferimento disponibile');
+        notification.error({
+          message: 'Nessun dato di trasferimento disponibile',
+          placement: 'bottomRight',
+          duration: 5,
+        });
         return;
       }
-
       setTransferConfirmationVisible(false);
       setLoading(true);
       
@@ -1686,11 +1771,20 @@ const TransferConfirmationModal = () => (
           setSelectedRows([]);
         }
 
-        message.success(`Trasferiti ${pendingTransferData.items.length} articoli`);
-        
+        notification.success({
+          message: 'Trasferimento Completato',
+          description: `Trasferiti ${pendingTransferData.items.length} articoli`,
+          duration: 5,
+          placement: 'bottomRight',
+        });
+        setIsModalOpen(false);
       } catch (error) {
         console.error('Transfer error:', error);
-        message.error(error.response?.data?.message || 'Errore durante il trasferimento');
+        notification.error({
+          message: error.response?.data?.message || 'Errore durante il trasferimento',
+          placement: 'bottomRight',
+          duration: 5,
+        });
       } finally {
         setLoading(false);
       }
@@ -1762,14 +1856,22 @@ console.log("QUI")
 
 const handleTransferInitiation = (isPartial) => {
   if (selectedTransferItems.length === 0) {
-    message.error('Seleziona almeno un articolo');
+    notification.error({
+      message: 'Seleziona almeno un articolo',
+      placement: 'bottomRight',
+      duration: 5,
+    });
     return;
   }
 
   // Validate all selected items have locations
   const itemsWithoutLocation = selectedTransferItems.filter(item => !item.location);
   if (itemsWithoutLocation.length > 0) {
-    message.error('Tutti gli articoli devono avere una posizione assegnata');
+    notification.error({
+      message: 'Tutti gli articoli devono avere una posizione assegnata',
+      placement: 'bottomRight',
+      duration: 5,
+    });
     return;
   }
   
@@ -1910,7 +2012,11 @@ return (
                   type="primary"
                   onClick={() => {
                     if (selectedLocationRows.length === 0) {
-                      message.warning('Seleziona almeno un articolo');
+                      notification.warning({
+                        message: 'Seleziona almeno un articolo',
+                        placement: 'bottomRight',
+                        duration: 5,
+                      });
                       return;
                     }
                     setMultiplePartialQuantity(0);
@@ -1991,55 +2097,64 @@ return (
   </Tabs>
      <Modal
      style={{width:"50%"}}
-title={`Scanned Shelf: Area ${shelfInfo.area}, Scaffale ${shelfInfo.scaffale}, Colonna ${shelfInfo.colonna}, Piano ${shelfInfo.piano}`}
-visible={isModalOpen}
-onCancel={() => setIsModalOpen(false)}
-footer={[
-  <Button key="cancel" onClick={() => setIsModalOpen(false)}>
-    Indietro
-  </Button>,
-  <Button
-  type="primary"
-  onClick={() => setIsLocationWarehouseMapOpen(true)}
-  disabled={transferQuantity <= 0 || transferQuantity > shelfInfo.totalQuantity}
-
->
-  Seleziona destinazione
-</Button>
-,
-]}
->
-  <div style={{ marginBottom: '16px' }}>
-    <strong>ID Articolo:</strong> {articoloCode}
-  </div>
-  <div style={{ marginBottom: '16px' }}>
-    <strong>Quantità Totale:</strong> {shelfInfo.totalQuantity}
-  </div>
-  <div style={{ marginBottom: '16px' }}>
-    <strong>Quantità da spostare:</strong>
-    <InputNumber
-  min={1}
-  max={shelfInfo.totalQuantity}
-  value={transferQuantity}
- 
-  onChange={(value) => {
-    if (value <= shelfInfo.totalQuantity) {
-      setTransferQuantity(value);
-    }
-  }}
-  style={{ width: '100%', marginTop: '8px' }}
-  onPressEnter={() => {
-    if (transferQuantity > 0 && transferQuantity <= shelfInfo.totalQuantity) {
-      message.success('Quantità impostata correttamente');
-    }
-  }}
-  step={1}
-  parser={(value) => value.replace(/[^\d]/g, '')}
-  formatter={(value) => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
-/>
-
-  </div>
-</Modal>
+     title={`Scaffale selezionato: Area ${shelfInfo.area}, Scaffale ${shelfInfo.scaffale}, Colonna ${shelfInfo.colonna}, Piano ${shelfInfo.piano}`}
+     visible={isModalOpen}
+     onCancel={() => setIsModalOpen(false)}
+     footer={[
+       <Button key="cancel" onClick={() => setIsModalOpen(false)}>
+         Indietro
+       </Button>,
+       <Button
+         type="primary"
+         onClick={() => setIsLocationWarehouseMapOpen(true)}
+         disabled={transferQuantity <= 0 || transferQuantity > shelfInfo.totalQuantity}
+       >
+         Seleziona destinazione
+       </Button>,
+     ]}
+   >
+     {loading ? (
+       <div style={{ textAlign: 'center', padding: '20px' }}>
+         <Spin size="large" />
+       </div>
+     ) : (
+       <>
+         <div style={{ marginBottom: '16px' }}>
+           <strong>ID Articolo:</strong> {articoloCode}
+         </div>
+         <div style={{ marginBottom: '16px' }}>
+           <strong>Quantità Totale:</strong> {shelfInfo.totalQuantity}
+         </div>
+         <div style={{ marginBottom: '16px' }}>
+           <strong>Quantità da spostare:</strong>
+           <InputNumber
+             min={1}
+             max={shelfInfo.totalQuantity}
+             defaultValue={0}
+             value={transferQuantity}
+             onChange={(value) => {
+               if (value <= shelfInfo.totalQuantity) {
+                 setTransferQuantity(value);
+               }
+             }}
+             style={{ width: '100%', marginTop: '8px' }}
+             onPressEnter={() => {
+               if (transferQuantity > 0 && transferQuantity <= shelfInfo.totalQuantity) {
+                 notification.success({
+                   message: 'Quantità impostata correttamente',
+                   placement: 'bottomRight',
+                   duration: 5,
+                 });
+               }
+             }}
+             step={1}
+             parser={(value) => value.replace(/[^\d]/g, '')}
+             formatter={(value) => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
+           />
+         </div>
+       </>
+     )}
+   </Modal>
 <Modal
   title="Conferma Trasferimento"
   visible={isTransferConfirmationOpen}
@@ -2118,7 +2233,11 @@ footer={[
       visible={showPartialDepositModal}
       onOk={() => {
         if (partialQuantity <= 0) {
-          message.error('Inserisci una quantità valida');
+          notification.error({
+            message: 'Inserisci una quantità valida',
+            placement: 'bottomRight',
+            duration: 5,
+          });
           return;
         }
         setShowPartialDepositModal(false);
@@ -2218,7 +2337,12 @@ footer={[
       setIsLocationWarehouseMapOpen(true);
       setShowMultiplePartialDepositModal(false);
     } else {
-      message.error(`La quantità deve essere tra 1 e ${minQty}`);
+      notification.error({
+        message: 'Errore',
+        description: `La quantità deve essere tra 1 e ${minQty}`,
+        placement: 'bottomRight',
+        duration: 5,
+      });
     }
   }}
   okText="Procedi con trasferimento"
