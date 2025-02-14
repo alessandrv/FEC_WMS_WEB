@@ -20,7 +20,7 @@ import LogsTable from './LogsTable';
 import Accettazione from './Accettazione';
 import IncomingItemsTable from './IncomingItemsTable';
 import FiveInputPage from './FiveInputPage';
-import WarehouseGridTest from './WarehouseGridTest';
+import Incongurenze from './Incongruenze';
 
 const { Content } = Layout;
 
@@ -79,6 +79,7 @@ root.render(
               <Route path="/inventario" element={<FiveInputPage />} />
               <Route path="/test" element={<Picking2 />} />
               <Route path="/logs" element={<LogsTable />} />
+              <Route path="/incongurenze" element={<Incongurenze />} />
             </Routes>
           </Content>
         </Layout>

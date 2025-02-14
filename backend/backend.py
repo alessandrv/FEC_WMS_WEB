@@ -292,6 +292,106 @@ def check_fornitore_coerenza():
         if 'conn' in locals():
             conn.close()
 
+@app.route('/api/system-quantities', methods=['GET'])
+def get_system_quantities():
+    """Get quantities grouped by location with system comparison"""
+    try:
+        conn = connect_to_db()
+        cursor = conn.cursor()
+
+        # Get WMS quantities with total per article
+        cursor.execute("""
+    SELECT
+CAST(w.id_art AS VARCHAR(20)) as id_art,
+w.area,
+w.scaffale,
+w.colonna,
+w.piano,
+w.wms_qty,
+t.total_wms_qty
+FROM (
+SELECT
+id_art,
+area,
+scaffale,
+colonna,
+piano,
+SUM(qta) as wms_qty
+FROM wms_items
+GROUP BY id_art, area, scaffale, colonna, piano
+) w
+JOIN (
+SELECT
+id_art,
+SUM(qta) as total_wms_qty
+FROM wms_items
+GROUP BY id_art
+) t ON w.id_art = t.id_art
+""")
+        wms_groups = cursor.fetchall()
+        columns = [column[0] for column in cursor.description]
+        wms_quantities = [dict(zip(columns, row)) for row in wms_groups]
+
+        # Get distinct articles
+        id_arts = list({group['id_art'] for group in wms_quantities})
+
+        # Get system quantities for all articles
+        system_quantities = {}
+        if id_arts:
+            format_strings = ','.join(['?'] * len(id_arts))
+            cursor.execute(f"""
+                SELECT 
+                    CAST(m.dep_arti AS VARCHAR(20)) as dep_arti,
+                    m.dep_qcar - m.dep_qsca as system_qty,
+                    g.amg_dest
+                FROM mgdepo m 
+                INNER JOIN mganag g ON m.dep_arti = g.amg_code
+                WHERE m.dep_code = '1' 
+                AND CAST(m.dep_arti AS VARCHAR(20)) IN ({format_strings})
+            """, id_arts)
+            system_data = cursor.fetchall()
+            system_quantities = {
+                row[0]: {
+                    'system_quantity': row[1],
+                    'amg_dest': row[2]
+                } for row in system_data
+            }
+
+        # Combine WMS and system data
+        results = []
+        for group in wms_quantities:
+            system_info = system_quantities.get(group['id_art'], {})
+            if int(group['total_wms_qty']) != int(system_info.get('system_quantity', 0)):
+                
+                results.append({
+                'id_art': group['id_art'],
+                'location': {
+                    'area': group['area'],
+                    'scaffale': group['scaffale'],
+                    'colonna': group['colonna'],
+                    'piano': group['piano']
+                },
+                'wms_quantity': int(group['wms_qty']),
+                'total_wms_qty': int(group['total_wms_qty']),
+                'system_quantity': int(system_info.get('system_quantity', 0)),
+                'difference': int(system_info.get('system_quantity', 0)) - int(group['total_wms_qty']),
+                'amg_dest': system_info.get('amg_dest', 'N/A')
+            })
+
+        return jsonify({
+            'count': len(results),
+            'results': results
+        }), 200
+
+    except pyodbc.Error as e:
+        app.logger.error(f"Database error: {str(e)}")
+        return jsonify({'error': 'Database error occurred.'}), 500
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        if 'conn' in locals():
+            conn.close()
+
 @app.route('/api/get-items', methods=['GET'])
 def get_items():
     try:
@@ -1411,7 +1511,7 @@ LEFT JOIN
     mganag mg ON m.mpl_figlio = mg.amg_code
 WHERE 
     p.occ_tipo = ?
-    AND p.occ_code = ? 
+    AND p.occ_code = ?
     AND p.occ_riga >= ?
     AND p.occ_riga <= (
         SELECT MIN(p1.occ_riga)
@@ -1423,7 +1523,6 @@ WHERE
     )
 
 UNION ALL
-
 SELECT 
     p.occ_arti,
     p.occ_qmov,
@@ -1436,15 +1535,35 @@ LEFT JOIN
     mganag mg ON p.occ_arti = mg.amg_code
 WHERE 
     p.occ_tipo = ?
-    AND p.occ_code = ? 
+    AND p.occ_code = ?
     AND p.occ_riga >= ?
-    AND p.occ_riga < ?
-    
     AND NOT EXISTS (
         SELECT 1 
         FROM mplegami m 
         WHERE m.mpl_padre = p.occ_arti
-    );
+    )
+    AND (
+         /* If there is a row with occ_arti NULL, return only rows before it */
+         p.occ_riga < (
+             SELECT MIN(p2.occ_riga)
+             FROM ocordic p2
+             WHERE p2.occ_tipo = ?
+               AND p2.occ_code = ?
+               AND p2.occ_riga >= ?
+               AND p2.occ_arti IS NULL
+         )
+         /* Or, if no such row exists, return all rows */
+         OR (
+             SELECT MIN(p2.occ_riga)
+             FROM ocordic p2
+             WHERE p2.occ_tipo = ?
+               AND p2.occ_code = ?
+               AND p2.occ_riga >= ?
+               AND p2.occ_arti IS NULL
+         ) IS NULL
+    )
+ORDER BY 
+    p.occ_riga;
         """
         # Find the minimum gol_ocri greater than current gol_ocri
         next_ocri_values = [row.gol_ocri for row in rows if row.gol_ocri > gol_ocri]
@@ -1455,7 +1574,8 @@ WHERE
             gol_octi, gol_occo, gol_ocri,  # First block
             gol_octi, gol_occo, gol_ocri,  # Subquery in first block
             gol_octi, gol_occo, gol_ocri,  # Subquery in second block
-            prossimo_ordine
+            gol_octi, gol_occo, gol_ocri,
+            gol_octi, gol_occo, gol_ocri,
         )
 
         cursor.execute(query3, params)
