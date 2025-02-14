@@ -1198,7 +1198,7 @@ const performTransfer = async (destinationShelf) => {
     await axios.post(`${process.env.REACT_APP_API_URL}/api/transfer-packages`, transferData);
     
     notification.success({
-      message: 'Transfer successful!',
+      message: 'Transferimento avvenuto con successo!',
       placement: 'bottomRight',
       duration: 5,
     });
@@ -1212,13 +1212,13 @@ const performTransfer = async (destinationShelf) => {
     
     if (error.response && error.response.data && error.response.data.error) {
       notification.error({
-        message: `Transfer failed: ${error.response.data.error}`,
+        message: `Transferimento fallito: ${error.response.data.error}`,
         placement: 'bottomRight',
         duration: 5,
       });
     } else {
       notification.error({
-        message: 'Transfer failed.',
+        message: 'Transferimento fallito.',
         placement: 'bottomRight',
         duration: 5,
       });
@@ -1366,9 +1366,8 @@ const validateFields = () => {
   const emptyOtpFields = otp.filter(field => field.trim() === '');
 
   if (articoloCode.trim() === '') {
-    console.log('Codice Articolo is empty');
     notification.error({
-      message: 'Codice Articolo is obbligatorio.',
+      message: 'Codice Articolo è obbligatorio.',
       placement: 'bottomRight',
       duration: 5,
     });
