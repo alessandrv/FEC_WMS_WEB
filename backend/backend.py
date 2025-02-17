@@ -514,7 +514,7 @@ def get_items():
                 wi.id_art IN ({placeholders})
                 {location_condition}
             ORDER BY 
-                wi.id_art
+                wi.id_art, wi.scaffale, wi.colonna, wi.piano
         """
         
         # Combine id_art_list with location parameters
@@ -1152,7 +1152,7 @@ def update_pacchi():
         # Step 3: Update the volume in wms_scaffali
         
         conn.commit()
-        operation_details = f"Prelievo articolo {articolo} da {area}-{scaffale}-{colonna}-{piano} - QTA: {quantity}"
+        operation_details = f"ODL: {odl} - Prelievo articolo {articolo} da {area}-{scaffale}-{colonna}-{piano} - QTA: {quantity}"
 
         log_operation(
             operation_type="UPDATE",
@@ -1493,9 +1493,19 @@ def process_ordine_lavoro():
             # Extract gol_octi, gol_occo, gol_ocri values from the found row
             gol_octi_new, gol_occo_new, gol_ocri_new, prossimo_ordine = found_row.gol_octi, found_row.gol_occo, found_row.gol_ocri, next_row.gol_ocri
 
-        # Extract gol_octi, gol_occo, gol_ocri values from the found row
-
-        # Third query: Find rows in ocordic between gol_ocri (included) and gol_ocri_new (excluded)
+        query_prelievi = """
+        SELECT id_art, SUM(qta) as picked_quantity
+        FROM wms_prelievi 
+        WHERE odl = ?
+        GROUP BY id_art
+        """
+        cursor.execute(query_prelievi, (codice_ordine,))
+        picked_items_rows = cursor.fetchall()
+        
+        
+        picked_items = {}
+        for row in picked_items_rows:
+            picked_items[row.id_art] = int(row.picked_quantity)  # Ensure integer conversion
         query3 = """
 SELECT 
     m.mpl_figlio AS occ_arti,
@@ -1590,20 +1600,40 @@ ORDER BY
         detailed_results = []
 
         for item in result:
-            occ_arti = item['occ_arti']
-            occ_qmov = item['occ_qmov']
+            occ_arti = item['occ_arti'].strip()
+            occ_qmov = float(item['occ_qmov'])  # Ensure numeric conversion
             occ_desc = item['occ_desc']
             occ_des2 = item['occ_des2']
             
-            # Combine descriptions
-            occ_desc_combined = f"{occ_desc} {occ_des2}".strip()
+            # Debug print
+            print(f"Processing article {occ_arti} with original quantity {occ_qmov}")
+            print(f"Picked quantity from dict: {picked_items.get(occ_arti, 0)}")
+            
+            # Get picked quantity for this article
+            picked_qty = picked_items.get(occ_arti, 0)
+            remaining_qty = occ_qmov - picked_qty
 
-            # First, check if this `occ_arti` is in `wms_proibiti`
-             # Skip if occ_arti starts with 'EG' or '0S'
+            print(f"Calculated remaining quantity: {remaining_qty}")
+
+            # If everything is picked, add a completed entry
+            if picked_qty >= occ_qmov:
+                detailed_results.append({
+                    'occ_arti': occ_arti,
+                    'occ_desc_combined': f"{occ_desc} {occ_des2}".strip(),
+                    'status': 'completed',
+                    'picked_quantity': str(int(picked_qty)),
+                    'total_quantity': str(int(occ_qmov)),
+                    'remaining_quantity': '0',
+                    'needed_quantity': '0',
+                    'available_quantity': '0',
+                })
+                continue
+
+            # Skip if occ_arti starts with 'EG' or 'CONAI'
             if occ_arti and (occ_arti.startswith('EG') or occ_arti.startswith('CONAI')):
                 continue
 
-            # Query wms_items for the current occ_arti
+            # Query wms_items for remaining quantity
             query_wms = """
             SELECT 
                 id_art, 
@@ -1642,26 +1672,17 @@ ORDER BY
             wms_rows = cursor.fetchall()
 
             total_available_quantity = sum(wms_row.qta for wms_row in wms_rows)
-            quantity_needed = occ_qmov
-            remaining_quantity = quantity_needed
-
-            # Create a dictionary to group results by location only
+            needed_quantity = remaining_qty  # Use remaining quantity after picking
             location_groups = {}
 
-            # Track how much quantity is still needed
-            needed_quantity = remaining_quantity
-
             for wms_row in wms_rows:
-                wms_qta = wms_row.qta
                 if needed_quantity <= 0:
                     break
 
-                # Define the key based on location only
+                wms_qta = float(wms_row.qta)  # Ensure numeric conversion
                 location_key = (wms_row.area, wms_row.scaffale, wms_row.colonna, wms_row.piano)
 
-                # Ensure id_pacco is valid and contributes to fulfilling the required quantity
                 if wms_row.id_pacco and wms_qta > 0:
-                    # Initialize the group if the location is new
                     if location_key not in location_groups:
                         location_groups[location_key] = {
                             'total_available_quantity': 0,
@@ -1674,10 +1695,7 @@ ORDER BY
                             }
                         }
 
-                    # Calculate how much we can take from this pacco
                     qty_to_take = min(wms_qta, needed_quantity)
-                    
-                    # Add this pacco's quantity to the location group
                     location_groups[location_key]['pacchi'].append({
                         'id_pacco': wms_row.id_pacco,
                         'quantity': qty_to_take
@@ -1685,26 +1703,32 @@ ORDER BY
                     location_groups[location_key]['total_available_quantity'] += qty_to_take
                     needed_quantity -= qty_to_take
 
-            # Now process the location groups and add the results
+            # Always add entry for picked items, even if picked_qty is 0
+            pick_status = 'partially_picked' if picked_qty > 0 else 'to_pick'
+            
+            # Process remaining quantity
             for location_key, group_data in location_groups.items():
                 total_qty_in_location = group_data['total_available_quantity']
                 
-                if total_qty_in_location > 0:  # Only add results if there's quantity to pick
+                if total_qty_in_location > 0:
                     detailed_results.append({
                         'occ_arti': occ_arti,
-                        'occ_desc_combined': occ_desc_combined,
-                        'sufficient_quantity': total_qty_in_location >= quantity_needed,
+                        'occ_desc_combined': f"{occ_desc} {occ_des2}".strip(),
+                        'status': pick_status,
+                        'sufficient_quantity': total_qty_in_location >= remaining_qty,
                         'pacchi': group_data['pacchi'],
                         'location': group_data['location'],
                         'available_quantity': str(int(total_qty_in_location)),
-                        'needed_quantity': str(int(quantity_needed)),
+                        'needed_quantity': str(int(remaining_qty)),
+                        'picked_quantity': str(int(picked_qty))  # Make sure this is included
                     })
 
-            # If after checking all locations we still need quantity, add a "missing" entry
+            # Add missing entry if needed
             if needed_quantity > 0:
                 detailed_results.append({
                     'occ_arti': occ_arti,
-                    'occ_desc_combined': occ_desc_combined,
+                    'occ_desc_combined': f"{occ_desc} {occ_des2}".strip(),
+                    'status': 'missing',
                     'missing': True,
                     'pacchi': None,
                     'location': {
@@ -1715,6 +1739,7 @@ ORDER BY
                     },
                     'available_quantity': str(int(needed_quantity)),
                     'needed_quantity': str(int(needed_quantity)),
+                    'picked_quantity': str(int(picked_qty))  # Make sure this is included
                 })
 
         return jsonify(detailed_results), 200
@@ -2585,6 +2610,75 @@ def get_item_locations():
     finally:
         if 'cursor' in locals(): cursor.close()
         if 'conn' in locals(): conn.close()
+
+@app.route('/api/articolo-offerte', methods=['GET'])
+def get_articolo_offerte():
+    codice_articolo = request.args.get('codice')
+    if not codice_articolo:
+        return jsonify({'error': 'Missing codice parameter'}), 400
+
+    try:
+        conn = connect_to_db()
+        cursor = conn.cursor()
+
+        query = """
+        select amg_code c_articolo, amp_lead lt,
+
+nvl((select sum(ofc_qord-ofc_qcon) from ofordic where ofc_arti = amg_code and ofc_feva = 'N'
+  and ofc_dtco <= last_day(today)),0) +
+nvl((select sum(mol_quaor-mol_quari) from mpordil where mol_parte = amg_code and mol_stato in ('A')
+  and mol_dats <= last_day(today)),0) off_mc,
+nvl((select sum(ofc_qord-ofc_qcon) from ofordic where ofc_arti = amg_code and ofc_feva = 'N'
+  and ofc_dtco between last_day(add_months(today,0))+1 and last_day(add_months(today,+1))),0) +
+nvl((select sum(mol_quaor-mol_quari) from mpordil where mol_parte = amg_code and mol_stato in ('A')
+  and mol_dats between last_day(add_months(today,0))+1 and last_day(add_months(today,+1))),0) off_ms,
+ 
+nvl((select sum(ofc_qord-ofc_qcon) from ofordic where ofc_arti = amg_code and ofc_feva = 'N'
+  and ofc_dtco between last_day(add_months(today,+1))+1 and last_day(add_months(today,+2))),0) +
+nvl((select sum(mol_quaor-mol_quari) from mpordil where mol_parte = amg_code and mol_stato in ('A')
+  and mol_dats between last_day(add_months(today,+1))+1 and last_day(add_months(today,+2))),0) off_msa,
+ 
+nvl((select sum(ofc_qord-ofc_qcon) from ofordic where ofc_arti = amg_code and ofc_feva = 'N'
+  and ofc_dtco >= last_day(add_months(today,2))+1),0) +
+nvl((select sum(mol_quaor-mol_quari) from mpordil where mol_parte = amg_code and mol_stato in ('A')
+  and mol_dats >= last_day(add_months(today,2))+1),0) off_mss
+from mganag, mppoli
+where amg_code = amp_code and amp_depo = 1
+and  amg_stat = 'D' 
+and nvl(amg_fagi,'S') = 'S'
+and amg_code = ?
+and amg_code in (select dep_arti from mgdepo where dep_code in (1,20,32,48,60,81)
+and dep_qgiai+dep_qcar-dep_qsca+dep_qord+dep_qorp+dep_qpre+dep_qprp <> 0)
+        """
+
+        cursor.execute(query, (codice_articolo,))
+        columns = [column[0] for column in cursor.description]
+        results = []
+        
+        for row in cursor.fetchall():
+            row_dict = dict(zip(columns, row))
+            # Convert numeric fields to integers
+            for field in ['off_mc', 'off_ms', 'off_msa', 'off_mss']:
+                if field in row_dict:
+                    # Handle string values and decimal/float types
+                    row_dict[field] = int(float(row_dict[field])) if row_dict[field] is not None else 0
+            # Clean up article code whitespace
+            row_dict['c_articolo'] = row_dict['c_articolo'].strip()
+            results.append(row_dict)
+
+        return jsonify(results)
+
+    except pyodbc.Error as e:
+        app.logger.error(f"Database error: {str(e)}")
+        return jsonify({'error': 'Database error occurred'}), 500
+    except Exception as ex:
+        app.logger.error(f"Unexpected error: {str(ex)}")
+        return jsonify({'error': 'An unexpected error occurred'}), 500
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        if 'conn' in locals():
+            conn.close()
 
 if __name__ == '__main__':
     # Run with SSL context for HTTPS

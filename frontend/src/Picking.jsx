@@ -320,6 +320,12 @@ const Picking = () => {
     const articoloRef = useRef(null);
     const movimentoRef = useRef(null);
 
+    const [prelevaTuttoModalVisible, setPrelevaTuttoModalVisible] = useState(false);
+
+    const [showMissingArticleModal, setShowMissingArticleModal] = useState(false);
+    const [missingArticleData, setMissingArticleData] = useState(null);
+    const [loadingMissingData, setLoadingMissingData] = useState(false);
+
     const handleQuantityConfirm = async () => {
 
         setConfirmLoading(true); // Start loading
@@ -338,20 +344,6 @@ const Picking = () => {
         const { mode, rowIndex, rowData, forcedPickingInfo } = quantityModalData;
 
         if (mode === 'exact') {
-            // Handle exact match quantity picking
-            if (pickedQuantity <= 0) {
-                notification.error({
-                    message: 'Errore',
-                    description: 'La quantità deve essere maggiore di zero.',
-                    placement: 'bottomRight',
-                    duration: 5, // Notification will close after 3 seconds
-                });
-                setConfirmLoading(false);
-
-                return;
-            }
-
-
             // Handle exact match quantity picking
             if (pickedQuantity > rowData.available_quantity) {
                 notification.error({
@@ -602,14 +594,20 @@ const Picking = () => {
         }
     };
     const handleLocationChangeModalVisible = (article, rowId) => {
-        // Clear previous data first
         setLocazioni([]);
-
-        // Find the specific row by its ID
         const currentRow = tableData.find(row => row.id === rowId);
+        
         if (currentRow) {
-            setQuantityNeeded(currentRow.available_quantity);
-            setSelectedRowId(rowId); // Store the selected row ID
+            // Calculate total quantity needed for ALL rows of this article
+            const totalNeeded = tableData
+                .filter(row => 
+                    row.occ_arti === article && 
+                    !highlightedRows.has(row.id)
+                )
+                .reduce((sum, row) => sum + row.available_quantity, 0);
+                
+            setQuantityNeeded(totalNeeded);
+            setSelectedRowId(rowId);
         }
 
         setArticleFilter(article);
@@ -654,6 +652,9 @@ const Picking = () => {
         return allocations;
     };
     const calculateAvailableQuantity = (location, articolo) => {
+        // Add null check for location
+        if (!location || !location.area) return 0;
+        
         const allocations = getExistingAllocations();
         const locationKey = `${location.area}-${location.scaffale}-${location.colonna}-${location.piano}-${articolo}`;
 
@@ -768,28 +769,65 @@ const Picking = () => {
             const data = await response.json();
             console.log("Fetched data:", data);
 
-            // Transform the data
-            const transformedData = data.map(item => ({
-                id: uuidv4(), // Unique ID for each row
-                occ_arti: item.occ_arti,
-                occ_desc_combined: item.occ_desc_combined || '',
-                occ_qmov: item.occ_qmov,
-                available_quantity: item.available_quantity,
-                movimento: item.movimento,
-                location: {
-                    area: item.location.area,
-                    scaffale: item.location.scaffale,
-                    colonna: item.location.colonna,
-                    piano: item.location.piano,
-                },
-                missing: item.missing || false,
-                pacchi: item.id_pacco || false,
-                picked_quantity: 0, // Initialize picked_quantity
-            }));
+            // Modify the data transformation in handleSearch
+            const transformedData = data.reduce((acc, item) => {
+                // Group by article code
+                const existing = acc.find(i => i.occ_arti === item.occ_arti);
+                
+                if (existing) {
+                    // Only update if we haven't captured a picked quantity yet
+                    if (!existing.has_picked && parseInt(item.picked_quantity) > 0) {
+                        existing.total_picked = parseInt(item.picked_quantity);
+                        existing.has_picked = true;
+                    }
+                    existing.children.push(item);
+                } else {
+                    acc.push({
+                        ...item,
+                        total_picked: parseInt(item.picked_quantity),
+                        has_picked: parseInt(item.picked_quantity) > 0,
+                        children: [item],
+                        isParent: true
+                    });
+                }
+                return acc;
+            }, []).flatMap(parentItem => {
+                // Create rows for each parent item
+                const baseParent = {
+                    id: uuidv4(),
+                    occ_arti: parentItem.occ_arti,
+                    occ_desc_combined: parentItem.occ_desc_combined,
+                    status: parentItem.status,
+                    isParent: true,
+                    total_quantity: parentItem.children.reduce((sum, c) => sum + parseInt(c.needed_quantity), 0),
+                    total_picked: parentItem.total_picked
+                };
+
+                // Create completed row if any picked quantity
+                const completedRow = parentItem.total_picked > 0 ? [{
+                    ...baseParent,
+                    id: uuidv4(),
+                    available_quantity: parentItem.total_picked,
+                    status: 'completed',
+                    isChildRow: true
+                }] : [];
+
+                // Create pending rows for each child location
+                const pendingRows = parentItem.children.map(child => ({
+                    ...child,
+                    id: uuidv4(),
+                    available_quantity: parseInt(child.available_quantity),
+                    status: 'pending',
+                    isChildRow: true,
+                    parentId: baseParent.id
+                }));
+
+                return [...completedRow, ...pendingRows];
+            });
 
             const newHighlightedShelves = new Set();
             transformedData.forEach(item => {
-                if (!item.missing) {
+                if (!item.missing && item.location) {  // Add null check for location
                     const shelfName = `${item.location.scaffale}-${item.location.colonna}-${item.location.piano}`;
                     newHighlightedShelves.add(shelfName);
                     if (!shelfItems.has(shelfName)) {
@@ -1269,27 +1307,46 @@ const Picking = () => {
             key: 'location',
             render: (location, record) => (
                 <>
-                    {location.area ? (
-                        <Tag color={'geekblue'} key={location} style={{ wordBreak: 'break-word', whiteSpace: 'normal' }}>
-                            <Button
-                                disabled={
-                                    highlightedRows.has(record.id) ||
-                                    // Check if trying to change to the same location
-                                    (selectedLocation &&
-                                        selectedLocation.area === location.area &&
-                                        selectedLocation.scaffale === location.scaffale &&
-                                        selectedLocation.colonna === location.colonna &&
-                                        selectedLocation.piano === location.piano)
-                                }
-                                type="text"
-                                onClick={() => handleLocationChangeModalVisible(record.occ_arti, record.id)}
-                            >
-                                {location.area}-{location.scaffale}-{location.colonna}-{location.piano}
-                            </Button>
+                    {record.status === 'completed' ? (
+                        <Tag color="green">Già prelevato</Tag>
+                    ) : location && location.area ? (
+                        <Tag 
+                            color={'geekblue'} 
+                            style={{ 
+                                wordBreak: 'break-word', 
+                                whiteSpace: 'normal', 
+                                cursor: highlightedRows.has(record.id) ? 'not-allowed' : 'pointer',
+                                opacity: highlightedRows.has(record.id) ? 0.6 : 1
+                            }}
+                            onClick={!highlightedRows.has(record.id) 
+                                ? () => handleLocationChangeModalVisible(record.occ_arti, record.id)
+                                : undefined}
+                        >
+                            {location.area}-{location.scaffale}-{location.colonna}-{location.piano}
                         </Tag>
                     ) : (
-                        <Tag color={'red'} style={{ wordBreak: 'break-word', whiteSpace: 'normal' }}>
-                            Mancante
+                        <Tag 
+                            color={'red'} 
+                            style={{ wordBreak: 'break-word', whiteSpace: 'normal', cursor: 'pointer' }}
+                            onClick={async () => {
+                                try {
+                                    setLoadingMissingData(true);
+                                    const response = await axios.get(`${process.env.REACT_APP_API_URL}/api/articolo-offerte`, {
+                                        params: { codice: record.occ_arti.trim() }
+                                    });
+                                    setMissingArticleData(response.data[0]);
+                                    setShowMissingArticleModal(true);
+                                } catch (error) {
+                                    notification.error({
+                                        message: 'Errore',
+                                        description: 'Impossibile recuperare i dati dell\'articolo',
+                                    });
+                                } finally {
+                                    setLoadingMissingData(false);
+                                }
+                            }}
+                        >
+                            Mancante {loadingMissingData}
                         </Tag>
                     )}
                 </>
@@ -1299,8 +1356,11 @@ const Picking = () => {
             title: 'Azioni',
             key: 'actions',
             render: (_, record) => {
-                // Don't show button for missing rows
-                if (record.missing) {
+                // Disable button for completed, missing, or already picked items
+                const isCompleted = record.status === 'completed';
+                const isDisabled = isCompleted || record.missing || highlightedRows.has(record.id);
+                
+                if (isDisabled) {
                     return null;
                 }
 
@@ -1308,7 +1368,6 @@ const Picking = () => {
                     <Button
                         type="primary"
                         onClick={() => handlePickFromRow(record)}
-                        disabled={highlightedRows.has(record.id)}
                     >
                         Preleva
                     </Button>
@@ -1381,27 +1440,36 @@ const Picking = () => {
             title: 'Azioni',
             key: 'actions',
             render: (_, record) => {
-                // Find the current row in tableData
                 const currentRow = tableData.find(row => row.id === selectedRowId);
-
-                // Check if this is the starting location
-                const isStartingLocation = currentRow &&
-                    currentRow.location.area === record.area &&
-                    currentRow.location.scaffale === record.scaffale &&
-                    currentRow.location.colonna === record.colonna &&
-                    currentRow.location.piano === record.piano;
+                const isStartingLocation = currentRow?.location?.area === record.area && 
+                                          currentRow?.location?.scaffale === record.scaffale && 
+                                          currentRow?.location?.colonna === record.colonna && 
+                                          currentRow?.location?.piano === record.piano;
 
                 const availableQty = calculateAvailableQuantity(record, articleFilter);
+                const canTakeAll = availableQty >= quantityNeeded; // Now uses the total needed
 
                 return (
-                    <Button
-                        type="primary"
-                        onClick={() => handleLocationChange(record)}
-                        disabled={isStartingLocation}
-                    >
-                        ✓
-                    </Button>
-
+                    <Space>
+                        <Button
+                            type="primary"
+                            onClick={() => handleLocationChange(record)}
+                            disabled={isStartingLocation}
+                        >
+                            ✓
+                        </Button>
+                        {canTakeAll && (
+                            <Button
+                                type="link"
+                                onClick={() => {
+                                    setSelectedLocation(record);
+                                    setPrelevaTuttoModalVisible(true);
+                                }}
+                            >
+                                Preleva tutto da qui
+                            </Button>
+                        )}
+                    </Space>
                 );
             },
         }
@@ -1409,12 +1477,15 @@ const Picking = () => {
 
     // Update handleLocationChange to use the calculated available quantity
     const handleLocationChange = (newLocation) => {
+        const currentRow = tableData.find(row => row.id === selectedRowId);
+        if (!currentRow) return;
+
         const availableQty = calculateAvailableQuantity(newLocation, articleFilter);
-
+        const rowAvailableQty = currentRow.available_quantity;
+        
         setSelectedLocation(newLocation);
-        setMaxAvailableQuantity(availableQty);
-
-        setSelectedQuantity(Math.min(availableQty, quantityNeeded));
+        setMaxAvailableQuantity(Math.min(availableQty, rowAvailableQty));
+        setSelectedQuantity(Math.min(availableQty, rowAvailableQty));
         setChangeLocationQuantityModalVisible(true);
     };
 
@@ -1612,6 +1683,9 @@ const Picking = () => {
 
 
     const rowClassName = (record) => {
+        if (record.status === 'completed') {
+            return 'completed-row';
+        }
         if (highlightedRows.has(record.id)) {
             return 'highlighted-row';
         }
@@ -1703,6 +1777,52 @@ const Picking = () => {
         return '';
     };
 
+    const handlePrelevaTuttoConfirm = () => {
+        if (!selectedLocation) return;
+
+        const updatedTableData = [...tableData];
+        const rowsToUpdate = updatedTableData.filter(row => 
+            row.occ_arti === articleFilter && 
+            !highlightedRows.has(row.id)
+        );
+
+        if (rowsToUpdate.length === 0) return;
+
+        // Find the first occurrence index to maintain position
+        const firstOccurrenceIndex = updatedTableData.findIndex(row => 
+            row.id === rowsToUpdate[0].id
+        );
+
+        // Create consolidated row at original position
+        const totalQuantity = rowsToUpdate.reduce((sum, row) => sum + row.available_quantity, 0);
+        const newRow = {
+            ...rowsToUpdate[0],
+            id: uuidv4(),
+            available_quantity: totalQuantity,
+            location: {
+                area: selectedLocation.area,
+                scaffale: selectedLocation.scaffale,
+                colonna: selectedLocation.colonna,
+                piano: selectedLocation.piano
+            }
+        };
+
+        // Replace first occurrence and remove others
+        const newTableData = updatedTableData
+            .filter(row => !(row.occ_arti === articleFilter && !highlightedRows.has(row.id) && row.id !== rowsToUpdate[0].id))
+            .map(row => row.id === rowsToUpdate[0].id ? newRow : row);
+
+        setTableData(newTableData);
+        setPrelevaTuttoModalVisible(false);
+        handleLocationChangeModalClose();
+        
+        notification.success({
+            message: 'Successo',
+            description: 'Tutte le quantità sono state spostate nella posizione selezionata',
+            placement: 'bottomRight',
+        });
+    };
+
     return (
         <Layout style={{ minHeight: '100%' }}>
 
@@ -1765,26 +1885,12 @@ const Picking = () => {
             >
                 <Space direction="vertical" style={{ width: '100%' }}>
                     <div>
-                        <Text>Posizione selezionata: </Text>
-                        <Text strong>
-                            {selectedLocation ?
-                                `${selectedLocation.area}-${selectedLocation.scaffale}-${selectedLocation.colonna}-${selectedLocation.piano}` :
-                                ''}
-                        </Text>
-                    </div>
-                    <div>
-                        <Text>Movimento selezionato: </Text>
-                        <Text strong>
-                            {selectedLocation?.id_mov || ''}
-                        </Text>
-                    </div>
-                    <div>
                         <Text>Quantità disponibile in questa posizione: </Text>
                         <Text strong>{maxAvailableQuantity}</Text>
                     </div>
                     <div>
-                        <Text>Quantità ancora da prelevare: </Text>
-                        <Text strong>{quantityNeeded}</Text>
+                        <Text>Quantità nella riga selezionata: </Text>
+                        <Text strong>{tableData.find(row => row.id === selectedRowId)?.available_quantity || 0}</Text>
                     </div>
                     {maxAvailableQuantity < quantityNeeded && (
                         <Alert
@@ -1798,7 +1904,7 @@ const Picking = () => {
                     <Form.Item label="Quantità da prelevare">
                         <InputNumber
                             min={1}
-                            max={Math.min(maxAvailableQuantity, quantityNeeded)} // Use the minimum between available and needed quantity
+                            max={maxAvailableQuantity}
                             value={selectedQuantity}
                             onChange={value => setSelectedQuantity(value)}
                             style={{ width: '100%' }}
@@ -1838,6 +1944,92 @@ const Picking = () => {
                             style={{ width: '100%' }}
                         />
                     </>
+                )}
+            </Modal>
+
+            <Modal
+                title="Conferma Prelievo Totale"
+                visible={prelevaTuttoModalVisible}
+                onOk={handlePrelevaTuttoConfirm}
+                onCancel={() => setPrelevaTuttoModalVisible(false)}
+                okText="Conferma"
+                cancelText="Annulla"
+            >
+                <Space direction="vertical" style={{ width: '100%' }}>
+                    <div>
+                        <Text strong>Quantità totale richiesta:</Text> {quantityNeeded}
+                    </div>
+                    <div>
+                        <Text strong>Quantità disponibile in questa posizione:</Text> 
+                        {calculateAvailableQuantity(selectedLocation, articleFilter)}
+                    </div>
+                    {calculateAvailableQuantity(selectedLocation, articleFilter) < quantityNeeded && (
+                        <Alert
+                            message="Attenzione"
+                            description="Questa posizione non ha sufficiente quantità per tutto l'articolo. Verrà prelevato solo quanto disponibile."
+                            type="warning"
+                            showIcon
+                        />
+                    )}
+                </Space>
+            </Modal>
+
+            <Modal
+                title={`Dettagli Articolo Mancante - ${missingArticleData?.c_articolo || ''}`}
+                visible={showMissingArticleModal}
+                onCancel={() => setShowMissingArticleModal(false)}
+                footer={null}
+                width={600}
+            >
+                {missingArticleData && (
+                    <div style={{ padding: '20px' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                            <tbody>
+                                {missingArticleData.lt !== null && (
+                                    <tr>
+                                        <td style={{ padding: '8px', borderBottom: '1px solid #f0f0f0' }}>
+                                            <strong>Lead Time (gg):</strong>
+                                        </td>
+                                        <td style={{ padding: '8px', borderBottom: '1px solid #f0f0f0' }}>
+                                            {missingArticleData.lt}
+                                        </td>
+                                    </tr>
+                                )}
+                                <tr>
+                                    <td style={{ padding: '8px', borderBottom: '1px solid #f0f0f0' }}>
+                                        <strong>Arrivo Mese Corrente:</strong>
+                                    </td>
+                                    <td style={{ padding: '8px', borderBottom: '1px solid #f0f0f0' }}>
+                                        {missingArticleData.off_mc}
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td style={{ padding: '8px', borderBottom: '1px solid #f0f0f0' }}>
+                                        <strong>Arrivo Mese Successivo:</strong>
+                                    </td>
+                                    <td style={{ padding: '8px', borderBottom: '1px solid #f0f0f0' }}>
+                                        {missingArticleData.off_ms}
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td style={{ padding: '8px', borderBottom: '1px solid #f0f0f0' }}>
+                                        <strong>Arrivo nei Prossimi due Mesi:</strong>
+                                    </td>
+                                    <td style={{ padding: '8px', borderBottom: '1px solid #f0f0f0' }}>
+                                        {missingArticleData.off_msa}
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td style={{ padding: '8px' }}>
+                                        <strong>Arrivo Mesi Successivi:</strong>
+                                    </td>
+                                    <td style={{ padding: '8px' }}>
+                                        {missingArticleData.off_mss}
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
                 )}
             </Modal>
 
@@ -1900,7 +2092,7 @@ const Picking = () => {
                     ) : (
                         <Table
                             columns={columns}
-                            dataSource={tableData}
+                            dataSource={tableData.filter(row => row.available_quantity > 0)}
                             pagination={false}
                             scroll={{ y: 'calc(100vh - 250px)' }}
                             rowKey="id"

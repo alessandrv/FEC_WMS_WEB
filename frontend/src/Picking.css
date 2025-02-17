@@ -4,14 +4,18 @@
   }
   .missing-row:hover td{
     background-color: rgba(107, 3, 3, 0.342) !important; /* Red background for missing items */
-  }
-
+  }.completed-row {
+    background-color: #93f893 !important;
+}
+.completed-row:hover td {
+  background-color: #7bda7b !important;
+}
   .highlighted {
     background-color: #adc6ff; /* Step 2: Highlight color */
   }
 
   .highlighted-row {
-    background-color: #71ff71 !important; /* Light green background */
+    background-color: #60ff60 !important; /* Light green background */
   }
   .highlighted-row:hover td{
     background-color: #54c054 !important; /* Light green background */
