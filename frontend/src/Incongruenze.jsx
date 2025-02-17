@@ -9,11 +9,24 @@ const SystemQuantitiesTable = () => {
   const [filter, setFilter] = useState('');
 
   useEffect(() => {
+    const savedCounts = JSON.parse(localStorage.getItem('warehouseCounts') || '{}');
+    setData(prevData => prevData.map(item => ({
+      ...item,
+      counted: savedCounts[`${item.id_art}-${item.location.area}-${item.location.scaffale}`] || 0
+    })));
+  }, []);
+
+  useEffect(() => {
     const fetchData = async () => {
       setLoading(true);
       try {
         const response = await axios.get(`${process.env.REACT_APP_API_URL}/api/system-quantities`);
-        const sortedData = response.data.results.sort((a, b) => 
+        const savedCounts = JSON.parse(localStorage.getItem('warehouseCounts') || '{}');
+        
+        const sortedData = response.data.results.map(item => ({
+          ...item,
+          counted: savedCounts[`${item.id_art}-${item.location.area}-${item.location.scaffale}`] || 0
+        })).sort((a, b) => 
           `${a.location.area}-${a.location.scaffale}-${a.location.colonna}-${a.location.piano}`
             .localeCompare(
               `${b.location.area}-${b.location.scaffale}-${b.location.colonna}-${b.location.piano}`
@@ -27,6 +40,26 @@ const SystemQuantitiesTable = () => {
     };
     fetchData();
   }, []);
+
+  const handleCountChange = (id_art, location, value) => {
+    const key = `${id_art}-${location.area}-${location.scaffale}`;
+    const newValue = parseInt(value) || 0;
+    
+    setData(prevData => 
+      prevData.map(item => 
+        item.id_art === id_art && item.location === location 
+          ? { ...item, counted: newValue } 
+          : item
+      )
+    );
+    
+    localStorage.setItem('warehouseCounts', 
+      JSON.stringify({
+        ...JSON.parse(localStorage.getItem('warehouseCounts') || '{}'),
+        [key]: newValue
+      })
+    );
+  };
 
   const filteredData = data.filter(item =>
     item.id_art.toLowerCase().includes(filter.toLowerCase())
@@ -94,6 +127,23 @@ const SystemQuantitiesTable = () => {
       key: 'amg_dest',
       width: 300,
       render: text => <span className="text-ellipsis">{text.trim()}</span>,
+    },
+    {
+      title: 'Counted',
+      key: 'counted',
+      width: 120,
+      render: (_, record) => (
+        <Input 
+          type="number"
+          value={record.counted}
+          onChange={(e) => handleCountChange(
+            record.id_art,
+            record.location,
+            e.target.value
+          )}
+          style={{ width: 80 }}
+        />
+      )
     },
   ];
 
