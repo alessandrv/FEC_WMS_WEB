@@ -1446,8 +1446,8 @@ const Picking = () => {
                                           currentRow?.location?.colonna === record.colonna && 
                                           currentRow?.location?.piano === record.piano;
 
-                const availableQty = calculateAvailableQuantity(record, articleFilter);
-                const canTakeAll = availableQty >= quantityNeeded; // Now uses the total needed
+                const totalQta = record.totalQta; // Use totalQta instead of availableQty
+                const canTakeAll = totalQta >= quantityNeeded; // Check if totalQta is >= quantityNeeded
 
                 return (
                     <Space>
