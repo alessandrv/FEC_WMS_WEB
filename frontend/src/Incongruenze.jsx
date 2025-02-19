@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Table, Input, Spin } from 'antd';
+import { Table, Input, Spin, Button } from 'antd';
 import { FixedSizeList } from 'react-window';
 import axios from 'axios';
-
+import * as XLSX from "xlsx";
+import { saveAs } from "file-saver";
 const SystemQuantitiesTable = () => {
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -67,13 +68,13 @@ const SystemQuantitiesTable = () => {
 
   const columns = [
     {
-      title: 'Article ID',
+      title: 'Articolo',
       dataIndex: 'id_art',
       key: 'id_art',
       width: 150,
     },
     {
-      title: 'Location',
+      title: 'Locazione',
       key: 'location',
       width: 200,
       render: (_, record) => (
@@ -86,28 +87,28 @@ const SystemQuantitiesTable = () => {
           ),
     },
     {
-      title: 'System Qty',
+      title: 'Adapta',
       dataIndex: 'system_quantity',
       key: 'system_quantity',
       width: 120,
       sorter: (a, b) => a.system_quantity - b.system_quantity,
     },
     {
-      title: 'WMS Qty',
+      title: 'WMS Locazione',
       dataIndex: 'wms_quantity',
       key: 'wms_quantity',
       width: 120,
       sorter: (a, b) => a.wms_quantity - b.wms_quantity,
     },
     {
-      title: 'WMS Total',
+      title: 'WMS Totale',
       dataIndex: 'total_wms_qty',
       key: 'total_wms_qty',
       width: 120,
       sorter: (a, b) => a.total_wms_qty - b.total_wms_qty,
     },
     {
-      title: 'Difference',
+      title: 'Differenza Adapta-WMS Totale',
       dataIndex: 'difference',
       key: 'difference',
       width: 120,
@@ -122,14 +123,14 @@ const SystemQuantitiesTable = () => {
       )
     },
     {
-      title: 'Description',
+      title: 'Descrizione',
       dataIndex: 'amg_dest',
       key: 'amg_dest',
       width: 300,
       render: text => <span className="text-ellipsis">{text.trim()}</span>,
     },
     {
-      title: 'Counted',
+      title: 'Conteggio locazione',
       key: 'counted',
       width: 120,
       render: (_, record) => (
@@ -167,12 +168,42 @@ const SystemQuantitiesTable = () => {
   };
   
   
+  const exportExcel = () => {
+    // Define the columns to include in the export
+    const exportData = data.map((item) => ({
+        "Articolo": item.id_art,
+        "WMS QTA": item.wms_quantity,
+        "TOTAL WMS": item.total_wms_qty,
+        "ADAPTA": item.system_quantity,
+        "LOCAZIONE": `${item.location.area} ${item.location.scaffale} ${item.location.colonna} ${item.location.piano}`,
+        "DIFFERENZA": item.difference,
+        "Descrizione": item.amg_dest,
+        "Conteggio": item.counted,
 
+    }));
+
+    // Create a worksheet from the data
+    const worksheet = XLSX.utils.json_to_sheet(exportData);
+
+    // Create a new workbook and append the worksheet
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Articoli");
+
+    // Generate a buffer
+    const excelBuffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
+
+    // Create a Blob from the buffer
+    const dataBlob = new Blob([excelBuffer], { type: "application/octet-stream" });
+
+    // Trigger the download using FileSaver
+    saveAs(dataBlob, "Articoli.xlsx");
+};
   return (
     <div>
+      <Button onClick={exportExcel}></Button>
       <div style={{ marginBottom: 16 }}>
         <Input.Search
-          placeholder="Filter by Article ID"
+          placeholder="Filtra ID articolo"
           onChange={(e) => setFilter(e.target.value)}
           style={{ width: 300 }}
         />
