@@ -2180,7 +2180,7 @@ return (
 
       width="80%"
     >
-      <div style={{ maxHeight: '100%', overflowY: 'auto' }}>
+      <div style={{ maxHeight: '100%'}}>
         <div className="grid-container">
           {renderWarehouseSectionSelection()}
         </div>
@@ -2207,7 +2207,7 @@ return (
         style={{top: '50%', transform: 'translateY(-50%)' }}
 
       >
-  <div style={{ maxHeight: '100%', overflowY: 'auto' }}>
+  <div style={{ maxHeight: '100%'}}>
         <div className="grid-container">
           {renderWarehouseSection2()}
         </div>

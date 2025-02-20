@@ -811,7 +811,7 @@ const expandableConfig = {
 
       width="80%"
     >
-      <div style={{ maxHeight: '100%', overflowY: 'auto' }}>
+      <div style={{ maxHeight: '100%'}}>
         <div className="grid-container">
           {renderWarehouseSectionSelection()}
         </div>
