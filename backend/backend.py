@@ -1152,7 +1152,7 @@ def update_pacchi():
         # Step 3: Update the volume in wms_scaffali
         
         conn.commit()
-        operation_details = f"ODL: {odl} - Prelievo articolo {articolo} da {area}-{scaffale}-{colonna}-{piano} - QTA: {quantity}"
+        operation_details = f"{f'ODL: {odl} - ' if odl else ''}Prelievo articolo {articolo} da {area}-{scaffale}-{colonna}-{piano} - QTA: {quantity}"
 
         log_operation(
             operation_type="UPDATE",
