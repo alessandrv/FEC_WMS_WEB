@@ -70,3 +70,54 @@
 .striped-table .ant-table-row:hover td {
     background-color: rgba(233, 93, 102, 0.466) !important;
 }
+
+/* Mobile-first styles */
+.picking-container {
+    flex-direction: column;
+}
+
+.table-sider {
+    height: auto !important;
+    max-height: 60vh;
+    overflow: auto;
+}
+
+.map-layout {
+    height: 50vh;
+}
+
+.mobile-warehouse-container {
+    height: 100%;
+    position: relative;
+}
+
+.pagination-container {
+    position: absolute;
+    bottom: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 1;
+}
+
+/* Desktop styles */
+@media (min-width: 768px) {
+    .picking-container {
+        flex-direction: row;
+    }
+    
+    .table-sider {
+        height: 100vh !important;
+        max-height: none;
+    }
+
+    .map-layout {
+        height: auto;
+    }
+
+    .pagination-container {
+        position: static;
+        transform: none;
+        margin-top: 20px;
+    }
+}
+

@@ -1926,19 +1926,24 @@ const Picking = () => {
                 {quantityModalData && quantityModalData.mode === 'exact' && (
                     <>
                         <p>Sei sicuro di voler prelevare <strong>{quantityModalData.rowData.occ_arti}</strong> da <strong>{quantityModalData.rowData.location.area}-{quantityModalData.rowData.location.scaffale}-{quantityModalData.rowData.location.colonna}-{quantityModalData.rowData.location.piano}</strong>?</p>
-                        <p>Quantità da prelevare: <strong>{quantityModalData.rowData.available_quantity}</strong></p>
-
-
+                        <p>Quantità disponibile: <strong>{quantityModalData.rowData.available_quantity}</strong></p>
+                        <InputNumber
+                            min={1}
+                            max={quantityModalData.rowData.available_quantity}
+                            value={pickedQuantity}
+                            onChange={(value) => setPickedQuantity(value)}
+                            style={{ width: '100%' }}
+                        />
                     </>
                 )}
                 {quantityModalData && quantityModalData.mode === 'forced' && (
                     <>
                         <p>Sei sicuro di voler effettuare un prelievo forzato di <strong>{quantityModalData.forcedPickingInfo.articolo}</strong> da <strong>{quantityModalData.forcedPickingInfo.scaffale}</strong>?</p>
                         <p>Movimento: <strong>{quantityModalData.forcedPickingInfo.movimento}</strong></p>
-                        <p>Inserisci la quantità da prelevare: (FORZATO)</p>
+                        <p>Quantità massima prelevabile: <strong>{maxAvailableQuantity}</strong></p>
                         <InputNumber
-                            min={0}
-
+                            min={1}
+                            max={maxAvailableQuantity}
                             value={pickedQuantity}
                             onChange={(value) => setPickedQuantity(value)}
                             style={{ width: '100%' }}
@@ -2105,7 +2110,8 @@ const Picking = () => {
                     )}
                 </Space>
             </Sider>
-            <Layout>
+            
+            <Layout style={{ background: '#fff', display: window.innerWidth < 768 ? 'none' : 'block' }}>
                 <div style={{ padding: '20px', background: '#fff' }}>
                     <Input.Group compact style={{ display: 'none' }}> {/* Hide the manual input form */}
                         <Button
