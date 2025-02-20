@@ -1946,7 +1946,7 @@ const Picking = () => {
                 {quantityModalData && quantityModalData.mode === 'exact' && (
                     <>
                         <p>Sei sicuro di voler prelevare <strong>{quantityModalData.rowData.occ_arti}</strong> da <strong>{quantityModalData.rowData.location.area}-{quantityModalData.rowData.location.scaffale}-{quantityModalData.rowData.location.colonna}-{quantityModalData.rowData.location.piano}</strong>?</p>
-                        <p>Quantità disponibile: <strong>{quantityModalData.rowData.available_quantity}</strong></p>
+                        <p>Quantità da prelevare nella locazione: (<strong>Richiesto: {quantityModalData.rowData.available_quantity}</strong>)</p>
                         <InputNumber
                             min={1}
                             max={quantityModalData.rowData.available_quantity}
