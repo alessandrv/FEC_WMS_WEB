@@ -24,6 +24,7 @@ const Picking = () => {
     const [changeLocationQuantityModalVisible, setChangeLocationQuantityModalVisible] = useState(false);
     const [selectedLocation, setSelectedLocation] = useState(null);
     const [selectedQuantity, setSelectedQuantity] = useState(0);
+    const [activeTab, setActiveTab] = useState('1'); // '1' for ODL, '2' for Articolo
 
     const [selectedShelf, setSelectedShelf] = useState(null);
     const [occupiedShelves, setOccupiedShelves] = useState(new Set());
@@ -598,15 +599,20 @@ const Picking = () => {
         const currentRow = tableData.find(row => row.id === rowId);
         
         if (currentRow) {
-            // Calculate total quantity needed for ALL rows of this article
-            const totalNeeded = tableData
-                .filter(row => 
-                    row.occ_arti === article && 
-                    !highlightedRows.has(row.id)
-                )
-                .reduce((sum, row) => sum + row.available_quantity, 0);
-                
-            setQuantityNeeded(totalNeeded);
+            // For Articolo tab, use articoloQuantity directly
+            if (activeTab === '2') {
+                setQuantityNeeded(articoloQuantity);
+            } else {
+                // Existing ODL logic
+                const totalNeeded = tableData
+                    .filter(row => 
+                        row.occ_arti === article && 
+                        !highlightedRows.has(row.id) && row.status != 'completed' && 
+                        row.isChildRow
+                    )
+                    .reduce((sum, row) => sum + row.available_quantity, 0);
+                setQuantityNeeded(totalNeeded);
+            }
             setSelectedRowId(rowId);
         }
 
@@ -1445,10 +1451,12 @@ const Picking = () => {
                                           currentRow?.location?.scaffale === record.scaffale && 
                                           currentRow?.location?.colonna === record.colonna && 
                                           currentRow?.location?.piano === record.piano;
-
-                const totalQta = record.totalQta; // Use totalQta instead of availableQty
-                const canTakeAll = totalQta >= quantityNeeded; // Check if totalQta is >= quantityNeeded
-
+    
+                const totalQta = record.totalQta;
+                // Use articoloQuantity for Articolo tab, quantityNeeded for ODL tab
+                const requiredQty = activeTab === '2' ? articoloQuantity : quantityNeeded;
+                const canTakeAll = totalQta >= requiredQty;
+                
                 return (
                     <Space>
                         <Button
@@ -1781,9 +1789,11 @@ const Picking = () => {
         if (!selectedLocation) return;
 
         const updatedTableData = [...tableData];
+        // Exclude completed rows and highlighted rows from consolidation
         const rowsToUpdate = updatedTableData.filter(row => 
             row.occ_arti === articleFilter && 
-            !highlightedRows.has(row.id)
+            !highlightedRows.has(row.id) &&
+            row.status !== 'completed' // Add status check
         );
 
         if (rowsToUpdate.length === 0) return;
@@ -1792,9 +1802,14 @@ const Picking = () => {
         const firstOccurrenceIndex = updatedTableData.findIndex(row => 
             row.id === rowsToUpdate[0].id
         );
-
+        let totalQuantity;
         // Create consolidated row at original position
-        const totalQuantity = rowsToUpdate.reduce((sum, row) => sum + row.available_quantity, 0);
+        if (activeTab === '1') {
+        totalQuantity = rowsToUpdate.reduce((sum, row) => sum + row.available_quantity, 0);
+        } else{
+            totalQuantity = articoloQuantity;
+
+        }
         const newRow = {
             ...rowsToUpdate[0],
             id: uuidv4(),
@@ -1809,7 +1824,12 @@ const Picking = () => {
 
         // Replace first occurrence and remove others
         const newTableData = updatedTableData
-            .filter(row => !(row.occ_arti === articleFilter && !highlightedRows.has(row.id) && row.id !== rowsToUpdate[0].id))
+            .filter(row => !(
+                row.occ_arti === articleFilter && 
+                !highlightedRows.has(row.id) &&
+                row.status !== 'completed' && // Match the same filter
+                row.id !== rowsToUpdate[0].id
+            ))
             .map(row => row.id === rowsToUpdate[0].id ? newRow : row);
 
         setTableData(newTableData);
@@ -1934,6 +1954,7 @@ const Picking = () => {
                             onChange={(value) => setPickedQuantity(value)}
                             style={{ width: '100%' }}
                         />
+
                     </>
                 )}
                 {quantityModalData && quantityModalData.mode === 'forced' && (
@@ -1942,8 +1963,9 @@ const Picking = () => {
                         <p>Movimento: <strong>{quantityModalData.forcedPickingInfo.movimento}</strong></p>
                         <p>Quantità massima prelevabile: <strong>{maxAvailableQuantity}</strong></p>
                         <InputNumber
-                            min={1}
-                            max={maxAvailableQuantity}
+                             min={1}
+                             max={maxAvailableQuantity}
+
                             value={pickedQuantity}
                             onChange={(value) => setPickedQuantity(value)}
                             style={{ width: '100%' }}
@@ -1953,7 +1975,7 @@ const Picking = () => {
             </Modal>
 
             <Modal
-                title="Conferma Prelievo Totale"
+                title="Cambia tutte le locazioni per questo articolo"
                 visible={prelevaTuttoModalVisible}
                 onOk={handlePrelevaTuttoConfirm}
                 onCancel={() => setPrelevaTuttoModalVisible(false)}
@@ -2041,8 +2063,14 @@ const Picking = () => {
 
             <Sider width={"50%"} style={{ background: '#fff' }}>
                 <Space direction="vertical" style={{ width: '100%', padding: '20px' }}>
-                    <Tabs onChange={() => resetInputSearch()} defaultActiveKey="1" centered>
-                        {/* ODL Tab */}
+                <Tabs 
+    onChange={(key) => {
+        setActiveTab(key);
+        resetInputSearch();
+    }} 
+    defaultActiveKey="1" 
+    centered
+>                        {/* ODL Tab */}
                         <TabPane tab="ODL" key="1">
                             <Input.Group compact>
                                 <Input
@@ -2110,7 +2138,6 @@ const Picking = () => {
                     )}
                 </Space>
             </Sider>
-            
             <Layout style={{ background: '#fff', display: window.innerWidth < 768 ? 'none' : 'block' }}>
                 <div style={{ padding: '20px', background: '#fff' }}>
                     <Input.Group compact style={{ display: 'none' }}> {/* Hide the manual input form */}
