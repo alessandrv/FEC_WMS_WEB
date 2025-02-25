@@ -1,8 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { Input, Button, Table, Layout, Space, message, Tooltip, Spin, Tag, Modal, InputNumber, Pagination, Form, Alert } from 'antd';
-import WarehouseGrid from './GridComponent';
+import { Input, Button, Table, Layout, Space, message, Tooltip, Spin, Tag, Modal, InputNumber, Pagination, Form, Alert, Typography, Checkbox } from 'antd';
 import axios from 'axios';
-import { QuestionCircleOutlined } from '@ant-design/icons';
+import { QuestionCircleOutlined, PlusOutlined, MinusOutlined } from '@ant-design/icons';
 
 import './Picking.css';
 import { LoadingOutlined } from '@ant-design/icons';
@@ -12,14 +11,15 @@ import { InfoCircleOutlined } from '@ant-design/icons';
 import { Tabs } from 'antd';
 import { CloseCircleOutlined } from '@ant-design/icons';
 import WarehouseGridSystem from './WarehouseGridSystem';
-import { Typography } from 'antd';
 const { Text } = Typography;
 
 const { TabPane } = Tabs;
 const { Content, Sider } = Layout;
 
 const Picking = () => {
-    const [selectedLayout, setSelectedLayout] = useState('simple');
+    const [groupLocationModalVisible, setGroupLocationModalVisible] = useState(false);
+    const [selectedGroup, setSelectedGroup] = useState(null);
+    const [groupedLocations, setGroupLocations] = useState([]);
     const [selectedRowId, setSelectedRowId] = useState(null);
     const [changeLocationQuantityModalVisible, setChangeLocationQuantityModalVisible] = useState(false);
     const [selectedLocation, setSelectedLocation] = useState(null);
@@ -327,6 +327,247 @@ const Picking = () => {
     const [missingArticleData, setMissingArticleData] = useState(null);
     const [loadingMissingData, setLoadingMissingData] = useState(false);
 
+    // Add new state for expanded rows
+    const [expandedRowKeys, setExpandedRowKeys] = useState([]);
+
+    // Add new state variables
+    const [groupPickModalVisible, setGroupPickModalVisible] = useState(false);
+
+    // 1. Add new state variables
+    const [multiSelectMode, setMultiSelectMode] = useState(false);
+    const [selectedRows, setSelectedRows] = useState([]);
+    const [multiLocationModalVisible, setMultiLocationModalVisible] = useState(false);
+
+    // 1. Fix and add logging to toggleMultiSelectMode
+    const toggleMultiSelectMode = () => {
+        console.log("Toggling multi-select mode, current:", multiSelectMode);
+        if (multiSelectMode) {
+            // Clear selections when exiting multi-select mode
+            setSelectedRows([]);
+        }
+        setMultiSelectMode(!multiSelectMode);
+    };
+
+    // 2. Add logging to getColumnConfig
+    const getColumnConfig = () => {
+        console.log("Getting column config, multiSelectMode:", multiSelectMode);
+        // IMPORTANT: Don't return just the checkbox - merge with existing columns
+        const baseColumns = [...columns]; // Use your existing columns array here
+
+        if (multiSelectMode) {
+            console.log("Adding checkbox column to:", baseColumns.map(c => c.title));
+            // Add checkbox column at the beginning
+            return [
+                {
+                    title: 'Seleziona',
+                    key: 'selection',
+                    width: 60,
+                    render: (_, record) => {
+                        // Only allow selection of non-parent, non-completed, non-highlighted rows
+                        const canSelect = !record.isParent &&
+                            record.status !== 'completed' &&
+                            !highlightedRows.has(record.id) &&
+                            record.location; // Must have a location
+
+                        console.log("Checkbox for record:", record.id, "canSelect:", canSelect);
+
+                        return (
+                            <Checkbox
+                                checked={selectedRows.some(row => row.id === record.id)}
+                                onChange={(e) => {
+                                    console.log("Checkbox changed:", record.id, e.target.checked);
+                                    if (canSelect) {
+                                        handleRowSelect(record, e.target.checked);
+                                    }
+                                }}
+                                disabled={!canSelect}
+                            />
+                        );
+                    }
+                },
+                ...baseColumns
+            ];
+        }
+
+        return baseColumns;
+    };
+
+    // 3. Add logging to handleRowSelect
+    const handleRowSelect = (record, selected) => {
+        console.log("Row select handler called:", record.id, selected);
+        if (selected) {
+            const newSelectedRows = [...selectedRows, record];
+            console.log("Adding to selected rows, new count:", newSelectedRows.length);
+            setSelectedRows(newSelectedRows);
+        } else {
+            const newSelectedRows = selectedRows.filter(row => row.id !== record.id);
+            console.log("Removing from selected rows, new count:", newSelectedRows.length);
+            setSelectedRows(newSelectedRows);
+        }
+    };
+
+    // 4. Function to handle the multi-location change
+
+
+
+    // 7. Add a button to enable multi-select mode and handle multiple location changes
+    // Add this to your layout where appropriate
+    const MultiSelectControls = () => (
+        <>
+            {!multiSelectMode ? (
+                <Button
+                    type="primary"
+                    onClick={() => {
+                        console.log("Enabling multi-select mode");
+                        toggleMultiSelectMode();
+                    }}
+                    style={{ marginBottom: 16 }}
+                >
+                    Cambia locazione multipla
+                </Button>
+            ) : (
+                <Space style={{ marginBottom: 16 }}>
+                    <Button onClick={() => {
+                        console.log("Canceling multi-select mode");
+                        toggleMultiSelectMode();
+                    }}>
+                        Annulla
+                    </Button>
+                    <Button
+                        type="primary"
+                        onClick={openMultiLocationModal}
+                        disabled={selectedRows.length === 0}
+                        loading={loadingLocations} // Add loading state to button
+                    >
+                        Cambia locazione ({selectedRows.length})
+                    </Button>
+                </Space>
+            )}
+        </>
+    );
+
+    // Add function to handle row expansion
+    const onExpandedRowsChange = (expandedRows) => {
+        setExpandedRowKeys(expandedRows);
+    };
+
+    // Modify the groupDataByParent function
+    const groupDataByParent = (data) => {
+        const groupedData = new Map();
+        const processedIds = new Set(); // Track which items have been processed
+
+        // First pass: Create parent groups and track picked quantities
+        data.forEach(item => {
+            if (item.mpl_padre) {
+                const parentKey = item.mpl_padre;
+
+                if (!groupedData.has(parentKey)) {
+                    groupedData.set(parentKey, {
+                        id: parentKey,
+                        occ_arti: parentKey,
+                        occ_desc_combined: `Distinta ${parentKey}`,
+                        isParent: true,
+                        children: [],
+                        pickedMap: new Map()
+                    });
+                }
+
+                const parentGroup = groupedData.get(parentKey);
+                const articleKey = item.occ_arti;
+
+                // Track picked quantities per article
+                if (!parentGroup.pickedMap.has(articleKey)) {
+                    parentGroup.pickedMap.set(articleKey, {
+                        picked: parseFloat(item.picked_quantity) || 0,
+                        data: item
+                    });
+                }
+
+                // Mark this item as processed
+                processedIds.add(item.id);
+            }
+        });
+
+        // Second pass: Create children entries
+        data.forEach(item => {
+            if (item.mpl_padre) {
+                const parentGroup = groupedData.get(item.mpl_padre);
+                const articleKey = item.occ_arti;
+
+                // Add picked quantity row once per article
+                if (parentGroup.pickedMap.has(articleKey)) {
+                    const pickedEntry = parentGroup.pickedMap.get(articleKey);
+                    if (pickedEntry.picked > 0 && !parentGroup.children.some(c => c.status === 'completed' && c.occ_arti === articleKey)) {
+                        parentGroup.children.push({
+                            ...pickedEntry.data,
+                            // Keep the original ID but make it unique for completed items
+                            id: `${pickedEntry.data.id}-completed`,
+                            available_quantity: pickedEntry.picked,
+                            status: 'completed',
+                            isChildRow: true,
+                            mpl_padre: parentGroup.id
+                        });
+                    }
+                }
+
+                // Add individual location rows - IMPORTANT: Preserve the original item ID
+                if (parseFloat(item.available_quantity) > 0) {
+                    parentGroup.children.push({
+                        ...item,
+                        // Preserve original ID instead of generating a new one
+                        isChildRow: true
+                    });
+                }
+            }
+        });
+
+        // Third pass: Add only items without mpl_padre that haven't been processed
+        console.log(data)
+
+        data.forEach(item => {
+            if (!item.mpl_padre && !processedIds.has(item.id)) {
+                groupedData.set(item.id, {
+                    ...item,
+                    children: [],
+                    isParent: false
+                });
+            }
+        });
+
+        // Clean up parent groups
+        groupedData.forEach(group => {
+            if (group.isParent) {
+                delete group.pickedMap;
+            }
+        });
+
+        return Array.from(groupedData.values());
+    };
+
+    // Modify the table configuration
+    const expandableConfig = {
+        expandedRowKeys,
+        onExpandedRowsChange,
+        expandIcon: ({ expanded, onExpand, record }) => {
+            if (!record.children || record.children.length === 0) return null;
+            return expanded ? (
+                <Button
+                    icon={<MinusOutlined />}
+                    onClick={e => onExpand(record, e)}
+                    type="text"
+                    size="small"
+                />
+            ) : (
+                <Button
+                    icon={<PlusOutlined />}
+                    onClick={e => onExpand(record, e)}
+                    type="text"
+                    size="small"
+                />
+            );
+        }
+    };
+
     const handleQuantityConfirm = async () => {
 
         setConfirmLoading(true); // Start loading
@@ -367,12 +608,38 @@ const Picking = () => {
 
             // Call the API
             try {
-                await updatePacchi({
-                    articolo,
-                    location: { area, scaffale: scaffalePart, colonna, piano },
-                    movimento,
-                    quantity: pickedQuantity, // Pass the picked quantity
+                
+                const response = await fetch(`${process.env.REACT_APP_API_URL}/api/update-pacchi`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        articolo,
+                        area: area,
+                        scaffale: scaffalePart,
+                        colonna: colonna,
+                        piano: piano,
+                        movimento,
+                        quantity: pickedQuantity, // Include the picked quantity
+                        odl: ordineLavoro,
+                    }),
                 });
+                if (!response.ok) {
+                    throw new Error('Failed to update pacchi');
+                }
+                const data = await response.json();
+                // Handle success, e.g., update state or notify user
+                notification.success({
+                    message: 'Successo',
+                    description: `Articolo ${articolo} prelevato da ${area}-${scaffalePart}-${colonna}-${piano}`,
+                    placement: 'bottomRight'
+    
+                });
+                // Make the API call
+              
+                
+                // Only proceed with UI updates if the API call succeeds
                 if (pickedQuantity === rowData.available_quantity) {
                     // User picked the entire quantity; highlight the row normally
                     setHighlightedRows(prev => new Set(prev).add(rowData.id));
@@ -381,20 +648,20 @@ const Picking = () => {
                     // Update the original row by subtracting the picked quantity
                     updatedTableData[rowIndex] = {
                         ...rowData,
-                        available_quantity: rowData.available_quantity - pickedQuantity,
+                        available_quantity: parseFloat(rowData.available_quantity) - parseFloat(pickedQuantity),
                     };
-
+            
                     // Create a new row for the picked quantity
                     const newRow = {
                         ...rowData,
-                        available_quantity: pickedQuantity,
-                        picked_quantity: pickedQuantity,
+                        available_quantity: parseFloat(pickedQuantity),
+                        picked_quantity: parseFloat(pickedQuantity),
                         id: uuidv4(), // Assign a unique ID
                     };
-
+            
                     // Insert the new row right after the original row
                     updatedTableData.splice(rowIndex + 1, 0, newRow);
-
+            
                     // Highlight the new row
                     setHighlightedRows(prev => {
                         const newSet = new Set(prev);
@@ -402,170 +669,27 @@ const Picking = () => {
                         return newSet;
                     });
                 }
-
+            
+                // Update UI state
                 setTableData(updatedTableData);
                 setQuantityModalVisible(false);
                 setQuantityModalData(null);
-
+                
+                
+            
             } catch (error) {
-                // Handle error if needed
-            };
-
-        } else if (mode === 'forced') {
-            const { articolo, scaffale, movimento, originalLocation } = forcedPickingInfo;
-
-            // Parse scaffale into area, scaffale, colonna, piano
-            const scaffaleParts = scaffale.split('-');
-            if (scaffaleParts.length !== 4) {
+                // Handle API failure
+                console.error("Error updating pacchi:", error);
                 notification.error({
                     message: 'Errore',
-                    description: 'Formato scaffale non valido. Deve essere "area-scaffale-colonna-piano".',
+                    description: 'Il prelievo non è stato registrato. Si prega di riprovare.',
                     placement: 'bottomRight',
-                    duration: 5, // Notification will close after 3 seconds
+                    duration: 5,
                 });
-                setQuantityModalVisible(false);
-                setQuantityModalData(null);
-                setConfirmLoading(false); // Start loading
-
-                return;
-            }
-
-            const [area, scaffalePart, colonna, piano] = scaffaleParts;
-
-            // Check availability with the user-specified quantity
-            const isAvailable = await FetchArticoliPresence(
-                articolo,
-                movimento,
-                area,
-                scaffalePart,
-                colonna,
-                piano,
-                pickedQuantity
-            );
-
-            if (!isAvailable) {
-                notification.error({
-                    message: 'Errore',
-                    description: `Articoli non presenti nella posizione specificata o non nella quantità richiesta.`,
-                    placement: 'bottomRight',
-                    duration: 5, // Notification will close after 3 seconds
-                });
-                setQuantityModalVisible(false);
-                setQuantityModalData(null);
+                
+                // Don't close the modal so user can retry
                 setConfirmLoading(false);
-
-                return;
-            }
-
-            // Find all rows that match the article code
-            const matchingRows = tableData.filter(item => item.occ_arti.trim() === articolo.trim());
-            let articleDescription = 'Descrizione non disponibile';
-            let originalArticleData = null;
-
-            if (matchingRows.length > 0) {
-                // Prioritize rows with a matching location, if any
-                originalArticleData = matchingRows.find(item =>
-                    item.location &&
-                    `${item.location.area}-${item.location.scaffale}-${item.location.colonna}-${item.location.piano}` === originalLocation
-                ) || matchingRows[0]; // Fallback to the first matching row if no location match
-
-                articleDescription = originalArticleData.occ_desc_combined || articleDescription;
-            } else {
-                console.warn(`Nessuna riga trovata per l'articolo ${articolo}. Utilizzo descrizione predefinita.`);
-            }
-
-            // Proceed with forced picking as there is enough quantity
-            let remainingQuantity = pickedQuantity;
-
-            // Step 1: Deduct the quantity from existing rows (excluding the forced picking location and highlighted rows)
-
-            const updatedTableData = tableData.map(item => {
-
-                if (
-                    item.occ_arti.trim() === articolo.trim() &&
-                    item.location &&
-
-                    !highlightedRows.has(item.id) // Exclude highlighted rows
-                ) {
-
-                    if (remainingQuantity > 0) {
-                        const deduction = Math.min(item.available_quantity, remainingQuantity);
-                        remainingQuantity -= deduction;
-                        const newQuantity = item.available_quantity - deduction;
-                        console.log(newQuantity)
-                        return newQuantity > 0 ? { ...item, available_quantity: newQuantity } : null;
-                    }
-                }
-                return item;
-            }).filter(Boolean);
-
-            // Step 2: Check if a forced pick row for this location already exists
-            const existingForcedPick = updatedTableData.find(item =>
-                item.occ_arti.trim() === articolo.trim() &&
-                item.picked_quantity > 0 &&
-                item.location &&
-                `${item.location.area}-${item.location.scaffale}-${item.location.colonna}-${item.location.piano}` === scaffale
-            );
-
-
-
-            // Step 3: Prepare the forced picking row
-            const forcedPickingRow = {
-                id: uuidv4(), // Assign a unique ID
-                occ_arti: articolo,
-                occ_desc_combined: articleDescription,
-                occ_qmov: pickedQuantity,
-                available_quantity: pickedQuantity,
-                movimento: movimento,
-                location: {
-                    area,
-                    scaffale: scaffalePart,
-                    colonna,
-                    piano
-                },
-                picked_quantity: pickedQuantity,
-            };
-
-            // Step 4: Find the index to insert the new row after the scanned article
-            const scannedArticleIndex = updatedTableData.findIndex(item =>
-                item.occ_arti === articolo &&
-                item.location && // Ensure location exists
-                `${item.location.area}-${item.location.scaffale}-${item.location.colonna}-${item.location.piano}` === scaffale
-            );
-
-            // Insert the forced picking row right after the scanned article, or push it to the end if not found
-            if (scannedArticleIndex !== -1) {
-                updatedTableData.splice(scannedArticleIndex + 1, 0, forcedPickingRow);
-            } else {
-                updatedTableData.push(forcedPickingRow);
-            }
-
-            // Step 5: Update the table data and highlight the new forced picking row
-
-
-            // Step 6: Highlight the forced picking row
-            const newHighlightedRows = new Set(highlightedRows);
-            newHighlightedRows.add(forcedPickingRow.id);
-
-
-
-            // Call the API
-            try {
-                await updatePacchi({
-                    articolo,
-                    location: { area, scaffale: scaffalePart, colonna, piano },
-                    movimento,
-                    quantity: pickedQuantity, // Pass the picked quantity
-                });
-                setHighlightedRows(newHighlightedRows);
-
-                // Reset quantity modal state
-                setTableData(updatedTableData);
-                setQuantityModalVisible(false);
-                setQuantityModalData(null);
-
-            } catch (error) {
-                // Handle error if needed
+                return; // Important: Exit the function early
             }
 
         }
@@ -597,7 +721,7 @@ const Picking = () => {
     const handleLocationChangeModalVisible = (article, rowId) => {
         setLocazioni([]);
         const currentRow = tableData.find(row => row.id === rowId);
-        
+
         if (currentRow) {
             // For Articolo tab, use articoloQuantity directly
             if (activeTab === '2') {
@@ -605,9 +729,9 @@ const Picking = () => {
             } else {
                 // Existing ODL logic
                 const totalNeeded = tableData
-                    .filter(row => 
-                        row.occ_arti === article && 
-                        !highlightedRows.has(row.id) && row.status != 'completed' && 
+                    .filter(row =>
+                        row.occ_arti === article &&
+                        !highlightedRows.has(row.id) && row.status != 'completed' &&
                         row.isChildRow
                     )
                     .reduce((sum, row) => sum + row.available_quantity, 0);
@@ -660,7 +784,7 @@ const Picking = () => {
     const calculateAvailableQuantity = (location, articolo) => {
         // Add null check for location
         if (!location || !location.area) return 0;
-        
+
         const allocations = getExistingAllocations();
         const locationKey = `${location.area}-${location.scaffale}-${location.colonna}-${location.piano}-${articolo}`;
 
@@ -690,6 +814,10 @@ const Picking = () => {
         setScaffale('');
         setMovimento('');
         setArticolo(articoloInput)
+        setSelectedRows([]);
+        if (multiSelectMode) {
+            setMultiSelectMode(false);
+        }
         if (!articoloInput.trim()) {
             notification.warning({
                 message: 'Attenzione',
@@ -767,6 +895,10 @@ const Picking = () => {
         setTableData([]); // Clear the data immediately
         setLoading(true); // Set loading to true
         shelfItems.clear();
+        setSelectedRows([]);
+        if (multiSelectMode) {
+            setMultiSelectMode(false);
+        }
         try {
             const response = await fetch(`${process.env.REACT_APP_API_URL}/api/ordine-lavoro?ordine_lavoro=${ordineLavoro}`);
             if (!response.ok) {
@@ -779,7 +911,7 @@ const Picking = () => {
             const transformedData = data.reduce((acc, item) => {
                 // Group by article code
                 const existing = acc.find(i => i.occ_arti === item.occ_arti);
-                
+
                 if (existing) {
                     // Only update if we haven't captured a picked quantity yet
                     if (!existing.has_picked && parseInt(item.picked_quantity) > 0) {
@@ -808,9 +940,9 @@ const Picking = () => {
                     total_quantity: parentItem.children.reduce((sum, c) => sum + parseInt(c.needed_quantity), 0),
                     total_picked: parentItem.total_picked
                 };
-
+                
                 // Create completed row if any picked quantity
-                const completedRow = parentItem.total_picked > 0 ? [{
+                const completedRow = parentItem.total_picked > 0 && !parentItem.mpl_padre ? [{
                     ...baseParent,
                     id: uuidv4(),
                     available_quantity: parentItem.total_picked,
@@ -1277,26 +1409,78 @@ const Picking = () => {
                 </div>)
         }
     };
+    const handleGroupLocationModalVisible = (record) => {
+        setSelectedGroup(record);
+        setGroupLocationModalVisible(true);
+        // Fetch available locations that can accommodate all items
+        fetchGroupLocations(record);
+    };
 
+    // Add function to fetch locations for the group
+    const fetchGroupLocations = async (group) => {
+        try {
+            // Create a structured array of articles and their quantities
+            const articlesData = group.children.map(child => ({
+                article: child.occ_arti,
+                quantity: parseFloat(child.available_quantity || 0)
+            }));
+
+            const response = await axios.get(`${process.env.REACT_APP_API_URL}/api/get-group-locations`, {
+                params: {
+                    articlesData: JSON.stringify(articlesData)
+                }
+            });
+
+            if (response.data && response.data.locations) {
+                setGroupLocations(response.data.locations);
+            } else {
+                setGroupLocations([]);
+                notification.warning({
+                    message: 'Attenzione',
+                    description: 'Nessuna locazione disponibile per tutti gli articoli del gruppo'
+                });
+            }
+        } catch (error) {
+            console.error('Error fetching group locations:', error);
+            notification.error({
+                message: 'Errore',
+                description: 'Impossibile recuperare le locazioni disponibili'
+            });
+        }
+    };
     const columns = [
+        // Update the Articolo column render function
         {
             title: 'Articolo',
             dataIndex: 'occ_arti',
             key: 'occ_arti',
+            render: (text, record) => (
+                record.isParent ? (
+                    <span style={{ fontWeight: 600 }}>
+                        {record.mpl_padre || record.id} {/* Show mpl_padre if available */}
+                    </span>
+                ) : (
+                    <span>{text}</span>
+                )
+            )
         },
         {
             title: 'Descrizione',
             dataIndex: 'occ_desc_combined',
             key: 'occ_desc_combined',
-            render: (description) => (
+            render: (text, record) => (
                 <span>
-                    {description.length > 10 ? (
-                        <Tooltip title={description} placement="topLeft">
-                            {description.substring(0, 10)}...
-                            <InfoCircleOutlined style={{ marginLeft: 4 }} />
-                        </Tooltip>
+                    {record.isParent ? (
+                        "Distinta"
                     ) : (
-                        description
+                        text.length > 10 ? (
+                            <Tooltip title={text} placement="topLeft">
+                                {text.substring(0, 10)}...
+                                <InfoCircleOutlined style={{ marginLeft: 4 }} />
+                            </Tooltip>
+                        ) : (
+                            text
+                        )
                     )}
                 </span>
             ),
@@ -1305,78 +1489,166 @@ const Picking = () => {
             title: 'Q.ta Da prelevare',
             dataIndex: 'available_quantity',
             key: 'available_quantity',
+            render: (text, record) => {
+                if (record.isParent) {
+                    // Calculate minimum needed quantity from children
+                    const childQuantities = record.children?.map(child =>
+                        parseFloat(child.needed_quantity || 0)
+                    ).filter(q => q > 0) || [];
+
+                    const minQuantity = childQuantities.length > 0
+                        ? Math.min(...childQuantities)
+                        : 'N/A';
+
+                    return <span>{minQuantity}</span>;
+                }
+                return <span>{text}</span>;
+            },
         },
 
         {
             title: 'Posizione',
             dataIndex: 'location',
             key: 'location',
-            render: (location, record) => (
-                <>
-                    {record.status === 'completed' ? (
-                        <Tag color="green">Già prelevato</Tag>
-                    ) : location && location.area ? (
-                        <Tag 
-                            color={'geekblue'} 
-                            style={{ 
-                                wordBreak: 'break-word', 
-                                whiteSpace: 'normal', 
-                                cursor: highlightedRows.has(record.id) ? 'not-allowed' : 'pointer',
-                                opacity: highlightedRows.has(record.id) ? 0.6 : 1
+            render: (location, record) => {
+                // For parent/expandable rows
+                if (record.isParent) {
+                    // Check if any child has missing items
+                    const hasAnyMissingChild = record.children?.some(child => child.missing);
+
+                    if (hasAnyMissingChild) {
+                        return <Tag color="red">Incompleto</Tag>;
+                    }
+
+                    // Check if all children have the same location
+                    const locations = record.children
+                        .filter(child => child.location) // Filter out items without location
+                        .map(child => `${child.location.area}-${child.location.scaffale}-${child.location.colonna}-${child.location.piano}`);
+
+                    if (locations.length === 0) {
+                        return null;
+                    }
+
+                    const allSameLocation = locations.every(loc => loc === locations[0]);
+
+                    return allSameLocation ? (
+                        <Tag
+                            color="geekblue"
+                            style={{
+                                wordBreak: 'break-word',
+                                whiteSpace: 'normal',
+                                cursor: 'pointer'
                             }}
-                            onClick={!highlightedRows.has(record.id) 
-                                ? () => handleLocationChangeModalVisible(record.occ_arti, record.id)
-                                : undefined}
+                            onClick={() => handleGroupLocationModalVisible(record)}
                         >
-                            {location.area}-{location.scaffale}-{location.colonna}-{location.piano}
+                            {locations[0]}
                         </Tag>
                     ) : (
-                        <Tag 
-                            color={'red'} 
-                            style={{ wordBreak: 'break-word', whiteSpace: 'normal', cursor: 'pointer' }}
-                            onClick={async () => {
-                                try {
-                                    setLoadingMissingData(true);
-                                    const response = await axios.get(`${process.env.REACT_APP_API_URL}/api/articolo-offerte`, {
-                                        params: { codice: record.occ_arti.trim() }
-                                    });
-                                    setMissingArticleData(response.data[0]);
-                                    setShowMissingArticleModal(true);
-                                } catch (error) {
-                                    notification.error({
-                                        message: 'Errore',
-                                        description: 'Impossibile recuperare i dati dell\'articolo',
-                                    });
-                                } finally {
-                                    setLoadingMissingData(false);
-                                }
+                        <Tag
+                            color="orange"
+                            style={{
+                                cursor: 'pointer'
                             }}
+                            onClick={() => handleGroupLocationModalVisible(record)}
                         >
-                            Mancante {loadingMissingData}
+                            Diverse
                         </Tag>
-                    )}
-                </>
-            ),
+
+                    );
+                }
+
+                // For child rows - original logic
+                return (
+                    <>
+                        {record.status === 'completed' ? (
+                            <Tag color="green">Già prelevato</Tag>
+                        ) : location && location.area ? (
+                            <Tag
+                                color={'geekblue'}
+                                style={{
+                                    wordBreak: 'break-word',
+                                    whiteSpace: 'normal',
+                                    cursor: highlightedRows.has(record.id) ? 'not-allowed' : 'pointer',
+                                    opacity: highlightedRows.has(record.id) ? 0.6 : 1
+                                }}
+                                onClick={!highlightedRows.has(record.id)
+                                    ? () => handleLocationChangeModalVisible(record.occ_arti, record.id)
+                                    : undefined}
+                            >
+                                {location.area}-{location.scaffale}-{location.colonna}-{location.piano}
+                            </Tag>
+                        ) : (
+                            <Tag
+                                color={'red'}
+                                style={{ wordBreak: 'break-word', whiteSpace: 'normal', cursor: 'pointer' }}
+                                onClick={async () => {
+                                    try {
+                                        setLoadingMissingData(true);
+                                        const response = await axios.get(`${process.env.REACT_APP_API_URL}/api/articolo-offerte`, {
+                                            params: { codice: record.occ_arti.trim() }
+                                        });
+                                        setMissingArticleData(response.data[0]);
+                                        setShowMissingArticleModal(true);
+                                    } catch (error) {
+                                        notification.error({
+                                            message: 'Errore',
+                                            description: 'Impossibile recuperare i dati dell\'articolo',
+                                        });
+                                    } finally {
+                                        setLoadingMissingData(false);
+                                    }
+                                }}
+                            >
+                                Mancante {loadingMissingData}
+                            </Tag>
+                        )}
+                    </>
+                );
+            },
         },
         {
             title: 'Azioni',
             key: 'actions',
             render: (_, record) => {
-                // Disable button for completed, missing, or already picked items
                 const isCompleted = record.status === 'completed';
                 const isDisabled = isCompleted || record.missing || highlightedRows.has(record.id);
-                
-                if (isDisabled) {
+
+                // For parent rows: check if any child is missing
+                const hasMissingChildren = record.isParent && record.children?.some(child => child.missing);
+
+                if (isDisabled || hasMissingChildren) {
                     return null;
                 }
 
                 return (
-                    <Button
-                        type="primary"
-                        onClick={() => handlePickFromRow(record)}
-                    >
-                        Preleva
-                    </Button>
+                    <Space>
+                        {record.isParent ? (
+                            <Button
+                                type="default"
+                                onClick={() => {
+                                    // ... existing code ...
+                                    setSelectedGroup({
+                                        ...record,
+                                        children: record.children.filter(child =>
+                                            !highlightedRows.has(child.id) && child.status !== 'completed'
+                                        )
+                                    });
+                                    setGroupPickModalVisible(true);
+                                    console.log(selectedGroup)
+
+                                }}
+                            >
+                                Preleva distinta
+                            </Button>
+                        ) : (
+                            <Button
+                                type="primary"
+                                onClick={() => handlePickFromRow(record)}
+                            >
+                                Preleva
+                            </Button>
+                        )}
+                    </Space>
                 );
             },
         }
@@ -1425,38 +1697,39 @@ const Picking = () => {
             }
         },
         {
-            title: 'Q.ta Disponibile',
+            title: 'Q.ta',
             dataIndex: 'totalQta',
             key: 'availableQta',
             render: (totalQta, record) => {
                 const availableQty = calculateAvailableQuantity(record, articleFilter);
                 return (
                     <Tooltip title={
-                        <>
+                        <div style={{ whiteSpace: 'nowrap' }}>
                             <div>Totale: {totalQta}</div>
                             <div>Disponibile: {availableQty}</div>
-                        </>
+                        </div>
                     }>
                         <span>{availableQty} / {totalQta}</span>
                     </Tooltip>
                 );
             },
+            width: 110, // Set width to 100px
         },
         {
             title: 'Azioni',
             key: 'actions',
             render: (_, record) => {
                 const currentRow = tableData.find(row => row.id === selectedRowId);
-                const isStartingLocation = currentRow?.location?.area === record.area && 
-                                          currentRow?.location?.scaffale === record.scaffale && 
-                                          currentRow?.location?.colonna === record.colonna && 
-                                          currentRow?.location?.piano === record.piano;
-    
+                const isStartingLocation = currentRow?.location?.area === record.area &&
+                    currentRow?.location?.scaffale === record.scaffale &&
+                    currentRow?.location?.colonna === record.colonna &&
+                    currentRow?.location?.piano === record.piano;
+
                 const totalQta = record.totalQta;
                 // Use articoloQuantity for Articolo tab, quantityNeeded for ODL tab
                 const requiredQty = activeTab === '2' ? articoloQuantity : quantityNeeded;
                 const canTakeAll = totalQta >= requiredQty;
-                
+
                 return (
                     <Space>
                         <Button
@@ -1474,7 +1747,7 @@ const Picking = () => {
                                     setPrelevaTuttoModalVisible(true);
                                 }}
                             >
-                                Preleva tutto da qui
+                                Seleziona questa locazione per l'intera quantità
                             </Button>
                         )}
                     </Space>
@@ -1482,7 +1755,42 @@ const Picking = () => {
             },
         }
     ];
+    const handleGroupLocationChange = async (newLocation) => {
+        if (!selectedGroup || !newLocation) return;
 
+        try {
+            const [area, scaffale, colonna, piano] = newLocation.split('-');
+            const updatedTableData = [...tableData];
+
+            // Update all children in the group
+            selectedGroup.children.forEach(child => {
+                const rowIndex = updatedTableData.findIndex(row => row.id === child.id);
+                if (rowIndex !== -1) {
+                    updatedTableData[rowIndex] = {
+                        ...updatedTableData[rowIndex],
+                        location: { area, scaffale, colonna, piano }
+                    };
+                }
+            });
+
+            setTableData(updatedTableData);
+            setGroupLocationModalVisible(false);
+            setSelectedGroup(null);
+            setGroupLocations([]);
+
+            notification.success({
+                message: 'Successo',
+                description: 'Locazione aggiornata per tutti gli articoli del gruppo',
+                placement: 'bottomRight',
+            });
+        } catch (error) {
+            notification.error({
+                message: 'Errore',
+                description: 'Errore durante l\'aggiornamento delle locazioni',
+                placement: 'bottomRight',
+            });
+        }
+    };
     // Update handleLocationChange to use the calculated available quantity
     const handleLocationChange = (newLocation) => {
         const currentRow = tableData.find(row => row.id === selectedRowId);
@@ -1490,7 +1798,7 @@ const Picking = () => {
 
         const availableQty = calculateAvailableQuantity(newLocation, articleFilter);
         const rowAvailableQty = currentRow.available_quantity;
-        
+
         setSelectedLocation(newLocation);
         setMaxAvailableQuantity(Math.min(availableQty, rowAvailableQty));
         setSelectedQuantity(Math.min(availableQty, rowAvailableQty));
@@ -1666,6 +1974,12 @@ const Picking = () => {
     };
 
     const groupLocations = (items) => {
+        // Add null check to prevent forEach on undefined
+        if (!items || !Array.isArray(items)) {
+            console.warn("groupLocations received invalid input:", items);
+            return []; // Return empty array instead of throwing error
+        }
+
         const groupedMap = new Map();
 
         items.forEach(item => {
@@ -1688,16 +2002,25 @@ const Picking = () => {
         return Array.from(groupedMap.values());
     };
 
-
-
     const rowClassName = (record) => {
+        let className = '';
+
         if (record.status === 'completed') {
-            return 'completed-row';
+            className += 'completed-row ';
         }
         if (highlightedRows.has(record.id)) {
-            return 'highlighted-row';
+            className += 'highlighted-row ';
         }
-        return record.missing ? 'missing-row' : '';
+        if (record.isParent) {
+            className += 'parent-row ';
+        } else if (!record.isParent && record.mpl_padre) {
+            className += 'child-row '; // Add child-row class for nested rows
+        }
+        if (record.missing) {
+            className += 'missing-row ';
+        }
+
+        return className.trim();
     };
 
     const handleKeyPress = (e) => {
@@ -1790,8 +2113,8 @@ const Picking = () => {
 
         const updatedTableData = [...tableData];
         // Exclude completed rows and highlighted rows from consolidation
-        const rowsToUpdate = updatedTableData.filter(row => 
-            row.occ_arti === articleFilter && 
+        const rowsToUpdate = updatedTableData.filter(row =>
+            row.occ_arti === articleFilter &&
             !highlightedRows.has(row.id) &&
             row.status !== 'completed' // Add status check
         );
@@ -1799,14 +2122,14 @@ const Picking = () => {
         if (rowsToUpdate.length === 0) return;
 
         // Find the first occurrence index to maintain position
-        const firstOccurrenceIndex = updatedTableData.findIndex(row => 
+        const firstOccurrenceIndex = updatedTableData.findIndex(row =>
             row.id === rowsToUpdate[0].id
         );
         let totalQuantity;
         // Create consolidated row at original position
         if (activeTab === '1') {
-        totalQuantity = rowsToUpdate.reduce((sum, row) => sum + row.available_quantity, 0);
-        } else{
+            totalQuantity = rowsToUpdate.reduce((sum, row) => sum + row.available_quantity, 0);
+        } else {
             totalQuantity = articoloQuantity;
 
         }
@@ -1825,7 +2148,7 @@ const Picking = () => {
         // Replace first occurrence and remove others
         const newTableData = updatedTableData
             .filter(row => !(
-                row.occ_arti === articleFilter && 
+                row.occ_arti === articleFilter &&
                 !highlightedRows.has(row.id) &&
                 row.status !== 'completed' && // Match the same filter
                 row.id !== rowsToUpdate[0].id
@@ -1835,12 +2158,469 @@ const Picking = () => {
         setTableData(newTableData);
         setPrelevaTuttoModalVisible(false);
         handleLocationChangeModalClose();
-        
+
         notification.success({
             message: 'Successo',
             description: 'Tutte le quantità sono state spostate nella posizione selezionata',
             placement: 'bottomRight',
         });
+    };
+
+    // Add new function to check if group has missing items
+    const hasGroupMissingItems = (record) => {
+        if (record.children) {
+            return record.children.some(child => child.missing);
+        }
+        return record.missing;
+    };
+
+    // Add the group pick modal component
+    const GroupPickModal = () => (
+        <Modal
+            title="Preleva distinta"
+            visible={groupPickModalVisible}
+            onCancel={() => setGroupPickModalVisible(false)}
+            footer={[
+                <Button key="back" onClick={() => setGroupPickModalVisible(false)}>
+                    Annulla
+                </Button>,
+                <Button
+                    key="submit"
+                    type="primary"
+                    onClick={() => handleGroupPick()}
+                >
+                    Conferma prelievo
+                </Button>,
+            ]}
+            width={800}
+        >
+            {selectedGroup && (
+                <div>
+                    <div style={{ marginBottom: 16 }}>
+                        <Text strong>Distinta articolo: </Text>
+                        <Text>{selectedGroup.occ_arti}</Text>
+                    </div>
+
+                    <Table
+                        dataSource={selectedGroup.children}
+                        columns={[
+                            {
+                                title: 'Articolo',
+                                dataIndex: 'occ_arti',
+                                key: 'occ_arti',
+                            },
+                            {
+                                title: 'Quantità',
+                                dataIndex: 'available_quantity',
+                                key: 'available_quantity',
+                            },
+                            {
+                                title: 'Posizione',
+                                key: 'location',
+                                render: (_, record) => (
+                                    record.location ?
+                                        `${record.location.area}-${record.location.scaffale}-${record.location.colonna}-${record.location.piano}` :
+                                        'Mancante'
+                                ),
+                            },
+                        ]}
+                        pagination={false}
+                        rowKey="id"
+                    />
+                </div>
+            )}
+        </Modal>
+    );
+
+    // Add the group pick handler
+    // Add the group pick handler
+    const handleGroupPick = async () => {
+        if (!selectedGroup) return;
+
+        try {
+            // Create arrays to collect successful picks
+            let successfulPicks = [];
+            let failedPicks = [];
+
+            // Process each child item
+            for (const child of selectedGroup.children) {
+                try {
+                    // Skip if already highlighted
+                    if (highlightedRows.has(child.id)) continue;
+
+                    // Call update-pacchi API for each item
+                    const response = await axios.post(`${process.env.REACT_APP_API_URL}/api/update-pacchi`, {
+                        articolo: child.occ_arti,
+                        quantity: child.available_quantity,
+                        area: child.location.area,
+                        scaffale: child.location.scaffale,
+                        colonna: child.location.colonna,
+                        piano: child.location.piano,
+                        movimento: child.movimento || '',
+                        odl: ordineLavoro
+                    });
+
+                    if (response.data.success) {
+                        successfulPicks.push(child.id);
+
+                        // Log the operation
+
+                    } else {
+                        failedPicks.push(child.occ_arti);
+                    }
+                } catch (error) {
+                    console.error(`Error picking ${child.occ_arti}:`, error);
+                    failedPicks.push(child.occ_arti);
+                }
+            }
+
+            // Update UI state after all operations
+            if (successfulPicks.length > 0) {
+                setHighlightedRows(prev => new Set([...prev, ...successfulPicks]));
+                setHighlightedShelves(prev => new Set([
+                    ...prev,
+                    ...successfulPicks.map(id => {
+                        const child = selectedGroup.children.find(c => c.id === id);
+                        return `${child.location.area}-${child.location.scaffale}-${child.location.colonna}-${child.location.piano}`;
+                    })
+                ]));
+            }
+
+            // Show results notification
+            if (failedPicks.length === 0) {
+                notification.success({
+                    message: 'Successo',
+                    description: `Tutti i ${successfulPicks.length} articoli sono stati prelevati con successo`,
+                    placement: 'bottomRight'
+                });
+            } else {
+                notification.warning({
+                    message: 'Risultato parziale',
+                    description: (
+                        <div>
+                            <p>Articoli prelevati: {successfulPicks.length}</p>
+                            <p>Articoli non prelevati: {failedPicks.length}</p>
+                            {failedPicks.length > 0 && (
+                                <p>Problemi con: {failedPicks.join(', ')}</p>
+                            )}
+                        </div>
+                    ),
+                    placement: 'bottomRight',
+                    duration: 8
+                });
+            }
+
+            setGroupPickModalVisible(false);
+            setSelectedGroup(null);
+
+        } catch (error) {
+            console.error('Error during group pick:', error);
+            notification.error({
+                message: 'Errore',
+                description: 'Si è verificato un errore durante il prelievo della distinta',
+                placement: 'bottomRight'
+            });
+        }
+    };
+
+    // 1. Add state for loading locations
+    const [loadingLocations, setLoadingLocations] = useState(false);
+
+    // 2. Update the multi-location handler
+    const handleMultiLocationChange = async (newLocation) => {
+        if (!selectedRows.length || !newLocation) return;
+    
+        try {
+            const [area, scaffale, colonna, piano] = newLocation.split('-');
+            const updatedTableData = [...tableData];
+            
+            // Update all selected rows
+            selectedRows.forEach(selectedRow => {
+                // Find row in the table data (considering nested children)
+                const findAndUpdateRow = (rows) => {
+                    for (let i = 0; i < rows.length; i++) {
+                        if (rows[i].id === selectedRow.id) {
+                            rows[i] = {
+                                ...rows[i],
+                                location: { area, scaffale, colonna, piano }
+                            };
+                            return true;
+                        }
+                        
+                        // Check children if present
+                        if (rows[i].children && rows[i].children.length) {
+                            if (findAndUpdateRow(rows[i].children)) {
+                                return true;
+                            }
+                        }
+                    }
+                    return false;
+                };
+                
+                findAndUpdateRow(updatedTableData);
+            });
+    
+            setTableData(updatedTableData);
+            setMultiLocationModalVisible(false);
+            setSelectedRows([]);
+            setMultiSelectMode(false);
+    
+            notification.success({
+                message: 'Successo',
+                description: `Locazione aggiornata per ${selectedRows.length} articoli selezionati`,
+                placement: 'bottomRight',
+            });
+        } catch (error) {
+            notification.error({
+                message: 'Errore',
+                description: 'Errore durante l\'aggiornamento delle locazioni',
+                placement: 'bottomRight',
+            });
+        }
+    };
+    
+
+    // 3. Add API call to fetch compatible locations
+    const fetchMultiLocations = async () => {
+        setLoadingLocations(true);
+        try {
+            // Create articlesData from selected rows similar to group handling
+            const articlesData = selectedRows.map(row => ({
+                article: row.occ_arti,
+                quantity: parseFloat(row.available_quantity || 0)
+            }));
+
+            console.log("Fetching group locations for selected articles:", JSON.stringify(articlesData, null, 2));
+
+            const response = await axios.get(`${process.env.REACT_APP_API_URL}/api/get-group-locations`, {
+                params: {
+                    articlesData: JSON.stringify(articlesData)
+                }
+            });
+
+            console.log("API response:", response.data);
+
+            if (response.data?.locations) {
+                setLocazioni(response.data.locations);
+            } else {
+                setLocazioni([]);
+                notification.warning({
+                    message: 'Nessuna locazione compatibile',
+                    description: 'Non esistono locazioni che possono contenere tutti gli articoli selezionati',
+                    placement: 'bottomRight'
+                });
+            }
+        } catch (error) {
+            console.error("Location fetch error:", error.response?.data || error.message);
+            notification.error({
+                message: 'Errore',
+                description: error.response?.data?.message || 'Errore durante il recupero delle locazioni',
+                placement: 'bottomRight'
+            });
+        } finally {
+            setLoadingLocations(false);
+        }
+    };
+    const fetchedRef = useRef(false);
+    const openMultiLocationModal = async () => {
+        if (selectedRows.length === 0) {
+            notification.warning({
+                message: 'Nessuna riga selezionata',
+                description: 'Seleziona almeno una riga per cambiare la locazione',
+                placement: 'bottomRight'
+            });
+            return;
+        }
+
+        // Show loading in the UI without opening the modal yet
+        setLoadingLocations(true);
+
+        try {
+            // Create articlesData from selected rows
+            const articlesData = selectedRows.map(row => ({
+                article: row.occ_arti,
+                quantity: parseFloat(row.available_quantity || 0)
+            }));
+
+            console.log("Fetching group locations for selected articles:", JSON.stringify(articlesData, null, 2));
+
+            const response = await axios.get(`${process.env.REACT_APP_API_URL}/api/get-group-locations`, {
+                params: {
+                    articlesData: JSON.stringify(articlesData)
+                }
+            });
+
+            console.log("API response:", response.data);
+
+            if (response.data?.locations) {
+                setLocazioni(response.data.locations);
+                // Only now show the modal
+                setMultiLocationModalVisible(true);
+            } else {
+                setLocazioni([]);
+                notification.warning({
+                    message: 'Nessuna locazione compatibile',
+                    description: 'Non esistono locazioni che possono contenere tutti gli articoli selezionati',
+                    placement: 'bottomRight'
+                });
+            }
+        } catch (error) {
+            console.error("Location fetch error:", error.response?.data || error.message);
+            notification.error({
+                message: 'Errore',
+                description: error.response?.data?.message || 'Errore durante il recupero delle locazioni',
+                placement: 'bottomRight'
+            });
+        } finally {
+            setLoadingLocations(false);
+        }
+    };
+    // 4. Update the MultiLocationChangeModal to use this data
+    // Update the MultiLocationChangeModal to match the group location modal style
+    const MultiLocationChangeModal = () => {
+        const getConsolidatedArticles = () => {
+            const articleMap = new Map();
+
+            // Group by article code and sum quantities
+            selectedRows.forEach(row => {
+                const articleCode = row.occ_arti;
+                if (articleMap.has(articleCode)) {
+                    const existing = articleMap.get(articleCode);
+                    existing.required_quantity += parseFloat(row.available_quantity || 0);
+                } else {
+                    articleMap.set(articleCode, {
+                        id_art: articleCode,
+                        required_quantity: parseFloat(row.available_quantity || 0)
+                    });
+                }
+            });
+
+            return Array.from(articleMap.values());
+        };
+        const consolidatedArticles = getConsolidatedArticles();
+
+        return (
+            <Modal
+                title="Cambia Locazione Multipla"
+                visible={multiLocationModalVisible}
+                onCancel={() => {
+                    setMultiLocationModalVisible(false);
+                    setLocazioni([]); // Clear locations when closing
+                }}
+                footer={null}
+                width="80%"
+            >
+                <div>
+                    <div style={{ marginBottom: 16 }}>
+                        <Text strong>Articoli selezionati: </Text>
+                        <Text>{consolidatedArticles.length}</Text>
+                    </div>
+                    <div style={{ marginBottom: 16 }}>
+                        <Text strong>Codici articoli: </Text>
+                        <Text>{consolidatedArticles.map(a => a.id_art).join(', ')}</Text>
+                    </div>
+
+                    {locazioni.length === 0 ? (
+                        <Text style={{ fontSize: '18px', textAlign: 'center', display: 'block' }}>
+                            Nessuna locazione compatibile tra gli articoli selezionati
+                        </Text>
+                    ) : (
+                        <Table
+                            dataSource={getCompatibleLocations().map(location => {
+                                // Find available quantities for each article in this location
+                                const articlesWithQuantities = consolidatedArticles.map(article => {
+                                    // Find this article in the location data
+                                    const locationArticleData = locazioni
+                                        .find(loc =>
+                                            loc.area === location.area &&
+                                            loc.scaffale === location.scaffale &&
+                                            loc.colonna === location.colonna &&
+                                            loc.piano === location.piano
+                                        )?.articles?.find(a => a.id_art === article.id_art);
+
+                                    return {
+                                        ...article,
+                                        available_quantity: locationArticleData?.available_quantity || 0
+                                    };
+                                });
+
+                                return {
+                                    key: location.location,
+                                    location: location.location,
+                                    articles: articlesWithQuantities
+                                };
+                            })}
+                            columns={[
+                                {
+                                    title: 'Locazione',
+                                    dataIndex: 'location',
+                                    key: 'location',
+                                },
+                                {
+                                    title: 'Articoli Disponibili',
+                                    key: 'articles',
+                                    render: (_, record) => (
+                                        <div style={{ maxWidth: 300 }}>
+                                            {record.articles.map(article => (
+                                                <div key={article.id_art} style={{
+                                                    display: 'flex',
+                                                    justifyContent: 'space-between',
+                                                    margin: '4px 0',
+                                                    padding: 4,
+                                                    backgroundColor: article.available_quantity >= article.required_quantity
+                                                        ? '#f6ffed'
+                                                        : '#fffbe6'
+                                                }}>
+                                                    <div style={{ fontWeight: 500 }}>{article.id_art}</div>
+                                                    <div>
+                                                        <span style={{ marginRight: 8 }}>
+                                                            Richiesto: {article.required_quantity}
+                                                        </span>
+                                                        <span style={{
+                                                            color: article.available_quantity >= article.required_quantity
+                                                                ? '#389e0d'
+                                                                : '#d48806'
+                                                        }}>
+                                                            Disponibile: {article.available_quantity}
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    ),
+                                },
+                                {
+                                    title: 'Azioni',
+                                    key: 'actions',
+                                    render: (_, record) => (
+                                        <Button
+                                            type="primary"
+                                            onClick={() => handleMultiLocationChange(record.location)}
+                                        >
+                                            Seleziona
+                                        </Button>
+                                    ),
+                                },
+                            ]}
+                            pagination={false}
+                        />
+                    )}
+                </div>
+            </Modal>
+        );
+    };
+
+    // 5. Update getCompatibleLocations to match API response format
+    const getCompatibleLocations = () => {
+        console.log("Processing locations:", locazioni);
+
+        return locazioni.map(loc => ({
+            area: loc.area,
+            scaffale: loc.scaffale,
+            colonna: loc.colonna,
+            piano: loc.piano,
+            location: `${loc.area}-${loc.scaffale}-${loc.colonna}-${loc.piano}`
+        }));
     };
 
     return (
@@ -1963,8 +2743,8 @@ const Picking = () => {
                         <p>Movimento: <strong>{quantityModalData.forcedPickingInfo.movimento}</strong></p>
                         <p>Quantità massima prelevabile: <strong>{maxAvailableQuantity}</strong></p>
                         <InputNumber
-                             min={1}
-                             max={maxAvailableQuantity}
+                            min={1}
+                            max={maxAvailableQuantity}
 
                             value={pickedQuantity}
                             onChange={(value) => setPickedQuantity(value)}
@@ -1987,7 +2767,7 @@ const Picking = () => {
                         <Text strong>Quantità totale richiesta:</Text> {quantityNeeded}
                     </div>
                     <div>
-                        <Text strong>Quantità disponibile in questa posizione:</Text> 
+                        <Text strong>Quantità disponibile in questa posizione:</Text>
                         {calculateAvailableQuantity(selectedLocation, articleFilter)}
                     </div>
                     {calculateAvailableQuantity(selectedLocation, articleFilter) < quantityNeeded && (
@@ -2059,18 +2839,119 @@ const Picking = () => {
                     </div>
                 )}
             </Modal>
-
+            <Modal
+                title="Cambia locazione gruppo"
+                visible={groupLocationModalVisible}
+                onCancel={() => {
+                    setGroupLocationModalVisible(false);
+                    setSelectedGroup(null);
+                    setGroupLocations([]);
+                }}
+                footer={null}
+                width="80%"
+            >
+                {selectedGroup && (
+                    <div>
+                        <div style={{ marginBottom: 16 }}>
+                            {console.log(selectedGroup)}
+                            <Text strong>Distinta articolo: </Text>
+                            <Text>{selectedGroup.occ_arti}</Text>
+                        </div>
+                        <div style={{ marginBottom: 16 }}>
+                            <Text strong>Articoli nella distinta da: </Text>
+                            <Text>{[...new Set(selectedGroup.children.map(child => child.occ_arti))].length}</Text>
+                        </div>
+                        <div style={{ marginBottom: 16 }}>
+                            <Text strong>Articoli: </Text>
+                            <Text>{[...new Set(selectedGroup.children.map(child => child.occ_arti))].join(', ')}</Text>
+                        </div>
+                        {groupedLocations.length === 0 ? (
+                            <Text style={{ fontSize: '18px', textAlign: 'center', display: 'block' }}>
+                                Nessuna locazione compatibile tra gli articoli della distinta
+                            </Text>
+                        ) : (
+                            <Table
+                                dataSource={groupedLocations.map(location => ({
+                                    key: `${location.area}-${location.scaffale}-${location.colonna}-${location.piano}`,
+                                    location: `${location.area}-${location.scaffale}-${location.colonna}-${location.piano}`,
+                                    articles: location.articles
+                                }))}
+                                columns={[
+                                    {
+                                        title: 'Locazione',
+                                        dataIndex: 'location',
+                                        key: 'location',
+                                    },
+                                    {
+                                        title: 'Articoli Disponibili',
+                                        key: 'articles',
+                                        render: (_, record) => (
+                                            <div style={{ maxWidth: 300 }}>
+                                                {record.articles.map(article => (
+                                                    <div key={article.id_art} style={{
+                                                        display: 'flex',
+                                                        justifyContent: 'space-between',
+                                                        margin: '4px 0',
+                                                        padding: 4,
+                                                        backgroundColor: article.available_quantity >= article.required_quantity
+                                                            ? '#f6ffed'
+                                                            : '#fffbe6'
+                                                    }}>
+                                                        <div style={{ fontWeight: 500 }}>{article.id_art}</div>
+                                                        <div>
+                                                            <span style={{ marginRight: 8 }}>
+                                                                Richiesto: {article.required_quantity}
+                                                            </span>
+                                                            <span style={{
+                                                                color: article.available_quantity >= article.required_quantity
+                                                                    ? '#389e0d'
+                                                                    : '#d48806'
+                                                            }}>
+                                                                Disponibile: {article.available_quantity}
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        ),
+                                    },
+                                    {
+                                        title: 'Azioni',
+                                        key: 'actions',
+                                        render: (_, record) => (
+                                            <Button
+                                                type="primary"
+                                                onClick={() => handleGroupLocationChange(record.location)}
+                                                disabled={!record.articles.every(a => a.available_quantity >= a.required_quantity)}
+                                            >
+                                                Seleziona
+                                            </Button>
+                                        ),
+                                    },
+                                ]}
+                                pagination={false}
+                            />
+                        )}
+                    </div>
+                )}
+            </Modal>
 
             <Sider width={"50%"} style={{ background: '#fff' }}>
                 <Space direction="vertical" style={{ width: '100%', padding: '20px' }}>
-                <Tabs 
-    onChange={(key) => {
-        setActiveTab(key);
-        resetInputSearch();
-    }} 
-    defaultActiveKey="1" 
-    centered
->                        {/* ODL Tab */}
+                    {/* Add the MultiSelectControls here, above your tabs */}
+
+                    <Tabs
+                        onChange={(key) => {
+                            setActiveTab(key);
+                            resetInputSearch();
+                            // Reset multi-select mode when changing tabs
+                            if (multiSelectMode) {
+                                toggleMultiSelectMode();
+                            }
+                        }}
+                        defaultActiveKey="1"
+                        centered
+                    >                        {/* ODL Tab */}
                         <TabPane tab="ODL" key="1">
                             <Input.Group compact>
                                 <Input
@@ -2124,15 +3005,32 @@ const Picking = () => {
                         </div>
                     ) : (
                         <Table
-                            columns={columns}
-                            dataSource={tableData.filter(row => row.available_quantity > 0)}
+                            columns={multiSelectMode ? getColumnConfig() : columns}
+                            dataSource={groupDataByParent(tableData.filter(row => row.available_quantity > 0))}
                             pagination={false}
                             scroll={{ y: 'calc(100vh - 250px)' }}
                             rowKey="id"
                             rowClassName={rowClassName}
                             style={tableStyle}
+                            footer={() => tableData.length > 0 ? <MultiSelectControls /> : null} // Only show controls when there's data
+
+                            expandable={expandableConfig}
                             onRow={(record) => ({
                                 title: getRowTooltip(record),
+                                onClick: () => {
+                                    if (multiSelectMode) {
+                                        // Toggle selection on row click in multi-select mode
+                                        const canSelect = !record.isParent &&
+                                            record.status !== 'completed' &&
+                                            !highlightedRows.has(record.id) &&
+                                            record.location;
+
+                                        if (canSelect) {
+                                            const isSelected = selectedRows.some(row => row.id === record.id);
+                                            handleRowSelect(record, !isSelected);
+                                        }
+                                    }
+                                }
                             })}
                         />
                     )}
@@ -2205,6 +3103,9 @@ const Picking = () => {
 
                 </Content>
             </Layout>
+            <GroupPickModal />
+            {/* Include the multi-location change modal */}
+            <MultiLocationChangeModal />
         </Layout>
     );
 };

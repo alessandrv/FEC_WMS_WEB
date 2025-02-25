@@ -121,3 +121,24 @@
     }
 }
 
+
+/* Style for expanded rows container */
+.ant-table-expanded-row > .ant-table-cell {
+    background-color: #ffffff;
+    padding: 0 !important;
+}
+
+/* Add background color for all child rows */
+.child-row {
+    background-color: #ffffe9 ; /* Light grayish-blue background */
+}
+
+.child-row:hover td {
+    background-color: transparent !important; /* Slightly darker on hover */
+}
+
+/* Add inner table styles */
+.ant-table-expanded-row .ant-table {
+    margin: 8px 0;
+    border-left: 2px solid #1890ff;
+}
