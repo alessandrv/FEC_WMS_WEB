@@ -1,7 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { Input, Button, Table, Layout, Space, message, Tooltip, Spin, Tag, Modal, InputNumber, Pagination, Form, Alert, Typography, Checkbox } from 'antd';
 import axios from 'axios';
-import { QuestionCircleOutlined, PlusOutlined, MinusOutlined } from '@ant-design/icons';
+import { SettingOutlined, PlusOutlined, MinusOutlined } from '@ant-design/icons';
 
 import './Picking.css';
 import { LoadingOutlined } from '@ant-design/icons';
@@ -17,6 +17,9 @@ const { TabPane } = Tabs;
 const { Content, Sider } = Layout;
 
 const Picking = () => {
+    const [settingsModalVisible, setSettingsModalVisible] = useState(false);
+    const [resetConfirmModalVisible, setResetConfirmModalVisible] = useState(false);
+
     const [groupLocationModalVisible, setGroupLocationModalVisible] = useState(false);
     const [selectedGroup, setSelectedGroup] = useState(null);
     const [groupedLocations, setGroupLocations] = useState([]);
@@ -380,7 +383,7 @@ const Picking = () => {
                                         handleRowSelect(record, e.target.checked);
                                     }
                                 }}
-                                disabled={!canSelect}
+                                disabled={!canSelect || record.missing || record.status === 'completed' || highlightedRows.has(record.id)}
                             />
                         );
                     }
@@ -568,134 +571,166 @@ const Picking = () => {
         }
     };
 
-    const handleQuantityConfirm = async () => {
 
-        setConfirmLoading(true); // Start loading
-        if (pickedQuantity <= 0) {
+const handleQuantityConfirm = async () => {
+    setConfirmLoading(true);
+    if (pickedQuantity <= 0) {
+        notification.error({
+            message: 'Errore',
+            description: 'La quantità deve essere maggiore di zero.',
+            placement: 'bottomRight',
+            duration: 5,
+        });
+        setConfirmLoading(false);
+        return;
+    }
+
+    const { mode, rowIndex, rowData, forcedPickingInfo } = quantityModalData;
+
+    if (mode === 'exact') {
+        // Handle exact match quantity picking
+        if (pickedQuantity > rowData.available_quantity) {
             notification.error({
                 message: 'Errore',
-                description: 'La quantità deve essere maggiore di zero.',
+                description: 'La quantità inserita supera la quantità disponibile.',
                 placement: 'bottomRight',
-                duration: 5, // Notification will close after 3 seconds
+                duration: 5,
             });
             setConfirmLoading(false);
-
             return;
         }
 
-        const { mode, rowIndex, rowData, forcedPickingInfo } = quantityModalData;
+        // Extract location details
+        const { area, scaffale: scaffalePart, colonna, piano } = rowData.location;
 
-        if (mode === 'exact') {
-            // Handle exact match quantity picking
-            if (pickedQuantity > rowData.available_quantity) {
-                notification.error({
-                    message: 'Errore',
-                    description: 'La quantità inserita supera la quantità disponibile.',
-                    placement: 'bottomRight',
-                    duration: 5, // Notification will close after 3 seconds
-                });
-                setConfirmLoading(false);
-
-                return;
+        // Call the API
+        try {
+            const response = await fetch(`${process.env.REACT_APP_API_URL}/api/update-pacchi`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    articolo,
+                    area: area,
+                    scaffale: scaffalePart,
+                    colonna: colonna,
+                    piano: piano,
+                    movimento,
+                    quantity: pickedQuantity,
+                    odl: ordineLavoro,
+                }),
+            });
+            
+            if (!response.ok) {
+                throw new Error('Failed to update pacchi');
             }
-
-            const updatedTableData = [...tableData];
-
-
-
-            // Extract location details
-            const { area, scaffale: scaffalePart, colonna, piano } = rowData.location;
-
-            // Call the API
-            try {
-                
-                const response = await fetch(`${process.env.REACT_APP_API_URL}/api/update-pacchi`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        articolo,
-                        area: area,
-                        scaffale: scaffalePart,
-                        colonna: colonna,
-                        piano: piano,
-                        movimento,
-                        quantity: pickedQuantity, // Include the picked quantity
-                        odl: ordineLavoro,
-                    }),
-                });
-                if (!response.ok) {
-                    throw new Error('Failed to update pacchi');
-                }
-                const data = await response.json();
-                // Handle success, e.g., update state or notify user
-                notification.success({
-                    message: 'Successo',
-                    description: `Articolo ${articolo} prelevato da ${area}-${scaffalePart}-${colonna}-${piano}`,
-                    placement: 'bottomRight'
-    
-                });
-                // Make the API call
-              
-                
-                // Only proceed with UI updates if the API call succeeds
-                if (pickedQuantity === rowData.available_quantity) {
-                    // User picked the entire quantity; highlight the row normally
-                    setHighlightedRows(prev => new Set(prev).add(rowData.id));
-                } else {
-                    // User picked a partial quantity
-                    // Update the original row by subtracting the picked quantity
-                    updatedTableData[rowIndex] = {
-                        ...rowData,
-                        available_quantity: parseFloat(rowData.available_quantity) - parseFloat(pickedQuantity),
-                    };
             
-                    // Create a new row for the picked quantity
-                    const newRow = {
-                        ...rowData,
-                        available_quantity: parseFloat(pickedQuantity),
-                        picked_quantity: parseFloat(pickedQuantity),
-                        id: uuidv4(), // Assign a unique ID
-                    };
+            const data = await response.json();
             
-                    // Insert the new row right after the original row
-                    updatedTableData.splice(rowIndex + 1, 0, newRow);
+            notification.success({
+                message: 'Successo',
+                description: `Articolo ${articolo} prelevato da ${area}-${scaffalePart}-${colonna}-${piano}`,
+                placement: 'bottomRight'
+            });
             
-                    // Highlight the new row
-                    setHighlightedRows(prev => {
-                        const newSet = new Set(prev);
-                        newSet.add(newRow.id);
-                        return newSet;
-                    });
-                }
-            
-                // Update UI state
-                setTableData(updatedTableData);
+            // Find the exact row using ID - we need the current index, not the one from when the modal opened
+            const actualIndex = tableData.findIndex(row => row.id === rowData.id);
+            if (actualIndex < 0) {
+                console.error("Row not found in tableData:", rowData.id);
                 setQuantityModalVisible(false);
                 setQuantityModalData(null);
-                
-                
-            
-            } catch (error) {
-                // Handle API failure
-                console.error("Error updating pacchi:", error);
-                notification.error({
-                    message: 'Errore',
-                    description: 'Il prelievo non è stato registrato. Si prega di riprovare.',
-                    placement: 'bottomRight',
-                    duration: 5,
-                });
-                
-                // Don't close the modal so user can retry
                 setConfirmLoading(false);
-                return; // Important: Exit the function early
+                return;
             }
-
+            
+            // Check if there's already a highlighted row with the same article and location
+            const existingPickedRowIndex = tableData.findIndex(row => 
+                highlightedRows.has(row.id) && 
+                row.occ_arti === rowData.occ_arti &&
+                row.location &&
+                row.location.area === area &&
+                row.location.scaffale === scaffalePart &&
+                row.location.colonna === colonna &&
+                row.location.piano === piano
+            );
+            
+            // Start with the current tableData - we'll only modify what needs to change
+            const newTableData = [...tableData];
+            
+            if (existingPickedRowIndex >= 0) {
+                // There's already a highlighted row for this article/location
+                // Update the existing highlighted row
+                newTableData[existingPickedRowIndex] = {
+                    ...newTableData[existingPickedRowIndex],
+                    available_quantity: parseFloat(newTableData[existingPickedRowIndex].available_quantity) + parseFloat(pickedQuantity),
+                    picked_quantity: parseFloat(newTableData[existingPickedRowIndex].picked_quantity || 0) + parseFloat(pickedQuantity)
+                };
+                
+                if (parseFloat(pickedQuantity) === parseFloat(rowData.available_quantity)) {
+                    // Remove the original row if we picked all of it
+                    newTableData.splice(actualIndex, 1);
+                } else {
+                    // Otherwise just update its available quantity
+                    newTableData[actualIndex] = {
+                        ...newTableData[actualIndex],
+                        available_quantity: parseFloat(newTableData[actualIndex].available_quantity) - parseFloat(pickedQuantity)
+                    };
+                }
+            } else {
+                // No existing highlighted row for this article/location
+                if (parseFloat(pickedQuantity) === parseFloat(rowData.available_quantity)) {
+                    // User picked the entire quantity - just highlight the existing row
+                    const newHighlightedRows = new Set(highlightedRows);
+                    newHighlightedRows.add(rowData.id);
+                    setHighlightedRows(newHighlightedRows);
+                } else {
+                    // Update the original row with reduced quantity
+                    newTableData[actualIndex] = {
+                        ...newTableData[actualIndex],
+                        available_quantity: parseFloat(newTableData[actualIndex].available_quantity) - parseFloat(pickedQuantity)
+                    };
+                    
+                    // Create a new picked row
+                    const pickedRow = {
+                        ...JSON.parse(JSON.stringify(rowData)),
+                        available_quantity: parseFloat(pickedQuantity),
+                        picked_quantity: parseFloat(pickedQuantity),
+                        id: uuidv4()
+                    };
+                    
+                    // Insert the new row right after the updated row
+                    newTableData.splice(actualIndex + 1, 0, pickedRow);
+                    
+                    // Add the new row to highlighted rows
+                    const newHighlightedRows = new Set(highlightedRows);
+                    newHighlightedRows.add(pickedRow.id);
+                    setHighlightedRows(newHighlightedRows);
+                }
+            }
+            
+            // Close the modal
+            setQuantityModalVisible(false);
+            setQuantityModalData(null);
+            
+            // Update the table with our changes
+            setTableData(newTableData);
+            
+        } catch (error) {
+            console.error("Error updating pacchi:", error);
+            notification.error({
+                message: 'Errore',
+                description: 'Il prelievo non è stato registrato. Si prega di riprovare.',
+                placement: 'bottomRight',
+                duration: 5,
+            });
+            setConfirmLoading(false);
+            return;
         }
-        setConfirmLoading(false); // Stop loading
+    }
+    setConfirmLoading(false);
+};
 
-    };
     useEffect(() => {
         if (articleFilter !== null) {
             console.log(articleFilter); // This will log the updated state
@@ -1493,7 +1528,7 @@ const Picking = () => {
                 if (record.isParent) {
                     // Calculate minimum needed quantity from children
                     const childQuantities = record.children?.map(child =>
-                        parseFloat(child.needed_quantity || 0)
+                        parseFloat(child.mpl_qta || 0)
                     ).filter(q => q > 0) || [];
 
                     const minQuantity = childQuantities.length > 0
@@ -1517,7 +1552,7 @@ const Picking = () => {
                     const hasAnyMissingChild = record.children?.some(child => child.missing);
 
                     if (hasAnyMissingChild) {
-                        return <Tag color="red">Incompleto</Tag>;
+                        return <div style={{ textAlign: 'center' }}><Tag color="red">Incompleto</Tag></div>;
                     }
 
                     // Check if all children have the same location
@@ -1532,7 +1567,7 @@ const Picking = () => {
                     const allSameLocation = locations.every(loc => loc === locations[0]);
 
                     return allSameLocation ? (
-                        <Tag
+                        <div style={{ textAlign: 'center' }}><Tag
                             color="geekblue"
                             style={{
                                 wordBreak: 'break-word',
@@ -1542,9 +1577,9 @@ const Picking = () => {
                             onClick={() => handleGroupLocationModalVisible(record)}
                         >
                             {locations[0]}
-                        </Tag>
+                        </Tag></div>
                     ) : (
-                        <Tag
+                        <div style={{ textAlign: 'center' }}><Tag
                             color="orange"
                             style={{
                                 cursor: 'pointer'
@@ -1552,14 +1587,14 @@ const Picking = () => {
                             onClick={() => handleGroupLocationModalVisible(record)}
                         >
                             Diverse
-                        </Tag>
+                        </Tag></div>
 
                     );
                 }
 
                 // For child rows - original logic
                 return (
-                    <>
+                    <><div style={{ textAlign: 'center' }}>
                         {record.status === 'completed' ? (
                             <Tag color="green">Già prelevato</Tag>
                         ) : location && location.area ? (
@@ -1601,7 +1636,7 @@ const Picking = () => {
                             >
                                 Mancante {loadingMissingData}
                             </Tag>
-                        )}
+                        )}</div>
                     </>
                 );
             },
@@ -2332,34 +2367,79 @@ const Picking = () => {
     
         try {
             const [area, scaffale, colonna, piano] = newLocation.split('-');
-            const updatedTableData = [...tableData];
             
-            // Update all selected rows
-            selectedRows.forEach(selectedRow => {
-                // Find row in the table data (considering nested children)
-                const findAndUpdateRow = (rows) => {
-                    for (let i = 0; i < rows.length; i++) {
-                        if (rows[i].id === selectedRow.id) {
-                            rows[i] = {
-                                ...rows[i],
+            // Create a copy of the current table data
+            let updatedTableData = [...tableData];
+            
+            // Group selected rows by article code for merging
+            const articleGroups = {};
+            selectedRows.forEach(row => {
+                if (!articleGroups[row.occ_arti]) {
+                    articleGroups[row.occ_arti] = [];
+                }
+                articleGroups[row.occ_arti].push(row);
+            });
+            
+            // Process each article group
+            for (const articleCode in articleGroups) {
+                const rowsToProcess = articleGroups[articleCode];
+                
+                // Calculate total quantity for this article
+                const totalQuantity = rowsToProcess.reduce(
+                    (sum, row) => sum + parseFloat(row.available_quantity || 0), 0
+                );
+                
+                // Find if there's already a row with this article and target location (not in selected rows)
+                const existingTargetRow = updatedTableData.find(row => 
+                    !selectedRows.some(selected => selected.id === row.id) &&
+                    row.occ_arti === articleCode &&
+                    row.location?.area === area &&
+                    row.location?.scaffale === scaffale &&
+                    row.location?.colonna === colonna &&
+                    row.location?.piano === piano
+                );
+                
+                if (existingTargetRow) {
+                    // Update existing row at target location
+                    existingTargetRow.available_quantity = 
+                        parseFloat(existingTargetRow.available_quantity || 0) + totalQuantity;
+                    
+                    // Remove all selected rows for this article
+                    updatedTableData = updatedTableData.filter(row => 
+                        !rowsToProcess.some(selected => selected.id === row.id)
+                    );
+                } else {
+                    // No existing row at target location
+                    if (rowsToProcess.length === 1) {
+                        // Just one row to update - change its location
+                        const rowIndex = updatedTableData.findIndex(row => row.id === rowsToProcess[0].id);
+                        if (rowIndex !== -1) {
+                            updatedTableData[rowIndex] = {
+                                ...updatedTableData[rowIndex],
                                 location: { area, scaffale, colonna, piano }
                             };
-                            return true;
                         }
-                        
-                        // Check children if present
-                        if (rows[i].children && rows[i].children.length) {
-                            if (findAndUpdateRow(rows[i].children)) {
-                                return true;
-                            }
+                    } else {
+                        // Multiple rows to merge
+                        // Keep the first row, update its location and quantity
+                        const firstRowIndex = updatedTableData.findIndex(row => row.id === rowsToProcess[0].id);
+                        if (firstRowIndex !== -1) {
+                            updatedTableData[firstRowIndex] = {
+                                ...updatedTableData[firstRowIndex],
+                                location: { area, scaffale, colonna, piano },
+                                available_quantity: totalQuantity
+                            };
+                            
+                            // Remove the other rows for this article
+                            updatedTableData = updatedTableData.filter(row => 
+                                row.id === rowsToProcess[0].id || 
+                                !rowsToProcess.some(selected => selected.id === row.id)
+                            );
                         }
                     }
-                    return false;
-                };
-                
-                findAndUpdateRow(updatedTableData);
-            });
-    
+                }
+            }
+            
             setTableData(updatedTableData);
             setMultiLocationModalVisible(false);
             setSelectedRows([]);
@@ -2371,6 +2451,7 @@ const Picking = () => {
                 placement: 'bottomRight',
             });
         } catch (error) {
+            console.error("Error updating locations:", error);
             notification.error({
                 message: 'Errore',
                 description: 'Errore durante l\'aggiornamento delle locazioni',
@@ -2477,138 +2558,166 @@ const Picking = () => {
     };
     // 4. Update the MultiLocationChangeModal to use this data
     // Update the MultiLocationChangeModal to match the group location modal style
-    const MultiLocationChangeModal = () => {
-        const getConsolidatedArticles = () => {
-            const articleMap = new Map();
 
-            // Group by article code and sum quantities
-            selectedRows.forEach(row => {
-                const articleCode = row.occ_arti;
-                if (articleMap.has(articleCode)) {
-                    const existing = articleMap.get(articleCode);
-                    existing.required_quantity += parseFloat(row.available_quantity || 0);
-                } else {
-                    articleMap.set(articleCode, {
-                        id_art: articleCode,
-                        required_quantity: parseFloat(row.available_quantity || 0)
-                    });
-                }
+const MultiLocationChangeModal = () => {
+    const getConsolidatedArticles = () => {
+        const articleMap = new Map();
+
+        // Group by article code and sum quantities
+        selectedRows.forEach(row => {
+            const articleCode = row.occ_arti;
+            if (articleMap.has(articleCode)) {
+                const existing = articleMap.get(articleCode);
+                existing.required_quantity += parseFloat(row.available_quantity || 0);
+            } else {
+                articleMap.set(articleCode, {
+                    id_art: articleCode,
+                    required_quantity: parseFloat(row.available_quantity || 0)
+                });
+            }
+        });
+
+        return Array.from(articleMap.values());
+    };
+    const consolidatedArticles = getConsolidatedArticles();
+
+    // Filter compatible locations to only include those with sufficient quantity
+    const getFilteredCompatibleLocations = () => {
+        const compatibleLocations = getCompatibleLocations();
+        
+        return compatibleLocations.filter(location => {
+            // For each location, check if all articles have sufficient quantities
+            const locationString = location.location;
+            const [area, scaffale, colonna, piano] = locationString.split('-');
+            
+            // Check each article in this location
+            return consolidatedArticles.every(article => {
+                // Find this article in the location data
+                const locationData = locazioni.find(loc => 
+                    loc.area === area && 
+                    loc.scaffale === scaffale && 
+                    loc.colonna === colonna && 
+                    loc.piano === piano
+                );
+                
+                if (!locationData) return false;
+                
+                const articleData = locationData.articles?.find(a => a.id_art === article.id_art);
+                if (!articleData) return false;
+                
+                // Check if available quantity is sufficient
+                return parseFloat(articleData.available_quantity || 0) >= parseFloat(article.required_quantity || 0);
             });
+        });
+    };
+    
+    const filteredLocations = getFilteredCompatibleLocations();
 
-            return Array.from(articleMap.values());
-        };
-        const consolidatedArticles = getConsolidatedArticles();
+    return (
+        <Modal
+            title="Cambia Locazione Multipla"
+            visible={multiLocationModalVisible}
+            onCancel={() => {
+                setMultiLocationModalVisible(false);
+                setLocazioni([]); // Clear locations when closing
+            }}
+            footer={null}
+            width="80%"
+        >
+            <div>
+                <div style={{ marginBottom: 16 }}>
+                    <Text strong>Articoli selezionati: </Text>
+                    <Text>{consolidatedArticles.length}</Text>
+                </div>
+                <div style={{ marginBottom: 16 }}>
+                    <Text strong>Codici articoli: </Text>
+                    <Text>{consolidatedArticles.map(a => a.id_art).join(', ')}</Text>
+                </div>
 
-        return (
-            <Modal
-                title="Cambia Locazione Multipla"
-                visible={multiLocationModalVisible}
-                onCancel={() => {
-                    setMultiLocationModalVisible(false);
-                    setLocazioni([]); // Clear locations when closing
-                }}
-                footer={null}
-                width="80%"
-            >
-                <div>
-                    <div style={{ marginBottom: 16 }}>
-                        <Text strong>Articoli selezionati: </Text>
-                        <Text>{consolidatedArticles.length}</Text>
-                    </div>
-                    <div style={{ marginBottom: 16 }}>
-                        <Text strong>Codici articoli: </Text>
-                        <Text>{consolidatedArticles.map(a => a.id_art).join(', ')}</Text>
-                    </div>
-
-                    {locazioni.length === 0 ? (
-                        <Text style={{ fontSize: '18px', textAlign: 'center', display: 'block' }}>
-                            Nessuna locazione compatibile tra gli articoli selezionati
-                        </Text>
-                    ) : (
-                        <Table
-                            dataSource={getCompatibleLocations().map(location => {
-                                // Find available quantities for each article in this location
-                                const articlesWithQuantities = consolidatedArticles.map(article => {
-                                    // Find this article in the location data
-                                    const locationArticleData = locazioni
-                                        .find(loc =>
-                                            loc.area === location.area &&
-                                            loc.scaffale === location.scaffale &&
-                                            loc.colonna === location.colonna &&
-                                            loc.piano === location.piano
-                                        )?.articles?.find(a => a.id_art === article.id_art);
-
-                                    return {
-                                        ...article,
-                                        available_quantity: locationArticleData?.available_quantity || 0
-                                    };
-                                });
+                {filteredLocations.length === 0 ? (
+                    <Text style={{ fontSize: '18px', textAlign: 'center', display: 'block' }}>
+                        Nessuna locazione compatibile con quantità sufficiente per gli articoli selezionati
+                    </Text>
+                ) : (
+                    <Table
+                        dataSource={filteredLocations.map(location => {
+                            // Find available quantities for each article in this location
+                            const articlesWithQuantities = consolidatedArticles.map(article => {
+                                // Find this article in the location data
+                                const locationArticleData = locazioni
+                                    .find(loc =>
+                                        loc.area === location.area &&
+                                        loc.scaffale === location.scaffale &&
+                                        loc.colonna === location.colonna &&
+                                        loc.piano === location.piano
+                                    )?.articles?.find(a => a.id_art === article.id_art);
 
                                 return {
-                                    key: location.location,
-                                    location: location.location,
-                                    articles: articlesWithQuantities
+                                    ...article,
+                                    available_quantity: locationArticleData?.available_quantity || 0
                                 };
-                            })}
-                            columns={[
-                                {
-                                    title: 'Locazione',
-                                    dataIndex: 'location',
-                                    key: 'location',
-                                },
-                                {
-                                    title: 'Articoli Disponibili',
-                                    key: 'articles',
-                                    render: (_, record) => (
-                                        <div style={{ maxWidth: 300 }}>
-                                            {record.articles.map(article => (
-                                                <div key={article.id_art} style={{
-                                                    display: 'flex',
-                                                    justifyContent: 'space-between',
-                                                    margin: '4px 0',
-                                                    padding: 4,
-                                                    backgroundColor: article.available_quantity >= article.required_quantity
-                                                        ? '#f6ffed'
-                                                        : '#fffbe6'
-                                                }}>
-                                                    <div style={{ fontWeight: 500 }}>{article.id_art}</div>
-                                                    <div>
-                                                        <span style={{ marginRight: 8 }}>
-                                                            Richiesto: {article.required_quantity}
-                                                        </span>
-                                                        <span style={{
-                                                            color: article.available_quantity >= article.required_quantity
-                                                                ? '#389e0d'
-                                                                : '#d48806'
-                                                        }}>
-                                                            Disponibile: {article.available_quantity}
-                                                        </span>
-                                                    </div>
+                            });
+
+                            return {
+                                key: location.location,
+                                location: location.location,
+                                articles: articlesWithQuantities
+                            };
+                        })}
+                        columns={[
+                            {
+                                title: 'Locazione',
+                                dataIndex: 'location',
+                                key: 'location',
+                            },
+                            {
+                                title: 'Articoli Disponibili',
+                                key: 'articles',
+                                render: (_, record) => (
+                                    <div style={{ maxWidth: 300 }}>
+                                        {record.articles.map(article => (
+                                            <div key={article.id_art} style={{
+                                                display: 'flex',
+                                                justifyContent: 'space-between',
+                                                margin: '4px 0',
+                                                padding: 4,
+                                                backgroundColor: '#f6ffed' // All rows should be green now
+                                            }}>
+                                                <div style={{ fontWeight: 500 }}>{article.id_art}</div>
+                                                <div>
+                                                    <span style={{ marginRight: 8 }}>
+                                                        Richiesto: {article.required_quantity}
+                                                    </span>
+                                                    <span style={{ color: '#389e0d' }}>
+                                                        Disponibile: {article.available_quantity}
+                                                    </span>
                                                 </div>
-                                            ))}
-                                        </div>
-                                    ),
-                                },
-                                {
-                                    title: 'Azioni',
-                                    key: 'actions',
-                                    render: (_, record) => (
-                                        <Button
-                                            type="primary"
-                                            onClick={() => handleMultiLocationChange(record.location)}
-                                        >
-                                            Seleziona
-                                        </Button>
-                                    ),
-                                },
-                            ]}
-                            pagination={false}
-                        />
-                    )}
-                </div>
-            </Modal>
-        );
-    };
+                                            </div>
+                                        ))}
+                                    </div>
+                                ),
+                            },
+                            {
+                                title: 'Azioni',
+                                key: 'actions',
+                                render: (_, record) => (
+                                    <Button
+                                        type="primary"
+                                        onClick={() => handleMultiLocationChange(record.location)}
+                                    >
+                                        Seleziona
+                                    </Button>
+                                ),
+                            },
+                        ]}
+                        pagination={false}
+                    />
+                )}
+            </div>
+        </Modal>
+    );
+};
+
 
     // 5. Update getCompatibleLocations to match API response format
     const getCompatibleLocations = () => {
@@ -2622,7 +2731,92 @@ const Picking = () => {
             location: `${loc.area}-${loc.scaffale}-${loc.colonna}-${loc.piano}`
         }));
     };
+    const SettingsModal = () => (
+        <Modal
+            title="Impostazioni"
+            visible={settingsModalVisible}
+            onCancel={() => setSettingsModalVisible(false)}
+            footer={[
+                <Button key="close" onClick={() => setSettingsModalVisible(false)}>
+                    Chiudi
+                </Button>
+            ]}
+        >
+            <div style={{ padding: '10px 0' }}>
+                <div style={{ display: 'flex', alignItems: 'center', marginBottom: 16 }}>
+                    <Button 
+                        type="primary" 
+                        danger
+                        onClick={showResetConfirmation}
+                        style={{ marginRight: 8 }}
+                    >
+                        Elimina dati prelievo parziale
+                    </Button>
+                    <Tooltip title="Elimina i dati sul prelievo parziale, non effettua modifiche sul carico e scarico del magazzino ma permette di rieffettuare i prelievi per un ordine su articoli già prelevati">
+                        <InfoCircleOutlined style={{ color: '#1890ff' }} />
+                    </Tooltip>
+                </div>
+            </div>
+        </Modal>
+    );
 
+    const handleResetPartialPickups = async () => {
+        try {
+            
+            await axios.post(`${process.env.REACT_APP_API_URL}/api/reset-partial-pickups`, {
+                ordine_lavoro: ordineLavoro
+             });
+            
+            // For now, just clear the highlighted rows and update the UI
+            
+            // Close the confirmation modal
+            // Close the settings modal
+            setSettingsModalVisible(false);
+            closeResetConfirmation()
+            notification.success({
+                message: 'Operazione completata',
+                description: 'I dati di prelievo parziale sono stati eliminati con successo.',
+                placement: 'bottomRight'
+            });
+            handleSearch()
+        } catch (error) {
+            console.error("Error resetting partial pickups:", error);
+            notification.error({
+                message: 'Errore',
+                description: 'Si è verificato un errore durante l\'eliminazione dei dati.',
+                placement: 'bottomRight'
+            });
+        }
+    };
+    const showResetConfirmation = () => {
+        setResetConfirmModalVisible(true);
+    };
+    const closeResetConfirmation = () => {
+        setResetConfirmModalVisible(false);
+    };
+    const ResetConfirmationModal = () => (
+        <Modal
+            title="Conferma eliminazione"
+            visible={resetConfirmModalVisible}
+            onCancel={() => setResetConfirmModalVisible(false)}
+            footer={[
+                <Button key="cancel" onClick={() => setResetConfirmModalVisible(false)}>
+                    Annulla
+                </Button>,
+                <Button key="submit" type="primary" danger onClick={handleResetPartialPickups}>
+                    Conferma
+                </Button>
+            ]}
+        >
+            <Alert
+                            message="Attenzione"
+                            description="Sei sicuro di voler eliminare i dati di prelievo parziale? Quest'azione non può essere annullata e ricaricherà i dati dell'ordine, perdendo eventuali prelievi fatti durante questa sessione per quest'ordine."
+                            type="warning"
+                            showIcon
+                        />
+        </Modal>
+    );
+    
     return (
         <Layout style={{ minHeight: '100%' }}>
 
@@ -2935,6 +3129,8 @@ const Picking = () => {
                     </div>
                 )}
             </Modal>
+            <SettingsModal />
+            <ResetConfirmationModal />
 
             <Sider width={"50%"} style={{ background: '#fff' }}>
                 <Space direction="vertical" style={{ width: '100%', padding: '20px' }}>
@@ -3012,7 +3208,19 @@ const Picking = () => {
                             rowKey="id"
                             rowClassName={rowClassName}
                             style={tableStyle}
-                            footer={() => tableData.length > 0 ? <MultiSelectControls /> : null} // Only show controls when there's data
+                            footer={() => tableData.length > 0 ? (
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                    <MultiSelectControls />
+                                    <div>
+                                        <Button 
+                                            icon={<SettingOutlined />} 
+                                            onClick={() => setSettingsModalVisible(true)}
+                                            type="default"
+                                        >
+                                        </Button>
+                                    </div>
+                                </div>
+                            ) : null} // Only show controls when there's data
 
                             expandable={expandableConfig}
                             onRow={(record) => ({

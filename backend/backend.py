@@ -900,6 +900,55 @@ def get_item_presence():
         if 'conn' in locals():
             conn.close()
 
+@app.route('/api/reset-partial-pickups', methods=['POST'])
+def elimina_prelievi_parziali():
+    data = request.json
+    odl = data.get('ordine_lavoro')
+    
+    if not odl:
+        return jsonify({'error': 'Missing ordine_lavoro parameter'}), 400
+    
+    try:
+        conn = connect_to_db()
+        cursor = conn.cursor()
+        
+        # Delete query to remove all records with the specified ODL
+        delete_query = "DELETE FROM wms_prelievi WHERE odl = ?"
+        cursor.execute(delete_query, (odl,))
+        
+        # Get count of affected rows
+        affected_rows = cursor.rowcount
+        
+        # Commit the transaction
+        conn.commit()
+        
+        # Log the operation
+        log_operation(
+            operation_type="DELETE",
+            operation_details=f"Eliminati {affected_rows} prelievi parziali per ODL: {odl}",
+            ip_address=request.remote_addr
+        )
+        
+        return jsonify({
+            'success': True,
+            'message': f'Eliminati {affected_rows} record di prelievo parziale',
+            'affected_rows': affected_rows
+        }), 200
+        
+    except pyodbc.Error as e:
+        app.logger.error(f"Database error: {str(e)}")
+        return jsonify({'error': f'Database error: {str(e)}'}), 500
+    
+    except Exception as ex:
+        app.logger.error(f"Unexpected error: {str(ex)}")
+        return jsonify({'error': f'An unexpected error occurred: {str(ex)}'}), 500
+    
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        if 'conn' in locals():
+            conn.close()
+
 @app.route('/api/conferma-inserimento-multiplo', methods=['POST'])
 def conferma_inserimento_multiplo():
     data = request.json
@@ -1513,7 +1562,8 @@ SELECT
     mg.amg_desc AS occ_desc,
     mg.amg_des2 AS occ_des2,
     p.occ_riga,
-    m.mpl_padre
+    m.mpl_padre,
+        p.occ_qmov as mpl_qta
 FROM 
     ocordic p
 JOIN 
@@ -1541,7 +1591,8 @@ SELECT
     mg.amg_desc AS occ_desc,
     mg.amg_des2 AS occ_des2,
     p.occ_riga,
-    CAST(NULL AS VARCHAR) AS mpl_padre
+    CAST(NULL AS VARCHAR) AS mpl_padre,
+    CAST(NULL AS INT) AS mpl_qta
 
 FROM 
     ocordic p
@@ -1608,6 +1659,7 @@ ORDER BY
             occ_desc = item['occ_desc']
             occ_des2 = item['occ_des2']
             mpl_padre = item['mpl_padre']
+            mpl_qta = item['mpl_qta']
             # Debug print
             print(f"Processing article {occ_arti} with original quantity {occ_qmov}")
             print(f"Picked quantity from dict: {picked_items.get(occ_arti, 0)}")
@@ -1629,7 +1681,8 @@ ORDER BY
                     'remaining_quantity': '0',
                     'needed_quantity': '0',
                     'available_quantity': '0',
-                        **({'mpl_padre': mpl_padre} if mpl_padre is not None else {})
+                        **({'mpl_padre': mpl_padre} if mpl_padre is not None else {}),
+                        **({'mpl_qta': int(mpl_qta)} if mpl_qta is not None else {})
                 })
                 continue
 
@@ -1726,7 +1779,9 @@ ORDER BY
                         'available_quantity': str(int(total_qty_in_location)),
                         'needed_quantity': str(int(remaining_qty)),
                         'picked_quantity': str(int(picked_qty)),  # Make sure this is included,
-                        **({'mpl_padre': mpl_padre} if mpl_padre is not None else {})
+                        **({'mpl_padre': mpl_padre} if mpl_padre is not None else {}),
+                                                **({'mpl_qta': int(mpl_qta)} if mpl_qta is not None else {})
+
                     })
 
             # Add missing entry if needed
@@ -1746,7 +1801,9 @@ ORDER BY
                     'available_quantity': str(int(needed_quantity)),
                     'needed_quantity': str(int(needed_quantity)),
                     'picked_quantity': str(int(picked_qty)),
-                        **({'mpl_padre': mpl_padre} if mpl_padre is not None else {})
+                        **({'mpl_padre': mpl_padre} if mpl_padre is not None else {}),
+                                                **({'mpl_qta': int(mpl_qta)} if mpl_qta is not None else {})
+
                 })
 
         return jsonify(detailed_results), 200
