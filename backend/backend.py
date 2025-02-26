@@ -1210,15 +1210,7 @@ def update_pacchi():
             ip_address=request.remote_addr
         )
         print(operation_details)
-        if new_qta == 0:
-            operation_details = f"Pacco contentente {articolo} con quantitativo zero in {area}-{scaffale}-{colonna}-{piano} rimosso."
-
-            log_operation(
-                operation_type="DELETE",
-                operation_details=operation_details,
-                user="current_user",  # Replace with actual user info if available
-                ip_address=request.remote_addr
-            )
+        
          # Only insert into wms_prelievi if odl is provided
         if odl:
             try:
@@ -2847,7 +2839,93 @@ def get_group_locations():
             cursor.close()
         if 'conn' in locals():
             conn.close()
-
+@app.route('/api/undo-pacchi', methods=['POST'])
+def undo_pacchi():
+    data = request.get_json()
+    
+    # Extract parameters from the request
+    articolo = data.get('articolo')
+    area = data.get('area')
+    scaffale = data.get('scaffale')
+    colonna = data.get('colonna')
+    piano = data.get('piano')
+    quantity = data.get('quantity')
+    odl = data.get('odl')
+    movimento = data.get('movimento')
+    
+    # Validate input parameters
+    if not all([articolo, area, scaffale, colonna, piano, quantity]):
+        return jsonify({'error': 'Missing required parameters'}), 400
+    
+    try:
+        # Convert quantity to Decimal
+        try:
+            quantity = Decimal(quantity)
+        except (ValueError, TypeError, InvalidOperation):
+            return jsonify({'error': 'Invalid quantity value'}), 400
+        
+        conn = connect_to_db()
+        cursor = conn.cursor()
+        conn.autocommit = False  # Start transaction
+        
+        # 1. Insert the quantity back into wms_items2
+        insert_query = """
+        INSERT INTO wms_items2 (id_art, id_mov, area, scaffale, colonna, piano, qta, dimensione) 
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """
+        cursor.execute(insert_query, (
+            articolo, 
+            movimento,  # Use the stored movimento
+            area, 
+            scaffale, 
+            colonna, 
+            piano, 
+            quantity, 
+            'Zero'  # Always use 'Zero' for dimension
+        ))
+        
+        # 2. Delete the corresponding record from wms_prelievi if ODL is provided
+        if odl:
+            # Find the most recent prelievo for this specific article, location, and ODL
+            delete_query = """
+            DELETE FROM wms_prelievi 
+            WHERE odl = ? 
+              AND id_art = ? 
+              AND area = ? 
+              AND scaffale = ? 
+              AND colonna = ? 
+              AND piano = ? 
+              AND qta = ?
+            """
+            cursor.execute(delete_query, (odl, articolo, area, scaffale, colonna, piano, quantity))
+        
+        # Log the operation
+        operation_details = f"Annullamento prelievo articolo {articolo} da {area}-{scaffale}-{colonna}-{piano} - QTA: {quantity}"
+        log_operation(
+            operation_type="UNDO",
+            operation_details=operation_details,
+            user="current_user",  # Replace with actual user info if available
+            ip_address=request.remote_addr
+        )
+        
+        conn.commit()
+        return jsonify({'success': True}), 200
+        
+    except pyodbc.Error as e:
+        conn.rollback()
+        app.logger.error(f"Database error: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+    
+    except Exception as ex:
+        conn.rollback()
+        app.logger.error(f"Unexpected error: {str(ex)}")
+        return jsonify({'error': str(ex)}), 500
+    
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        if 'conn' in locals():
+            conn.close()
 if __name__ == '__main__':
     # Run with SSL context for HTTPS
     app.run(host='172.16.16.66', port=5000, debug=True, 

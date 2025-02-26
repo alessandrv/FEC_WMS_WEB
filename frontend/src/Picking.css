@@ -142,3 +142,53 @@
     margin: 8px 0;
     border-left: 2px solid #1890ff;
 }
+
+
+/* Add this to your CSS file */
+.child-row td:first-child {
+  border-left: 4px solid #1890ff !important;
+  padding-left: 20px !important;
+}
+
+/* Optional: Add hover effect for child rows */
+
+
+/* Optional: Add a subtle separator between groups */
+.parent-row td {
+  border-top: 2px solid #1890ff !important;
+  
+}
+.parent-row td:first-child {
+  border-left: 4px solid #1890ff !important;
+}
+
+/* Ensure completed status is still visible */
+.child-row.completed-row td:first-child {
+  border-left: 4px solid #52c41a !important;
+}
+
+/* Ensure highlighted status is still visible */
+.child-row.highlighted-row td:first-child {
+  border-left: 4px solid #1890ff !important;
+}
+
+/* For missing items */
+.child-row.missing-row td:first-child {
+  border-left: 4px solid #ffe600 !important;
+}
+/* Add space after the last child row in each group */
+.ant-table-expanded-row .ant-table-wrapper:last-child,
+.child-row:last-of-type {
+  margin-bottom: 16px !important;
+  padding-bottom: 16px !important;
+  border-bottom: 5px solid #0400ff !important;
+}
+
+/* Ensure that the last child's bottom padding is visible */
+.ant-table-expanded-row > .ant-table-cell {
+  padding-bottom: 16px !important;
+}
+
+.child-row:last-of-type td {
+  border-bottom: 8px solid #15ff00 !important;
+}
