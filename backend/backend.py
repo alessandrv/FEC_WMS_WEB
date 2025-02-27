@@ -2926,6 +2926,313 @@ def undo_pacchi():
             cursor.close()
         if 'conn' in locals():
             conn.close()
+
+
+@app.route('/api/batch-update-pacchi', methods=['POST'])
+def batch_update_pacchi():
+    data = request.get_json()
+    items = data.get('items', [])
+    odl = data.get('odl')
+    
+    if not items:
+        return jsonify({'error': 'No items provided'}), 400
+    
+    results = []
+    
+    try:
+        # Connect to the database
+        conn = connect_to_db()
+        cursor = conn.cursor()
+        conn.autocommit = False  # Start transaction
+        
+        for item in items:
+            # Extract parameters from the item
+            articolo = item.get('articolo')
+            area = item.get('area')
+            scaffale = item.get('scaffale')
+            colonna = item.get('colonna')
+            piano = item.get('piano')
+            quantity = item.get('quantity')
+            row_id = item.get('rowId')
+            
+            # Validate input parameters
+            if not all([articolo, area, scaffale, colonna, piano, quantity]):
+                results.append({
+                    'rowId': row_id,
+                    'success': False,
+                    'error': 'Missing parameters'
+                })
+                continue
+            
+            # Convert quantity to Decimal
+            try:
+                quantity = Decimal(quantity)
+            except (ValueError, TypeError, InvalidOperation):
+                results.append({
+                    'rowId': row_id,
+                    'success': False,
+                    'error': 'Invalid quantity value'
+                })
+                continue
+            
+            try:
+                # Step 1: Check if total available quantity at the location is sufficient
+                total_quantity_query = """
+                SELECT SUM(qta) AS total_qta
+                FROM wms_items2
+                WHERE id_art = ?
+                  AND area = ?
+                  AND scaffale = ?
+                  AND colonna = ?
+                  AND piano = ?
+                """
+                cursor.execute(total_quantity_query, (articolo, area, scaffale, colonna, piano))
+                result = cursor.fetchone()
+                
+                if not result or result.total_qta is None:
+                    results.append({
+                        'rowId': row_id,
+                        'success': False,
+                        'error': 'No pacchi found for the specified articolo and location'
+                    })
+                    continue
+                
+                total_available_quantity = Decimal(result.total_qta)
+                
+                if total_available_quantity < quantity:
+                    results.append({
+                        'rowId': row_id,
+                        'success': False,
+                        'error': 'Insufficient quantity at the specified location'
+                    })
+                    continue
+                
+                # Step 2: Retrieve all pacchi matching the articolo and location, ordered by quantity ascending
+                pacchi_query = """
+                SELECT id_pacco, qta, dimensione
+                FROM wms_items2
+                WHERE id_art = ?
+                  AND area = ?
+                  AND scaffale = ?
+                  AND colonna = ?
+                  AND piano = ?
+                ORDER BY qta ASC
+                """
+                cursor.execute(pacchi_query, (articolo, area, scaffale, colonna, piano))
+                pacchi = cursor.fetchall()
+                
+                if not pacchi:
+                    results.append({
+                        'rowId': row_id,
+                        'success': False,
+                        'error': 'No pacchi found for the specified articolo and location'
+                    })
+                    continue
+                
+                remaining_quantity = quantity
+                updated = False
+                
+                volume_mapping = {
+                    'Piccolo': 40000,
+                    'Medio': 100000,
+                    'Grande': 300000,
+                    'Zero': 0
+                }
+                
+                total_volume_to_add = 0
+                
+                for pacco in pacchi:
+                    id_pacco = pacco.id_pacco
+                    qta = Decimal(pacco.qta)
+                    dimensione = pacco.dimensione
+                    
+                    if remaining_quantity <= 0:
+                        break
+                    
+                    qta_to_remove = min(qta, remaining_quantity)
+                    new_qta = qta - qta_to_remove
+                    
+                    if new_qta == 0:
+                        # Remove the pacco
+                        delete_query = "DELETE FROM wms_items2 WHERE id_pacco = ?"
+                        cursor.execute(delete_query, (id_pacco,))
+                    else:
+                        # Update the pacco's quantity
+                        update_query = "UPDATE wms_items2 SET qta = ? WHERE id_pacco = ?"
+                        cursor.execute(update_query, (new_qta, id_pacco))
+                    
+                    # Calculate volume to add back to shelf
+                    total_volume_to_add += volume_mapping[dimensione] * (qta_to_remove / qta)
+                    remaining_quantity -= qta_to_remove
+                    updated = True
+                    
+                    if remaining_quantity == 0:
+                        break
+                
+                if remaining_quantity > 0:
+                    results.append({
+                        'rowId': row_id,
+                        'success': False,
+                        'error': 'Insufficient quantity to fulfill the request'
+                    })
+                    continue
+                
+                if not updated:
+                    results.append({
+                        'rowId': row_id,
+                        'success': False,
+                        'error': 'No updates were made'
+                    })
+                    continue
+                
+                # Log the operation
+                operation_details = f"{f'ODL: {odl} - ' if odl else ''}Prelievo articolo {articolo} da {area}-{scaffale}-{colonna}-{piano} - QTA: {quantity}"
+                log_operation(
+                    operation_type="UPDATE",
+                    operation_details=operation_details,
+                    user="current_user",  # Replace with actual user info if available
+                    ip_address=request.remote_addr
+                )
+                
+                # Only insert into wms_prelievi if odl is provided
+                if odl:
+                    try:
+                        insert_prelievo_query = """
+                        INSERT INTO wms_prelievi (odl, id_art, area, scaffale, colonna, piano, qta)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """
+                        cursor.execute(insert_prelievo_query, (
+                            odl,
+                            articolo,
+                            area,
+                            scaffale,
+                            colonna,
+                            piano,
+                            int(quantity)
+                        ))
+                    except pyodbc.Error as e:
+                        # If the prelievi insert fails, log it but don't roll back the pacchi updates
+                        log_operation(
+                            operation_type="ERRORE",
+                            operation_details=f"Errore nell'inserimento del prelievo in wms_prelievi: {str(e)}",
+                            user="current_user",
+                            ip_address=request.remote_addr
+                        )
+                
+                # Add success result
+                results.append({
+                    'rowId': row_id,
+                    'success': True
+                })
+                
+            except Exception as e:
+                # Handle individual item errors without failing the entire batch
+                results.append({
+                    'rowId': row_id,
+                    'success': False,
+                    'error': str(e)
+                })
+        
+        # Commit all changes if we got here
+        conn.commit()
+        
+        return jsonify({
+            'success': any(result['success'] for result in results),
+            'results': results
+        }), 200
+        
+    except Exception as e:
+        if 'conn' in locals():
+            conn.rollback()
+        return jsonify({'error': str(e)}), 500
+        
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        if 'conn' in locals():
+            conn.close()
+
+@app.route('/api/batch-undo-pacchi', methods=['POST'])
+def batch_undo_pacchi():
+    data = request.get_json()
+    items = data.get('items', [])
+    odl = data.get('odl')
+    
+    if not items:
+        return jsonify({'error': 'No items provided'}), 400
+    
+    try:
+        # Connect to the database
+        conn = connect_to_db()
+        cursor = conn.cursor()
+        conn.autocommit = False  # Start transaction
+        
+        for item in items:
+            # Extract parameters from the item
+            articolo = item.get('articolo')
+            area = item.get('area')
+            scaffale = item.get('scaffale')
+            colonna = item.get('colonna')
+            piano = item.get('piano')
+            quantity = item.get('quantity')
+            
+            # Validate input parameters
+            if not all([articolo, area, scaffale, colonna, piano, quantity]):
+                continue
+            
+            # Convert quantity to Decimal if it's not already
+            if not isinstance(quantity, Decimal):
+                try:
+                    quantity = Decimal(quantity)
+                except (ValueError, TypeError, InvalidOperation):
+                    continue
+            
+            # Insert the item back into inventory
+            insert_query = """
+            INSERT INTO wms_items2 (id_art, area, scaffale, colonna, piano, qta, dimensione)
+            VALUES (?, ?, ?, ?, ?, ?, 'Zero')
+            """
+            cursor.execute(insert_query, (articolo, area, scaffale, colonna, piano, quantity))
+            
+            # If ODL is provided, remove from wms_prelievi
+            if odl:
+                delete_prelievo_query = """
+                DELETE FROM wms_prelievi 
+                WHERE odl = ? AND id_art = ? AND area = ? AND scaffale = ? AND colonna = ? AND piano = ?
+                """
+                cursor.execute(delete_prelievo_query, (odl, articolo, area, scaffale, colonna, piano))
+            
+            # Log the operation
+            operation_details = f"{f'ODL: {odl} - ' if odl else ''}Annullamento prelievo articolo {articolo} da {area}-{scaffale}-{colonna}-{piano} - QTA: {quantity}"
+            log_operation(
+                operation_type="UNDO",
+                operation_details=operation_details,
+                user="current_user",  # Replace with actual user info if available
+                ip_address=request.remote_addr
+            )
+        
+        # Commit all changes
+        conn.commit()
+        
+        return jsonify({'success': True}), 200
+        
+    except pyodbc.Error as e:
+        if 'conn' in locals():
+            conn.rollback()
+        operation_details = f"Errore nell'annullamento dei prelievi: {str(e)}"
+        log_operation(
+            operation_type="ERRORE",
+            operation_details=operation_details,
+            user="current_user",
+            ip_address=request.remote_addr
+        )
+        return jsonify({'error': str(e)}), 500
+        
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        if 'conn' in locals():
+            conn.close()
 if __name__ == '__main__':
     # Run with SSL context for HTTPS
     app.run(host='172.16.16.66', port=5000, debug=True, 

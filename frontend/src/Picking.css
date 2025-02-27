@@ -154,10 +154,7 @@
 
 
 /* Optional: Add a subtle separator between groups */
-.parent-row td {
-  border-top: 2px solid #1890ff !important;
-  
-}
+
 .parent-row td:first-child {
   border-left: 4px solid #1890ff !important;
 }
@@ -171,6 +168,7 @@
 .child-row.highlighted-row td:first-child {
   border-left: 4px solid #1890ff !important;
 }
+
 
 /* For missing items */
 .child-row.missing-row td:first-child {
