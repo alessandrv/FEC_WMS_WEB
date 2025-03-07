@@ -3038,13 +3038,13 @@ const Picking = () => {
                         processedKeys.add(key);
                         
                         batchData.push({
-                            articolo: item.articolo,
-                            area: item.location.area,
-                            scaffale: item.location.scaffale,
-                            colonna: item.location.colonna,
-                            piano: item.location.piano,
-                            quantity: item.quantity,
-                            rowId: item.originalRow.id
+                    articolo: item.articolo,
+                    area: item.location.area,
+                    scaffale: item.location.scaffale,
+                    colonna: item.location.colonna,
+                    piano: item.location.piano,
+                    quantity: item.quantity,
+                    rowId: item.originalRow.id
                         });
                     }
                 });
@@ -3082,7 +3082,7 @@ const Picking = () => {
                         selectedOperation.articoli.forEach(item => {
                             if (item.originalRow && item.originalRow.id) {
                                 console.log("Removing articoli item:", item.originalRow.id);
-                                newSet.delete(item.originalRow.id);
+                            newSet.delete(item.originalRow.id);
                             }
                         });
                         
@@ -3138,11 +3138,11 @@ const Picking = () => {
                         (op.type !== 'groupItem' || op.parentId !== selectedOperation.parentId)
                     ));
 
-                notification.success({
-                    message: 'Operazione annullata',
+                    notification.success({
+                        message: 'Operazione annullata',
                         description: `Prelievo della distinta annullato con successo.`,
-                    placement: 'bottomRight'
-                });
+                        placement: 'bottomRight'
+                    });
                 } else {
                     throw new Error('Failed to undo group operation');
                 }
@@ -3224,7 +3224,7 @@ const Picking = () => {
                     if (originalIndex >= 0 && originalIndex <= updatedTableData.length) {
                         updatedTableData.splice(originalIndex, 0, mergedRow);
                     } else {
-                        updatedTableData.push(mergedRow);
+                    updatedTableData.push(mergedRow);
                     }
                 } else {
                     // No base row exists; add the restored row directly.
@@ -3240,7 +3240,7 @@ const Picking = () => {
                     if (originalIndex >= 0 && originalIndex <= updatedTableData.length) {
                         updatedTableData.splice(originalIndex, 0, restoredRow);
                     } else {
-                        updatedTableData.push(restoredRow);
+                    updatedTableData.push(restoredRow);
                     }
                 }
 
@@ -3624,28 +3624,28 @@ const Picking = () => {
                                                 const isSufficient = article.remaining_quantity >= article.required_quantity;
                                                 
                                                 return (
-                                                    <div key={article.id_art} style={{
-                                                        display: 'flex',
-                                                        justifyContent: 'space-between',
-                                                        margin: '4px 0',
-                                                        padding: 4,
+                                                <div key={article.id_art} style={{
+                                                    display: 'flex',
+                                                    justifyContent: 'space-between',
+                                                    margin: '4px 0',
+                                                    padding: 4,
                                                         backgroundColor: isSufficient ? '#f6ffed' : '#fff1f0'
-                                                    }}>
-                                                        <div style={{ fontWeight: 500 }}>{article.id_art}</div>
-                                                        <div>
-                                                            <span style={{ marginRight: 8 }}>
-                                                                Richiesto: {article.required_quantity}
-                                                            </span>
+                                                }}>
+                                                    <div style={{ fontWeight: 500 }}>{article.id_art}</div>
+                                                    <div>
+                                                        <span style={{ marginRight: 8 }}>
+                                                            Richiesto: {article.required_quantity}
+                                                        </span>
                                                             <span style={{ marginRight: 8, color: '#389e0d' }}>
-                                                                Disponibile: {article.available_quantity}
-                                                            </span>
+                                                            Disponibile: {article.available_quantity}
+                                                        </span>
                                                             {article.allocated_quantity > 0 && (
                                                                 <span style={{ color: '#d46b08' }}>
                                                                     Impegnato: {article.allocated_quantity}
                                                                 </span>
                                                             )}
-                                                        </div>
                                                     </div>
+                                                </div>
                                                 );
                                             })}
                                         </div>
@@ -3847,6 +3847,305 @@ const Picking = () => {
         } finally {
             setLoadingLocations(false);
         }
+    };
+
+    // Add a function to handle picking all items at once
+    const handlePickAll = async () => {
+        // Filter rows that can be picked
+        const pickableRows = tableData.filter(row => 
+            !row.isParent && 
+            canPickRow(row) && 
+            !highlightedRows.has(row.id)
+        );
+
+        if (pickableRows.length === 0) {
+            notification.warning({
+                message: 'Nessun articolo disponibile',
+                description: 'Non ci sono articoli disponibili da prelevare',
+                placement: 'bottomRight'
+            });
+            return;
+        }
+
+        // Create confirmation modal
+        Modal.confirm({
+            title: 'Conferma prelievo multiplo',
+            content: (
+                <div>
+                    <p>Stai per prelevare {pickableRows.length} articoli. Vuoi continuare?</p>
+                    <p>Questa operazione può essere annullata successivamente.</p>
+                </div>
+            ),
+            okText: 'Conferma',
+            cancelText: 'Annulla',
+            onOk: async () => {
+                try {
+                    setConfirmLoading(true);
+
+                    // Generate a batch ID for this operation
+                    const batchId = uuidv4();
+                    
+                    // Prepare batch data for API
+                    const batchData = pickableRows.map(row => ({
+                        articolo: row.occ_arti,
+                        quantity: parseFloat(row.available_quantity || 0),
+                        area: row.location.area,
+                        scaffale: row.location.scaffale,
+                        colonna: row.location.colonna,
+                        piano: row.location.piano,
+                        movimento: row.movimento || '',
+                        rowId: row.id // Include row ID for tracking
+                    }));
+
+                    // Make a single API call with all items
+                    const response = await axios.post(`${process.env.REACT_APP_API_URL}/api/batch-update-pacchi`, {
+                        items: batchData,
+                        odl: ordineLavoro
+                    });
+
+                    // Process results
+                    const successfulPicks = [];
+                    const failedPicks = [];
+                    
+                    // Create a batch operation record
+                    const batchOperation = {
+                        id: batchId,
+                        timestamp: new Date().toISOString(),
+                        type: 'batchPick',
+                        description: `Prelievo multiplo di ${pickableRows.length} articoli`,
+                        articles: pickableRows.map(row => row.occ_arti),
+                        operations: []
+                    };
+
+                    if (response.data.results) {
+                        // Process each result
+                        response.data.results.forEach((result, index) => {
+                            const row = pickableRows[index];
+                            
+                            if (result.success) {
+                                // Store operation for undo
+                                const operation = {
+                                    articolo: row.occ_arti,
+                                    location: { ...row.location },
+                                    quantity: parseFloat(row.available_quantity || 0),
+                                    movimento: row.movimento || '',
+                                    originalRow: { ...row },
+                                    type: 'batchItem',
+                                    batchId: batchId  // Link to the batch
+                                };
+                                
+                                // Store the operation for undo
+                                storePickOperation(operation);
+                                
+                                // Add to batch operations list
+                                batchOperation.operations.push(operation);
+                                
+                                // Add to successful picks
+                                successfulPicks.push(row.occ_arti);
+                                
+                                // Update highlighted rows
+                                setHighlightedRows(prev => {
+                                    const newSet = new Set(prev);
+                                    newSet.add(row.id);
+                                    return newSet;
+                                });
+                            } else {
+                                // Add to failed picks
+                                failedPicks.push(row.occ_arti);
+                            }
+                        });
+                        
+                        // Store the batch operation itself if any picks were successful
+                        if (successfulPicks.length > 0) {
+                            batchOperation.successCount = successfulPicks.length;
+                            batchOperation.failCount = failedPicks.length;
+                            setPickOperations(prev => [...prev, batchOperation]);
+                        }
+                        
+                        // Show result notification
+                        if (failedPicks.length === 0 && successfulPicks.length > 0) {
+                            notification.success({
+                                message: 'Prelievo completato',
+                                description: `Tutti i ${successfulPicks.length} articoli sono stati prelevati con successo`,
+                                placement: 'bottomRight'
+                            });
+                        } else if (successfulPicks.length > 0) {
+                            notification.warning({
+                                message: 'Prelievo parziale',
+                                description: (
+                                    <div>
+                                        <p>Articoli prelevati: {successfulPicks.length}</p>
+                                        <p>Articoli non prelevati: {failedPicks.length}</p>
+                                    </div>
+                                ),
+                                placement: 'bottomRight',
+                                duration: 8
+                            });
+                        } else {
+                            notification.error({
+                                message: 'Errore',
+                                description: 'Nessun articolo è stato prelevato',
+                                placement: 'bottomRight'
+                            });
+                        }
+                    } else {
+                        throw new Error('Risposta API non valida');
+                    }
+                } catch (error) {
+                    console.error('Error during batch pick:', error);
+                    notification.error({
+                        message: 'Errore',
+                        description: 'Si è verificato un errore durante il prelievo multiplo',
+                        placement: 'bottomRight'
+                    });
+                } finally {
+                    setConfirmLoading(false);
+                }
+            }
+        });
+    };
+
+    // Add the handleUndoAll function before the return statement
+    const handleUndoAll = () => {
+        // Get all operations that can be undone
+        const undoableOperations = pickOperations.filter(op => canUndoOperation(op));
+        
+        if (undoableOperations.length === 0) {
+            notification.warning({
+                message: 'Nessuna operazione da annullare',
+                description: 'Non ci sono operazioni che possono essere annullate',
+                placement: 'bottomRight'
+            });
+            return;
+        }
+
+        // Create confirmation modal
+        Modal.confirm({
+            title: 'Conferma annullamento multiplo',
+            content: (
+                <div>
+                    <p>Stai per annullare {undoableOperations.length} operazioni di prelievo. Vuoi continuare?</p>
+                    <p>Questa operazione ripristinerà tutti gli articoli prelevati.</p>
+                </div>
+            ),
+            okText: 'Conferma',
+            cancelText: 'Annulla',
+            onOk: async () => {
+                try {
+                    setConfirmLoading(true);
+                    
+                    // Prepare batch data - collect all operations to undo
+                    const batchData = [];
+                    const processedKeys = new Set();
+                    
+                    // Process each operation
+                    undoableOperations.forEach(op => {
+                        // For group operations, expand to include all children
+                        if (op.type === 'group') {
+                            // Find all related operations
+                            const groupItems = pickOperations.filter(item => 
+                                item.type === 'groupItem' && item.parentId === op.id
+                            );
+                            
+                            // Add each group item
+                            groupItems.forEach(item => {
+                                const key = `${item.articolo}-${item.location.area}-${item.location.scaffale}-${item.location.colonna}-${item.location.piano}`;
+                                
+                                if (!processedKeys.has(key)) {
+                                    processedKeys.add(key);
+                                    
+                                    batchData.push({
+                                        articolo: item.articolo,
+                                        area: item.location.area,
+                                        scaffale: item.location.scaffale,
+                                        colonna: item.location.colonna,
+                                        piano: item.location.piano,
+                                        quantity: item.quantity,
+                                        rowId: item.originalRow.id
+                                    });
+                                }
+                            });
+                        }
+                        // For batch operations, include all related batch items
+                        else if (op.type === 'batchPick') {
+                            // Find all related operations
+                            const batchItems = pickOperations.filter(item => 
+                                item.type === 'batchItem' && item.batchId === op.id
+                            );
+                            
+                            // Add each batch item
+                            batchItems.forEach(item => {
+                                const key = `${item.articolo}-${item.location.area}-${item.location.scaffale}-${item.location.colonna}-${item.location.piano}`;
+                                
+                                if (!processedKeys.has(key)) {
+                                    processedKeys.add(key);
+                                    
+                                    batchData.push({
+                                        articolo: item.articolo,
+                                        area: item.location.area,
+                                        scaffale: item.location.scaffale,
+                                        colonna: item.location.colonna,
+                                        piano: item.location.piano,
+                                        quantity: item.quantity,
+                                        rowId: item.originalRow.id
+                                    });
+                                }
+                            });
+                        }
+                        // For regular operations
+                        else {
+                            const key = `${op.articolo}-${op.location.area}-${op.location.scaffale}-${op.location.colonna}-${op.location.piano}`;
+                            
+                            if (!processedKeys.has(key)) {
+                                processedKeys.add(key);
+                                
+                                batchData.push({
+                                    articolo: op.articolo,
+                                    area: op.location.area,
+                                    scaffale: op.location.scaffale,
+                                    colonna: op.location.colonna,
+                                    piano: op.location.piano,
+                                    quantity: op.quantity,
+                                    rowId: op.originalRow.id
+                                });
+                            }
+                        }
+                    });
+
+                    // Make a single API call to undo all items
+                    const response = await axios.post(`${process.env.REACT_APP_API_URL}/api/batch-undo-pacchi`, {
+                        items: batchData,
+                        odl: ordineLavoro
+                    });
+
+                    if (response.data.success) {
+                        // Clear all highlighted rows
+                        setHighlightedRows(new Set());
+                        
+                        // Clear all operations
+                        setPickOperations([]);
+                        
+                        notification.success({
+                            message: 'Operazioni annullate',
+                            description: `Tutte le ${undoableOperations.length} operazioni sono state annullate con successo`,
+                            placement: 'bottomRight',
+                            duration: 5
+                        });
+                    } else {
+                        throw new Error(response.data.message || 'Errore durante l\'annullamento delle operazioni');
+                    }
+                } catch (error) {
+                    console.error('Error during batch undo:', error);
+                    notification.error({
+                        message: 'Errore',
+                        description: error.message || 'Si è verificato un errore durante l\'annullamento delle operazioni',
+                        placement: 'bottomRight'
+                    });
+                } finally {
+                    setConfirmLoading(false);
+                }
+            }
+        });
     };
 
     return (
@@ -4182,7 +4481,27 @@ const Picking = () => {
                             style={tableStyle}
                             footer={() => tableData.length > 0 ? (
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                    <MultiSelectControls />
+                                    <div>
+                                        <MultiSelectControls />
+                                        <Button
+                                            type="primary"
+                                            onClick={handlePickAll}
+                                            style={{ marginLeft: 8 }}
+                                            loading={confirmLoading}
+                                        >
+                                            Preleva Tutto
+                                        </Button>
+                                        <Button
+                                            type="primary"
+                                            danger
+                                            onClick={handleUndoAll}
+                                            style={{ marginLeft: 8 }}
+                                            loading={confirmLoading}
+                                            disabled={pickOperations.filter(op => canUndoOperation(op)).length === 0}
+                                        >
+                                            Annulla Tutto
+                                        </Button>
+                                    </div>
                                     <div>
                                         <Button
                                             icon={<SettingOutlined />}
@@ -4206,14 +4525,14 @@ const Picking = () => {
                                             return;
                                         } else {
                                             // Original logic for non-parent rows
-                                            const canSelect = !record.isParent &&
-                                                record.status !== 'completed' &&
-                                                !highlightedRows.has(record.id) &&
-                                                record.location;
+                                        const canSelect = !record.isParent &&
+                                            record.status !== 'completed' &&
+                                            !highlightedRows.has(record.id) &&
+                                            record.location;
 
-                                            if (canSelect) {
-                                                const isSelected = selectedRows.some(row => row.id === record.id);
-                                                handleRowSelect(record, !isSelected);
+                                        if (canSelect) {
+                                            const isSelected = selectedRows.some(row => row.id === record.id);
+                                            handleRowSelect(record, !isSelected);
                                             }
                                         }
                                     }
