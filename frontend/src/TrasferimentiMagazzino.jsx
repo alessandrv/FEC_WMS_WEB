@@ -1939,7 +1939,7 @@ return (
     <Tabs.TabPane  tab="Trasferimento con Movimento" key="2">
     <Card>
         <Form layout="vertical">
-          <Form.Item label="Codice Movimento">
+          <Form.Item label="Ottieni lista articoli da codice movimento">
             <Input
               value={movimentoTransfer}
               onChange={(e) => setMovimentoTransfer(e.target.value.toUpperCase())}

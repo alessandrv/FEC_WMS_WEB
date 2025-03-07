@@ -317,14 +317,14 @@ scaffale,
 colonna,
 piano,
 SUM(qta) as wms_qty
-FROM wms_items2
+FROM wms_items
 GROUP BY id_art, area, scaffale, colonna, piano
 ) w
 JOIN (
 SELECT
 id_art,
 SUM(qta) as total_wms_qty
-FROM wms_items2
+FROM wms_items
 GROUP BY id_art
 ) t ON w.id_art = t.id_art
 """)
@@ -436,7 +436,7 @@ def get_items():
         # Step 1: Count total distinct id_art with applied filters
         count_query = """
             SELECT COUNT(DISTINCT wi.id_art) 
-            FROM wms_items2 wi
+            FROM wms_items wi
             LEFT JOIN mganag mg ON wi.id_art = mg.amg_code
             WHERE 1=1
         """
@@ -464,7 +464,7 @@ def get_items():
         # Step 2: Fetch distinct id_art for the current page
         id_art_query = """
             SELECT SKIP ? FIRST ? DISTINCT wi.id_art
-            FROM wms_items2 wi
+            FROM wms_items wi
             LEFT JOIN mganag mg ON wi.id_art = mg.amg_code
             WHERE 1=1
         """
@@ -499,15 +499,15 @@ def get_items():
                 'totalPages': (total_distinct_id_art + limit - 1) // limit
             }), 200
 
-        # Step 3: Fetch all wms_items2 for the selected id_art and join with mganag for descriptions
+        # Step 3: Fetch all wms_items for the selected id_art and join with mganag for descriptions
         placeholders = ','.join(['?'] * len(id_art_list))
         items_query = f"""
             SELECT 
-                wi.*,               -- All fields from wms_items2
+                wi.*,               -- All fields from wms_items
                 mg.amg_desc,        -- Description from mganag
                 mg.amg_des2         -- Secondary Description from mganag
             FROM 
-                wms_items2 wi
+                wms_items wi
             LEFT JOIN 
                 mganag mg ON wi.id_art = mg.amg_code
             WHERE 
@@ -838,7 +838,7 @@ def get_articoli_scaffale():
         cursor = conn.cursor()
         
         # Define the query to fetch shelves based on area
-        query = "select * FROM wms_items2 WHERE area = ? AND  scaffale = ? AND colonna= ? AND piano= ? AND id_art= ?"
+        query = "select * FROM wms_items WHERE area = ? AND  scaffale = ? AND colonna= ? AND piano= ? AND id_art= ?"
 
         cursor.execute(query, (area, scaffale, colonna, piano, articolo))
         
@@ -874,7 +874,7 @@ def get_item_presence():
         cursor = conn.cursor()
         
         # Test a simplified query first
-        query = "select * from wms_items2 where id_art = ?"
+        query = "select * from wms_items where id_art = ?"
         cursor.execute(query, (id_art,))
         rows = cursor.fetchall()
 
@@ -882,7 +882,7 @@ def get_item_presence():
             print("No results found for id_art:", id_art)
 
         # Proceed with the full query
-        query = "select * from wms_items2 where id_mov = ? and area = ? and scaffale = ? and colonna = ? and piano = ? and id_art = ?"
+        query = "select * from wms_items where id_mov = ? and area = ? and scaffale = ? and colonna = ? and piano = ? and id_art = ?"
         cursor.execute(query, (id_mov, area, scaffale, colonna, piano, id_art))
         
         rows = cursor.fetchall()
@@ -967,7 +967,7 @@ def conferma_inserimento_multiplo():
         conn.autocommit = False  # Start transaction
 
         insert_query = """
-        INSERT INTO wms_items2 (id_art, id_mov, area, scaffale, colonna, piano, qta, dimensione) 
+        INSERT INTO wms_items (id_art, id_mov, area, scaffale, colonna, piano, qta, dimensione) 
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """
         
@@ -1049,7 +1049,7 @@ def conferma_inserimento():
         conn.autocommit = False  # Start transaction
 
         insert_query = """
-        INSERT INTO wms_items2 (id_art, id_mov, area, scaffale, colonna, piano, qta, dimensione) 
+        INSERT INTO wms_items (id_art, id_mov, area, scaffale, colonna, piano, qta, dimensione) 
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """
         update_query = """
@@ -1116,7 +1116,7 @@ def update_pacchi():
         # Step 1: Check if total available quantity at the location is sufficient
         total_quantity_query = """
         SELECT SUM(qta) AS total_qta
-        FROM wms_items2
+        FROM wms_items
         WHERE id_art = ?
           AND area = ?
           AND scaffale = ?
@@ -1137,7 +1137,7 @@ def update_pacchi():
         # Step 2: Retrieve all pacchi matching the articolo and location, ordered by quantity ascending
         pacchi_query = """
         SELECT id_pacco, qta, dimensione
-        FROM wms_items2
+        FROM wms_items
         WHERE id_art = ?
           AND area = ?
           AND scaffale = ?
@@ -1176,11 +1176,11 @@ def update_pacchi():
 
             if new_qta == 0:
                 # Remove the pacco
-                delete_query = "DELETE FROM wms_items2 WHERE id_pacco = ?"
+                delete_query = "DELETE FROM wms_items WHERE id_pacco = ?"
                 cursor.execute(delete_query, (id_pacco,))
             else:
                 # Update the pacco's quantity
-                update_query = "UPDATE wms_items2 SET qta = ? WHERE id_pacco = ?"
+                update_query = "UPDATE wms_items SET qta = ? WHERE id_pacco = ?"
                 cursor.execute(update_query, (new_qta, id_pacco))
 
             # Calculate volume to add back to shelf
@@ -1382,7 +1382,7 @@ def trasferimento():
         # Step 2: Retrieve all pacchi matching the articolo and location, ordered by quantity ascending
         pacchi_query = """
         SELECT id_pacco, qta, dimensione
-        FROM wms_items2
+        FROM wms_items
         WHERE id_art = ?
           AND area = ?
           AND scaffale = ?
@@ -1415,11 +1415,11 @@ def trasferimento():
 
             if new_qta == 0:
                 # Remove the pacco
-                delete_query = "DELETE FROM wms_items2 WHERE id_pacco = ?"
+                delete_query = "DELETE FROM wms_items WHERE id_pacco = ?"
                 cursor.execute(delete_query, (id_pacco,))
             else:
                 # Update the pacco's quantity
-                update_query = "UPDATE wms_items2 SET qta = ? WHERE id_pacco = ?"
+                update_query = "UPDATE wms_items SET qta = ? WHERE id_pacco = ?"
                 cursor.execute(update_query, (new_qta, id_pacco))
 
             # Calculate volume to add back to shelf
@@ -1438,7 +1438,7 @@ def trasferimento():
             return jsonify({'error': 'No updates were made.'}), 400
         
         # Step 3: Update the volume in wms_scaffali
-        add_query = "INSERT INTO wms_items2 (id_art, area, scaffale, colonna, piano, qta, dimensione) VALUES (?,  ?, ?, ?, ?, ?, 'Zero')"
+        add_query = "INSERT INTO wms_items (id_art, area, scaffale, colonna, piano, qta, dimensione) VALUES (?,  ?, ?, ?, ?, ?, 'Zero')"
         cursor.execute(add_query, (articolo, areaDest, scaffaleDest, colonnaDest, pianoDest, quantity))
         conn.commit()
         operation_details = f"Spostamento articolo {articolo} da {area}-{scaffale}-{colonna}-{piano} a {areaDest}-{scaffaleDest}-{colonnaDest}-{pianoDest} - QTA: {quantity}"
@@ -1642,7 +1642,7 @@ ORDER BY
         columns = [column[0] for column in cursor.description]
         result = [dict(zip(columns, row)) for row in final_rows]
 
-        # For each item in final_rows, check wms_items2
+        # For each item in final_rows, check wms_items
         detailed_results = []
 
         for item in result:
@@ -1682,7 +1682,7 @@ ORDER BY
             if occ_arti and (occ_arti.startswith('EG') or occ_arti.startswith('CONAI')):
                 continue
 
-            # Query wms_items2 for remaining quantity
+            # Query wms_items for remaining quantity
             query_wms = """
             SELECT 
                 id_art, 
@@ -1698,7 +1698,7 @@ ORDER BY
                     ELSE 0 
                 END AS scaffale_order
             FROM 
-                wms_items2
+                wms_items
             WHERE 
                 id_art = ?
             GROUP BY 
@@ -1841,7 +1841,7 @@ def articolo_search():
                 piano,
                 SUM(qta) AS available_quantity
             FROM 
-                wms_items2
+                wms_items
             WHERE 
                 id_art = ?
                 AND qta > 0
@@ -2013,7 +2013,7 @@ def transfer_packages():
         
         # --- Step 3: Verify and Update Each Package's Location ---
         update_package_query = """
-            UPDATE wms_items2
+            UPDATE wms_items
             SET area = ?, scaffale = ?, colonna = ?, piano = ?
             WHERE id_pacco = ?
         """
@@ -2273,7 +2273,7 @@ SELECT
 FROM 
     ofordic AS o
 LEFT JOIN 
-    wms_items2 AS w ON o.ofc_arti = w.id_art  -- Join with wms_items2 on ofc_arti and id_art
+    wms_items AS w ON o.ofc_arti = w.id_art  -- Join with wms_items on ofc_arti and id_art
 WHERE 
     o.ofc_dtco >= TODAY 
     AND o.ofc_arti IS NOT NULL
@@ -2545,7 +2545,7 @@ def process_single_transfer(cursor, item, item_idx):
     # Retrieve pacchi
     cursor.execute("""
         SELECT id_pacco, qta, dimensione
-        FROM wms_items2
+        FROM wms_items
         WHERE id_art=? AND area=? AND scaffale=? AND colonna=? AND piano=?
         ORDER BY qta ASC
     """, (articolo, *src_loc))
@@ -2564,13 +2564,13 @@ def process_single_transfer(cursor, item, item_idx):
 
         # Update source
         if new_qta == 0:
-            cursor.execute("DELETE FROM wms_items2 WHERE id_pacco=?", pacco.id_pacco)
+            cursor.execute("DELETE FROM wms_items WHERE id_pacco=?", pacco.id_pacco)
         else:
-            cursor.execute("UPDATE wms_items2 SET qta=? WHERE id_pacco=?", (new_qta, pacco.id_pacco))
+            cursor.execute("UPDATE wms_items SET qta=? WHERE id_pacco=?", (new_qta, pacco.id_pacco))
 
         # Create destination
         cursor.execute("""
-            INSERT INTO wms_items2 
+            INSERT INTO wms_items 
             (id_art, area, scaffale, colonna, piano, qta, dimensione)
             VALUES (?, ?, ?, ?, ?, ?, ?)
         """, (articolo, *dest_loc, transfer_qty, pacco.dimensione))
@@ -2607,7 +2607,7 @@ def get_movimento_location_items():
         # Get items in location that match movimento items
         placeholders = ','.join(['?'] * len(movimento_items))
         location_query = f"""SELECT wi.* 
-                           FROM wms_items2 wi
+                           FROM wms_items wi
                            WHERE wi.area = ? 
                              AND wi.scaffale = ?
                              AND wi.colonna = ?
@@ -2646,7 +2646,7 @@ def get_item_locations():
         query = """
         SELECT 
             area, scaffale, colonna, piano, SUM(qta) as total_qta
-        FROM wms_items2
+        FROM wms_items
         WHERE id_art = ?
         GROUP BY area, scaffale, colonna, piano
         ORDER BY
@@ -2736,6 +2736,45 @@ and dep_qgiai+dep_qcar-dep_qsca+dep_qord+dep_qorp+dep_qpre+dep_qprp <> 0)
         if 'conn' in locals():
             conn.close()
 
+@app.route('/api/get-distinta', methods=['GET'])
+def get_articoli_figli():
+    padre = request.args.get('articolo')
+    if not padre:
+        return jsonify({'error': 'Missing padre parameter'}), 400
+
+    try:
+        conn = connect_to_db()
+        cursor = conn.cursor()
+
+        query = """
+        SELECT 
+            m.mpl_figlio AS occ_arti
+        FROM
+            mplegami m
+        WHERE 
+            m.mpl_padre = ?
+        """
+
+        cursor.execute(query, (padre,))
+        columns = [column[0] for column in cursor.description]
+        results = [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+        return jsonify(results)
+
+    except pyodbc.Error as e:
+        app.logger.error(f"Database error: {str(e)}")
+        return jsonify({'error': 'Database error occurred'}), 500
+    except Exception as ex:
+        app.logger.error(f"Unexpected error: {str(ex)}")
+        return jsonify({'error': 'An unexpected error occurred'}), 500
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        if 'conn' in locals():
+            conn.close()
+    
+
+
 @app.route('/api/get-group-locations', methods=['GET'])
 def get_group_locations():
     try:
@@ -2774,7 +2813,7 @@ def get_group_locations():
             wi.id_art,
             SUM(wi.qta) as total_qta
         FROM 
-            wms_items2 wi
+            wms_items wi
         WHERE 
             wi.id_art = ?
         GROUP BY 
@@ -2810,7 +2849,7 @@ def get_group_locations():
                     article = article_data['article']
                     cursor.execute("""
                         SELECT SUM(qta) as total_qta
-                        FROM wms_items2
+                        FROM wms_items
                         WHERE id_art = ? AND area = ? AND scaffale = ? AND colonna = ? AND piano = ?
                     """, (article, area, scaffale, colonna, piano))
                     qty_result = cursor.fetchone()
@@ -2868,9 +2907,9 @@ def undo_pacchi():
         cursor = conn.cursor()
         conn.autocommit = False  # Start transaction
         
-        # 1. Insert the quantity back into wms_items2
+        # 1. Insert the quantity back into wms_items
         insert_query = """
-        INSERT INTO wms_items2 (id_art, id_mov, area, scaffale, colonna, piano, qta, dimensione) 
+        INSERT INTO wms_items (id_art, id_mov, area, scaffale, colonna, piano, qta, dimensione) 
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """
         cursor.execute(insert_query, (
@@ -2884,20 +2923,36 @@ def undo_pacchi():
             'Zero'  # Always use 'Zero' for dimension
         ))
         
-        # 2. Delete the corresponding record from wms_prelievi if ODL is provided
+        # 2. Delete or update corresponding records from wms_prelievi if ODL is provided
         if odl:
-            # Find the most recent prelievo for this specific article, location, and ODL
-            delete_query = """
-            DELETE FROM wms_prelievi 
+            remaining_to_delete = quantity  # 'quantity' is already a Decimal.
+            # Fetch all prelievo records for this specific article, location, and ODL.
+            select_query = """
+            SELECT id, qta FROM wms_prelievi 
             WHERE odl = ? 
               AND id_art = ? 
               AND area = ? 
               AND scaffale = ? 
               AND colonna = ? 
-              AND piano = ? 
-              AND qta = ?
+              AND piano = ?
+            ORDER BY id ASC
             """
-            cursor.execute(delete_query, (odl, articolo, area, scaffale, colonna, piano, quantity))
+            cursor.execute(select_query, (odl, articolo, area, scaffale, colonna, piano))
+            rows = cursor.fetchall()
+            
+            for row in rows:
+                if remaining_to_delete <= 0:
+                    break
+                current_qta = Decimal(row.qta)
+                if current_qta <= remaining_to_delete:
+                    # Delete this entire row if its quantity is less than or equal to what's to be undone.
+                    cursor.execute("DELETE FROM wms_prelievi WHERE id = ?", (row.id,))
+                    remaining_to_delete -= current_qta
+                else:
+                    # This row has more quantity than needed; update it to subtract the undone quantity.
+                    new_qta = current_qta - remaining_to_delete
+                    cursor.execute("UPDATE wms_prelievi SET qta = ? WHERE id = ?", (new_qta, row.id))
+                    remaining_to_delete = Decimal(0)
         
         # Log the operation
         operation_details = f"Annullamento prelievo articolo {articolo} da {area}-{scaffale}-{colonna}-{piano} - QTA: {quantity}"
@@ -2979,7 +3034,7 @@ def batch_update_pacchi():
                 # Step 1: Check if total available quantity at the location is sufficient
                 total_quantity_query = """
                 SELECT SUM(qta) AS total_qta
-                FROM wms_items2
+                FROM wms_items
                 WHERE id_art = ?
                   AND area = ?
                   AND scaffale = ?
@@ -3010,7 +3065,7 @@ def batch_update_pacchi():
                 # Step 2: Retrieve all pacchi matching the articolo and location, ordered by quantity ascending
                 pacchi_query = """
                 SELECT id_pacco, qta, dimensione
-                FROM wms_items2
+                FROM wms_items
                 WHERE id_art = ?
                   AND area = ?
                   AND scaffale = ?
@@ -3054,11 +3109,11 @@ def batch_update_pacchi():
                     
                     if new_qta == 0:
                         # Remove the pacco
-                        delete_query = "DELETE FROM wms_items2 WHERE id_pacco = ?"
+                        delete_query = "DELETE FROM wms_items WHERE id_pacco = ?"
                         cursor.execute(delete_query, (id_pacco,))
                     else:
                         # Update the pacco's quantity
-                        update_query = "UPDATE wms_items2 SET qta = ? WHERE id_pacco = ?"
+                        update_query = "UPDATE wms_items SET qta = ? WHERE id_pacco = ?"
                         cursor.execute(update_query, (new_qta, id_pacco))
                     
                     # Calculate volume to add back to shelf
@@ -3189,7 +3244,7 @@ def batch_undo_pacchi():
             
             # Insert the item back into inventory
             insert_query = """
-            INSERT INTO wms_items2 (id_art, area, scaffale, colonna, piano, qta, dimensione)
+            INSERT INTO wms_items (id_art, area, scaffale, colonna, piano, qta, dimensione)
             VALUES (?, ?, ?, ?, ?, ?, 'Zero')
             """
             cursor.execute(insert_query, (articolo, area, scaffale, colonna, piano, quantity))

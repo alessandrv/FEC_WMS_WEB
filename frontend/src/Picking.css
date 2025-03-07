@@ -174,19 +174,10 @@
 .child-row.missing-row td:first-child {
   border-left: 4px solid #ffe600 !important;
 }
-/* Add space after the last child row in each group */
-.ant-table-expanded-row .ant-table-wrapper:last-child,
-.child-row:last-of-type {
-  margin-bottom: 16px !important;
-  padding-bottom: 16px !important;
-  border-bottom: 5px solid #0400ff !important;
-}
+
 
 /* Ensure that the last child's bottom padding is visible */
 .ant-table-expanded-row > .ant-table-cell {
   padding-bottom: 16px !important;
 }
 
-.child-row:last-of-type td {
-  border-bottom: 8px solid #15ff00 !important;
-}
