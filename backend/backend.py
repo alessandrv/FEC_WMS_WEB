@@ -5,8 +5,11 @@ from decimal import Decimal
 import uuid
 from datetime import datetime
 import json
+
 app = Flask(__name__)
+
 CORS(app)  # Enable CORS for all routes
+
 def format_delivery_date(date_str):
     try:
         # Parse the input string to a datetime object
@@ -27,124 +30,177 @@ def connect_to_db():
 # Endpoint to fetch logs
 @app.route('/api/operation-logs', methods=['GET'])
 def get_operation_logs():
+    """
+    Get operation logs with filtering and pagination.
+    Can filter by operation_type, article_code, and undoable status.
+    """
     try:
-        # Get query parameters for filtering
-        page = int(request.args.get('page', 1))
-        limit = int(request.args.get('limit', 10))
+        # Get query parameters
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 50, type=int)
         operation_type = request.args.get('operation_type')
-        operation_details = request.args.get('operation_details')
+        article_code = request.args.get('article_code')
         start_date = request.args.get('start_date')
         end_date = request.args.get('end_date')
-        user_ip = request.remote_addr  # Get the current user's IP
-
-        offset = (page - 1) * limit
-
+        undoable_only = request.args.get('undoable_only', 'false').lower() == 'true'
+        
+        # Limit page size
+        if per_page > 100:
+            per_page = 100
+        
         conn = connect_to_db()
         cursor = conn.cursor()
-
-        # Base query - modified to include conditional IP display
-        query = """
-        SELECT {skip} {first} 
-            id, 
-            timestamp, 
-            operation_type, 
-            operation_details, 
-            user,
+        
+        # Build query conditions
+        conditions = []
+        params = []
+        
+        if operation_type:
+            conditions.append("operation_type = ?")
+            params.append(operation_type)
+        
+        if article_code:
+            conditions.append("article_code = ?")
+            params.append(article_code)
+            
+        if start_date:
+            conditions.append("timestamp >= ?")
+            params.append(start_date)
+            
+        if end_date:
+            conditions.append("timestamp <= ?")
+            params.append(end_date)
+        
+        if undoable_only:
+            conditions.append("can_undo = 't' AND is_undone = 'f'")
+        
+        # Construct the WHERE clause
+        where_clause = " AND ".join(conditions) if conditions else "1=1"
+        
+        # Count total matching records
+        count_query = f"SELECT COUNT(*) AS total FROM wms_log {f'WHERE {where_clause}' if where_clause else ''}"
+        cursor.execute(count_query, params)
+        total = cursor.fetchone()[0]
+        
+        # Calculate pagination
+        offset = (page - 1) * per_page
+        
+        # Get paginated results
+        query = f"""
+        SELECT {f"SKIP {offset}" if offset > 0 else ""} {"FIRST " + str(per_page)}
+            id, timestamp, operation_type, operation_details, user, 
             CASE 
                 WHEN ip_address = ? THEN ip_address || ' (TU)'
                 ELSE ip_address 
-            END as ip_address
+            END as ip_address,
+            article_code, source_location, destination_location, quantity, 
+            is_undone, can_undo, additional_data
         FROM wms_log
-        WHERE 1=1
-        """.format(
-            skip=f"SKIP {offset}" if offset > 0 else "",
-            first=f"FIRST {limit}"
-        )
+        {f"WHERE {where_clause}" if where_clause else ""}
+        ORDER BY timestamp DESC
+        """
+        # Add the current IP address to params for the CASE expression
+        current_ip = request.remote_addr
+        params.insert(0, current_ip)
         
-        # Add user_ip as the first parameter
-        params = [user_ip]
-
-        # Add filters
-        if operation_type:
-            query += " AND operation_type = ?"
-            params.append(operation_type)
-        if operation_details:
-            query += " AND UPPER(operation_details) LIKE UPPER(?)"
-            params.append(f"%{operation_details}%")
-        if start_date:
-            query += " AND timestamp >= ?"
-            params.append(datetime.strptime(start_date, "%Y-%m-%d"))
-        if end_date:
-            query += " AND timestamp <= ?"
-            params.append(datetime.strptime(end_date, "%Y-%m-%d"))
-
-        # Add ordering
-        query += " ORDER BY timestamp DESC"
-
+        # Execute the query
         cursor.execute(query, params)
-        rows = cursor.fetchall()
-
-        # Get column names from cursor description
+        
+        # Convert rows to dictionaries
+        logs = []
         columns = [column[0] for column in cursor.description]
-
-        # Convert rows to list of dictionaries
-        logs = [dict(zip(columns, row)) for row in rows]
-
-        # Get total count for pagination with the same filters
-        count_query = "SELECT COUNT(*) FROM wms_log WHERE 1=1"
-        count_params = []
-
-        if operation_type:
-            count_query += " AND operation_type = ?"
-            count_params.append(operation_type)
-        if operation_details:
-            count_query += " AND UPPER(operation_details) LIKE UPPER(?)"
-            count_params.append(f"%{operation_details}%")
-        if start_date:
-            count_query += " AND timestamp >= ?"
-            count_params.append(datetime.strptime(start_date, "%Y-%m-%d"))
-        if end_date:
-            count_query += " AND timestamp <= ?"
-            count_params.append(datetime.strptime(end_date, "%Y-%m-%d"))
-
-        cursor.execute(count_query, count_params)
-        total_count = cursor.fetchone()[0]
-
+        
+        for row in cursor.fetchall():
+            log = dict(zip(columns, row))
+            
+            # Parse additional_data if it exists
+            if log.get('additional_data'):
+                try:
+                    log['additional_data'] = json.loads(log['additional_data'])
+                except:
+                    pass  # Keep as string if not valid JSON
+            
+            # Convert timestamp to string if needed
+            if isinstance(log.get('timestamp'), datetime):
+                log['timestamp'] = log['timestamp'].strftime("%Y-%m-%d %H:%M:%S")
+                
+            # Include a flag indicating if this operation can be undone now
+            log['can_revert'] = log.get('can_undo') and not log.get('is_undone')
+            
+            logs.append(log)
+        
+        conn.close()
+        
         return jsonify({
             'logs': logs,
-            'total': total_count,
-            'page': page,
-            'limit': limit
-        })
-
-    except pyodbc.Error as e:
-        return jsonify({'error': str(e)}), 500
-    finally:
-        if 'cursor' in locals():
-            cursor.close()
-        if 'conn' in locals():
-            conn.close()
-
-def log_operation(operation_type, operation_details, user=None, ip_address=None):
-    try:
-        conn = connect_to_db()
-        cursor = conn.cursor()
+            'pagination': {
+                'total': total,
+                'page': page,
+                'per_page': per_page,
+                'total_pages': (total + per_page - 1) // per_page
+            }
+        }), 200
         
-        # Insert log entry into the database
+    except Exception as e:
+        print(f"Error retrieving operation logs: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+def log_operation(operation_type, operation_details, user=None, ip_address=None, article_code=None, 
+               source_location=None, destination_location=None, quantity=None, can_undo=True, additional_data=None):
+    """
+    Log an operation in the database with detailed information for potential reversal.
+    
+    Parameters:
+    - operation_type: Type of operation (INSERT, UPDATE, DELETE, etc.)
+    - operation_details: Description of what happened
+    - user: Username who performed the operation
+    - ip_address: IP address of the user
+    - article_code: The article code involved
+    - source_location: Source location (for transfers, pickups)
+    - destination_location: Destination location (for transfers)
+    - quantity: Quantity involved
+    - can_undo: Whether this operation can be undone
+    - additional_data: Any additional data as JSON string
+    """
+    conn = connect_to_db()
+    cursor = conn.cursor()
+    
+    if not user:
+        user = "system"
+    
+    try:
+        # Convert additional_data to string if it's not None
+        additional_data_str = json.dumps(additional_data) if additional_data else None
+        
         query = """
-        INSERT INTO wms_log (timestamp,operation_type, operation_details, user, ip_address)
-        VALUES (CURRENT, ?, ?, ?, ?)
+        INSERT INTO wms_log 
+        (timestamp, operation_type, operation_details, user, ip_address, 
+         article_code, source_location, destination_location, quantity, can_undo, additional_data) 
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
-        cursor.execute(query, (operation_type, operation_details, user, ip_address))
+        
+        cursor.execute(
+            query, 
+            (
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                operation_type,
+                operation_details,
+                user,
+                ip_address,
+                article_code,
+                source_location,
+                destination_location,
+                quantity,
+                can_undo,
+                additional_data_str
+            )
+        )
+        
         conn.commit()
-    except pyodbc.Error as e:
-        # Log the error to the console or a file if the logging itself fails
-        print(f"Logging error: {str(e)}")
+    except Exception as e:
+        print(f"Error logging operation: {e}")
     finally:
-        if 'cursor' in locals():
-            cursor.close()
-        if 'conn' in locals():
-            conn.close()
+        conn.close()
 
 @app.route('/api/articolo-descrizione', methods=['GET'])
 def get_descrizione_articolo():
@@ -317,14 +373,14 @@ scaffale,
 colonna,
 piano,
 SUM(qta) as wms_qty
-FROM wms_items
+FROM wms_items2
 GROUP BY id_art, area, scaffale, colonna, piano
 ) w
 JOIN (
 SELECT
 id_art,
 SUM(qta) as total_wms_qty
-FROM wms_items
+FROM wms_items2
 GROUP BY id_art
 ) t ON w.id_art = t.id_art
 """)
@@ -436,7 +492,7 @@ def get_items():
         # Step 1: Count total distinct id_art with applied filters
         count_query = """
             SELECT COUNT(DISTINCT wi.id_art) 
-            FROM wms_items wi
+            FROM wms_items2 wi
             LEFT JOIN mganag mg ON wi.id_art = mg.amg_code
             WHERE 1=1
         """
@@ -464,7 +520,7 @@ def get_items():
         # Step 2: Fetch distinct id_art for the current page
         id_art_query = """
             SELECT SKIP ? FIRST ? DISTINCT wi.id_art
-            FROM wms_items wi
+            FROM wms_items2 wi
             LEFT JOIN mganag mg ON wi.id_art = mg.amg_code
             WHERE 1=1
         """
@@ -499,15 +555,15 @@ def get_items():
                 'totalPages': (total_distinct_id_art + limit - 1) // limit
             }), 200
 
-        # Step 3: Fetch all wms_items for the selected id_art and join with mganag for descriptions
+        # Step 3: Fetch all wms_items2 for the selected id_art and join with mganag for descriptions
         placeholders = ','.join(['?'] * len(id_art_list))
         items_query = f"""
             SELECT 
-                wi.*,               -- All fields from wms_items
+                wi.*,               -- All fields from wms_items2
                 mg.amg_desc,        -- Description from mganag
                 mg.amg_des2         -- Secondary Description from mganag
             FROM 
-                wms_items wi
+                wms_items2 wi
             LEFT JOIN 
                 mganag mg ON wi.id_art = mg.amg_code
             WHERE 
@@ -838,7 +894,7 @@ def get_articoli_scaffale():
         cursor = conn.cursor()
         
         # Define the query to fetch shelves based on area
-        query = "select * FROM wms_items WHERE area = ? AND  scaffale = ? AND colonna= ? AND piano= ? AND id_art= ?"
+        query = "select * FROM wms_items2 WHERE area = ? AND  scaffale = ? AND colonna= ? AND piano= ? AND id_art= ?"
 
         cursor.execute(query, (area, scaffale, colonna, piano, articolo))
         
@@ -874,7 +930,7 @@ def get_item_presence():
         cursor = conn.cursor()
         
         # Test a simplified query first
-        query = "select * from wms_items where id_art = ?"
+        query = "select * from wms_items2 where id_art = ?"
         cursor.execute(query, (id_art,))
         rows = cursor.fetchall()
 
@@ -882,7 +938,7 @@ def get_item_presence():
             print("No results found for id_art:", id_art)
 
         # Proceed with the full query
-        query = "select * from wms_items where id_mov = ? and area = ? and scaffale = ? and colonna = ? and piano = ? and id_art = ?"
+        query = "select * from wms_items2 where id_mov = ? and area = ? and scaffale = ? and colonna = ? and piano = ? and id_art = ?"
         cursor.execute(query, (id_mov, area, scaffale, colonna, piano, id_art))
         
         rows = cursor.fetchall()
@@ -925,6 +981,8 @@ def elimina_prelievi_parziali():
         # Log the operation
         log_operation(
             operation_type="DELETE",
+            can_undo=False,
+
             operation_details=f"Eliminati {affected_rows} prelievi parziali per ODL: {odl}",
             ip_address=request.remote_addr
         )
@@ -967,7 +1025,7 @@ def conferma_inserimento_multiplo():
         conn.autocommit = False  # Start transaction
 
         insert_query = """
-        INSERT INTO wms_items (id_art, id_mov, area, scaffale, colonna, piano, qta, dimensione) 
+        INSERT INTO wms_items2 (id_art, id_mov, area, scaffale, colonna, piano, qta, dimensione) 
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """
         
@@ -1008,12 +1066,24 @@ def conferma_inserimento_multiplo():
         conn.commit()
 
         # Log the operation
-        log_operation(
-            operation_type="MULTIPLE_INSERT",
-            operation_details=", ".join(operation_details),
-            user="current_user",  # Replace with actual user info
-            ip_address=request.remote_addr
-        )
+        location = f"{area}-{scaffale}-{colonna}-{piano}"
+        
+        # Log a separate operation for each item to make them individually revertable
+        for item in items:
+            codice_articolo = item.get('articoloCode')
+            quantita = item.get('quantita')
+            item_detail = f"Articolo {codice_articolo}: {quantita} pezzi"
+            
+            log_operation(
+                operation_type="INSERT",
+                operation_details=item_detail,
+                user="current_user",  # Replace with actual user info
+                ip_address=request.remote_addr,
+                article_code=codice_articolo,
+                destination_location=location,
+                quantity=quantita,
+                can_undo=True
+            )
 
         return jsonify({'success': True}), 200
 
@@ -1049,7 +1119,7 @@ def conferma_inserimento():
         conn.autocommit = False  # Start transaction
 
         insert_query = """
-        INSERT INTO wms_items (id_art, id_mov, area, scaffale, colonna, piano, qta, dimensione) 
+        INSERT INTO wms_items2 (id_art, id_mov, area, scaffale, colonna, piano, qta, dimensione) 
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """
         update_query = """
@@ -1066,11 +1136,16 @@ def conferma_inserimento():
 
         # Log the operation
         operation_details = f"Inserimento {numero_pacchi} pacchi con {quantita} articolo {codice_articolo} in {area}-{scaffale}-{colonna}-{piano}"
+        location = f"{area}-{scaffale}-{colonna}-{piano}"
         log_operation(
             operation_type="INSERT",
             operation_details=operation_details,
             user="current_user",  # Replace with actual user info if available
-            ip_address=request.remote_addr
+            ip_address=request.remote_addr,
+            article_code=codice_articolo,
+            destination_location=location,
+            quantity=quantita * numero_pacchi,
+            can_undo=True
         )
 
         return jsonify({'success': True}), 200
@@ -1116,7 +1191,7 @@ def update_pacchi():
         # Step 1: Check if total available quantity at the location is sufficient
         total_quantity_query = """
         SELECT SUM(qta) AS total_qta
-        FROM wms_items
+        FROM wms_items2
         WHERE id_art = ?
           AND area = ?
           AND scaffale = ?
@@ -1137,7 +1212,7 @@ def update_pacchi():
         # Step 2: Retrieve all pacchi matching the articolo and location, ordered by quantity ascending
         pacchi_query = """
         SELECT id_pacco, qta, dimensione
-        FROM wms_items
+        FROM wms_items2
         WHERE id_art = ?
           AND area = ?
           AND scaffale = ?
@@ -1165,7 +1240,7 @@ def update_pacchi():
 
         for pacco in pacchi:
             id_pacco = pacco.id_pacco
-            qta = Decimal(pacco.qta)
+            qta = int(pacco.qta)
             dimensione = pacco.dimensione
 
             if remaining_quantity <= 0:
@@ -1176,11 +1251,11 @@ def update_pacchi():
 
             if new_qta == 0:
                 # Remove the pacco
-                delete_query = "DELETE FROM wms_items WHERE id_pacco = ?"
+                delete_query = "DELETE FROM wms_items2 WHERE id_pacco = ?"
                 cursor.execute(delete_query, (id_pacco,))
             else:
                 # Update the pacco's quantity
-                update_query = "UPDATE wms_items SET qta = ? WHERE id_pacco = ?"
+                update_query = "UPDATE wms_items2 SET qta = ? WHERE id_pacco = ?"
                 cursor.execute(update_query, (new_qta, id_pacco))
 
             # Calculate volume to add back to shelf
@@ -1201,13 +1276,22 @@ def update_pacchi():
         # Step 3: Update the volume in wms_scaffali
         
         conn.commit()
-        operation_details = f"{f'ODL: {odl} - ' if odl else ''}Prelievo articolo {articolo} da {area}-{scaffale}-{colonna}-{piano} - QTA: {quantity}"
-
+        source_location = f"{area}-{scaffale}-{colonna}-{piano}"
+        operation_details = f"{f'ODL: {odl} - ' if odl else ''}Prelievo articolo {articolo} da {source_location} - QTA: {int(quantity)}"
+        
+        additional_data = {
+            "odl": odl
+        }
         log_operation(
-            operation_type="UPDATE",
+            operation_type="PRELIEVO",
             operation_details=operation_details,
             user="current_user",  # Replace with actual user info if available
-            ip_address=request.remote_addr
+            ip_address=request.remote_addr,
+            article_code=articolo,
+            source_location=source_location,
+            quantity=quantity,
+            can_undo=True,
+            additional_data=additional_data
         )
         print(operation_details)
         
@@ -1242,7 +1326,7 @@ def update_pacchi():
 
     except pyodbc.Error as e:
         conn.rollback()
-        operation_details = f"Prelievo articolo {articolo} da {area}-{scaffale}-{colonna}-{piano} - QTA: {quantity} - MERCE NON SCARICATA"
+        operation_details = f"Prelievo articolo {articolo} da {area}-{scaffale}-{colonna}-{piano} - QTA: {int(quantity)} - MERCE NON SCARICATA"
         print(operation_details)
         log_operation(
             operation_type="ERRORE",
@@ -1348,30 +1432,28 @@ def get_prelievi_summary_by_odl(odl):
 @app.route('/api/trasferimento', methods=['POST'])
 def trasferimento():
     data = request.get_json()
-
-    # Extract parameters from the request
     articolo = data.get('articolo')
     area = data.get('area')
     scaffale = data.get('scaffale')
     colonna = data.get('colonna')
     piano = data.get('piano')
-
     areaDest = data.get('areaDest')
     scaffaleDest = data.get('scaffaleDest')
     colonnaDest = data.get('colonnaDest')
     pianoDest = data.get('pianoDest')
-
     quantity = data.get('quantity')
 
-    # Validate input parameters
-    if not all([articolo, area, scaffale, colonna, piano, quantity]):
-        return jsonify({'error': 'Missing parameters'}), 400
+    if not all([articolo, area, scaffale, colonna, piano, areaDest, scaffaleDest, colonnaDest, pianoDest, quantity]):
+        return jsonify({'error': 'Missing required fields'}), 400
 
-    # Convert quantity to Decimal
     try:
-        quantity = Decimal(quantity)
-    except (ValueError, TypeError, InvalidOperation):
-        return jsonify({'error': 'Invalid quantity value'}), 400
+        quantity = float(quantity)
+    except ValueError:
+        return jsonify({'error': 'Quantity must be a number'}), 400
+
+    # Validate source and destination are different
+    if area == areaDest and scaffale == scaffaleDest and colonna == colonnaDest and piano == pianoDest:
+        return jsonify({'error': 'Source and destination locations are the same'}), 400
 
     try:
         # Connect to the database
@@ -1382,7 +1464,7 @@ def trasferimento():
         # Step 2: Retrieve all pacchi matching the articolo and location, ordered by quantity ascending
         pacchi_query = """
         SELECT id_pacco, qta, dimensione
-        FROM wms_items
+        FROM wms_items2
         WHERE id_art = ?
           AND area = ?
           AND scaffale = ?
@@ -1404,7 +1486,7 @@ def trasferimento():
 
         for pacco in pacchi:
             id_pacco = pacco.id_pacco
-            qta = Decimal(pacco.qta)
+            qta = int(pacco.qta)
             
 
             if remaining_quantity <= 0:
@@ -1415,16 +1497,16 @@ def trasferimento():
 
             if new_qta == 0:
                 # Remove the pacco
-                delete_query = "DELETE FROM wms_items WHERE id_pacco = ?"
+                delete_query = "DELETE FROM wms_items2 WHERE id_pacco = ?"
                 cursor.execute(delete_query, (id_pacco,))
             else:
                 # Update the pacco's quantity
-                update_query = "UPDATE wms_items SET qta = ? WHERE id_pacco = ?"
+                update_query = "UPDATE wms_items2 SET qta = ? WHERE id_pacco = ?"
                 cursor.execute(update_query, (new_qta, id_pacco))
 
             # Calculate volume to add back to shelf
             
-            remaining_quantity -= qta_to_remove
+            remaining_quantity -= float(qta_to_remove)
             updated = True
 
             if remaining_quantity == 0:
@@ -1438,45 +1520,71 @@ def trasferimento():
             return jsonify({'error': 'No updates were made.'}), 400
         
         # Step 3: Update the volume in wms_scaffali
-        add_query = "INSERT INTO wms_items (id_art, area, scaffale, colonna, piano, qta, dimensione) VALUES (?,  ?, ?, ?, ?, ?, 'Zero')"
+        add_query = """
+        INSERT INTO wms_items2 (id_art, area, scaffale, colonna, piano, qta, dimensione) 
+        VALUES (?, ?, ?, ?, ?, ?, 'Zero')
+        """
         cursor.execute(add_query, (articolo, areaDest, scaffaleDest, colonnaDest, pianoDest, quantity))
+        
+        # Get the ID of the newly inserted package using a query that's compatible with Informix
+        cursor.execute("""
+        SELECT FIRST 1 id_pacco 
+        FROM wms_items2 
+        WHERE id_art = ? 
+          AND area = ? 
+          AND scaffale = ? 
+          AND colonna = ? 
+          AND piano = ? 
+          AND qta = ?
+        ORDER BY id_pacco DESC
+        """, (articolo, areaDest, scaffaleDest, colonnaDest, pianoDest, quantity))
+        
+        destination_pacco_result = cursor.fetchone()
+        destination_pacco_id = destination_pacco_result[0] if destination_pacco_result else None
+        
         conn.commit()
-        operation_details = f"Spostamento articolo {articolo} da {area}-{scaffale}-{colonna}-{piano} a {areaDest}-{scaffaleDest}-{colonnaDest}-{pianoDest} - QTA: {quantity}"
-
+        source_location = f"{area}-{scaffale}-{colonna}-{piano}"
+        destination_location = f"{areaDest}-{scaffaleDest}-{colonnaDest}-{pianoDest}"
+        operation_details = f"Trasferimento articolo {articolo} da {source_location} a {destination_location} - QTA: {int(quantity)}"
         log_operation(
-            operation_type="UPDATE",
+            operation_type="TRANSFER",
             operation_details=operation_details,
             user="current_user",  # Replace with actual user info if available
-            ip_address=request.remote_addr
+            ip_address=request.remote_addr,
+            article_code=articolo,
+            source_location=source_location,
+            destination_location=destination_location,
+            quantity=quantity,
+            can_undo=True,
+            additional_data={"destination_pacco_id": destination_pacco_id}
         )
-        if new_qta == 0:
-            operation_details = f"Pacco contentente {articolo} con quantitativo zero in {area}-{scaffale}-{colonna}-{piano} rimosso."
 
-            log_operation(
-                operation_type="DELETE",
-                operation_details=operation_details,
-                user="current_user",  # Replace with actual user info if available
-                ip_address=request.remote_addr
-            )
+        conn.commit()
+        conn.close()
+
         return jsonify({'success': True}), 200
 
     except pyodbc.Error as e:
-        operation_details = f"Spostamento articolo {articolo} da {area}-{scaffale}-{colonna}-{piano} a {areaDest}-{scaffaleDest}-{colonnaDest}-{pianoDest} - QTA: {quantity} - ERRORE"
-        print(operation_details)
+        operation_details = f"Spostamento articolo {articolo} da {area}-{scaffale}-{colonna}-{piano} a {areaDest}-{scaffaleDest}-{colonnaDest}-{pianoDest} - QTA: {int(quantity)} - ERRORE"
+        source_location = f"{area}-{scaffale}-{colonna}-{piano}"
+        destination_location = f"{areaDest}-{scaffaleDest}-{colonnaDest}-{pianoDest}"
+        error_details = f"Errore nel trasferimento articolo {articolo} da {source_location} a {destination_location} - QTA: {int(quantity)}"
+
         log_operation(
-            operation_type="ERRORE",
-            operation_details=operation_details,
-            user="current_user",  # Replace with actual user info if available
-            ip_address=request.remote_addr
+            operation_type="ERROR",
+            operation_details=error_details,
+            user="current_user",
+            ip_address=request.remote_addr,
+            article_code=articolo,
+            source_location=source_location,
+            destination_location=destination_location,
+            quantity=quantity,
+            can_undo=False
         )
-        conn.rollback()
+        
+        print(f"Error: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
-    finally:
-        if 'cursor' in locals():
-            cursor.close()
-        if 'conn' in locals():
-            conn.close()
 
 
 @app.route('/api/ordine-lavoro', methods=['GET'])
@@ -1642,7 +1750,7 @@ ORDER BY
         columns = [column[0] for column in cursor.description]
         result = [dict(zip(columns, row)) for row in final_rows]
 
-        # For each item in final_rows, check wms_items
+        # For each item in final_rows, check wms_items2
         detailed_results = []
 
         for item in result:
@@ -1682,7 +1790,7 @@ ORDER BY
             if occ_arti and (occ_arti.startswith('EG') or occ_arti.startswith('CONAI')):
                 continue
 
-            # Query wms_items for remaining quantity
+            # Query wms_items2 for remaining quantity
             query_wms = """
             SELECT 
                 id_art, 
@@ -1698,7 +1806,7 @@ ORDER BY
                     ELSE 0 
                 END AS scaffale_order
             FROM 
-                wms_items
+                wms_items2
             WHERE 
                 id_art = ?
             GROUP BY 
@@ -1841,7 +1949,7 @@ def articolo_search():
                 piano,
                 SUM(qta) AS available_quantity
             FROM 
-                wms_items
+                wms_items2
             WHERE 
                 id_art = ?
                 AND qta > 0
@@ -2013,7 +2121,7 @@ def transfer_packages():
         
         # --- Step 3: Verify and Update Each Package's Location ---
         update_package_query = """
-            UPDATE wms_items
+            UPDATE wms_items2
             SET area = ?, scaffale = ?, colonna = ?, piano = ?
             WHERE id_pacco = ?
         """
@@ -2273,7 +2381,7 @@ SELECT
 FROM 
     ofordic AS o
 LEFT JOIN 
-    wms_items AS w ON o.ofc_arti = w.id_art  -- Join with wms_items on ofc_arti and id_art
+    wms_items2 AS w ON o.ofc_arti = w.id_art  -- Join with wms_items2 on ofc_arti and id_art
 WHERE 
     o.ofc_dtco >= TODAY 
     AND o.ofc_arti IS NOT NULL
@@ -2514,8 +2622,34 @@ def bulk_transfer():
                 raise ValueError(f"Item {idx+1}: Invalid quantity value")
 
         # Process transfers
+        transfer_results = []
         for idx, item in enumerate(transfer_items):
-            process_single_transfer(cursor, item, idx+1)
+            result = process_single_transfer(cursor, item, idx+1)
+            transfer_results.append(result)
+
+        # Log operations
+        for result in transfer_results:
+            operation_details = f"Trasferimento articolo {result['article_code']} da {result['source_location']} a {result['destination_location']} - QTA: {result['quantity']}"
+            
+            # Create additional data with destination pacco IDs
+            additional_data = {}
+            if result['destination_pacco_ids']:
+                if len(result['destination_pacco_ids']) == 1:
+                    additional_data['destination_pacco_id'] = result['destination_pacco_ids'][0]
+                additional_data['all_destination_pacco_ids'] = result['destination_pacco_ids']
+            
+            log_operation(
+                operation_type="TRANSFER",
+                operation_details=operation_details,
+                user="current_user",
+                ip_address=request.remote_addr,
+                article_code=result['article_code'],
+                source_location=result['source_location'],
+                destination_location=result['destination_location'],
+                quantity=result['quantity'],
+                can_undo=True,
+                additional_data=additional_data
+            )
 
         conn.commit()
         return jsonify({'success': True, 'transferred_items': len(transfer_items)}), 200
@@ -2532,6 +2666,15 @@ def process_single_transfer(cursor, item, item_idx):
     quantity = Decimal(item['quantity'])
     src_loc = (item['area'], item['scaffale'], item['colonna'], item['piano'])
     dest_loc = (item['areaDest'], item['scaffaleDest'], item['colonnaDest'], item['pianoDest'])
+    
+    # Prepare return data
+    result = {
+        'article_code': articolo,
+        'quantity': quantity,
+        'source_location': f"{src_loc[0]}-{src_loc[1]}-{src_loc[2]}-{src_loc[3]}",
+        'destination_location': f"{dest_loc[0]}-{dest_loc[1]}-{dest_loc[2]}-{dest_loc[3]}",
+        'destination_pacco_ids': []
+    }
 
     # Verify locations exist
     for loc, loc_type in [(src_loc, 'source'), (dest_loc, 'destination')]:
@@ -2545,7 +2688,7 @@ def process_single_transfer(cursor, item, item_idx):
     # Retrieve pacchi
     cursor.execute("""
         SELECT id_pacco, qta, dimensione
-        FROM wms_items
+        FROM wms_items2
         WHERE id_art=? AND area=? AND scaffale=? AND colonna=? AND piano=?
         ORDER BY qta ASC
     """, (articolo, *src_loc))
@@ -2564,21 +2707,40 @@ def process_single_transfer(cursor, item, item_idx):
 
         # Update source
         if new_qta == 0:
-            cursor.execute("DELETE FROM wms_items WHERE id_pacco=?", pacco.id_pacco)
+            cursor.execute("DELETE FROM wms_items2 WHERE id_pacco=?", pacco.id_pacco)
         else:
-            cursor.execute("UPDATE wms_items SET qta=? WHERE id_pacco=?", (new_qta, pacco.id_pacco))
+            cursor.execute("UPDATE wms_items2 SET qta=? WHERE id_pacco=?", (new_qta, pacco.id_pacco))
 
         # Create destination
         cursor.execute("""
-            INSERT INTO wms_items 
+            INSERT INTO wms_items2 
             (id_art, area, scaffale, colonna, piano, qta, dimensione)
             VALUES (?, ?, ?, ?, ?, ?, ?)
         """, (articolo, *dest_loc, transfer_qty, pacco.dimensione))
+        
+        # Get the ID of the newly inserted package
+        cursor.execute("""
+        SELECT FIRST 1 id_pacco 
+        FROM wms_items2 
+        WHERE id_art = ? 
+          AND area = ? 
+          AND scaffale = ? 
+          AND colonna = ? 
+          AND piano = ? 
+          AND qta = ?
+        ORDER BY id_pacco DESC
+        """, (articolo, *dest_loc, transfer_qty))
+        
+        dest_pacco = cursor.fetchone()
+        if dest_pacco:
+            result['destination_pacco_ids'].append(dest_pacco[0])
 
         remaining -= transfer_qty
 
     if remaining > 0:
         raise ValueError(f"Item {item_idx}: Insufficient quantity (missing {remaining})")
+        
+    return result
 
 @app.route('/api/movimento-location-items', methods=['GET'])
 def get_movimento_location_items():
@@ -2607,7 +2769,7 @@ def get_movimento_location_items():
         # Get items in location that match movimento items
         placeholders = ','.join(['?'] * len(movimento_items))
         location_query = f"""SELECT wi.* 
-                           FROM wms_items wi
+                           FROM wms_items2 wi
                            WHERE wi.area = ? 
                              AND wi.scaffale = ?
                              AND wi.colonna = ?
@@ -2646,7 +2808,7 @@ def get_item_locations():
         query = """
         SELECT 
             area, scaffale, colonna, piano, SUM(qta) as total_qta
-        FROM wms_items
+        FROM wms_items2
         WHERE id_art = ?
         GROUP BY area, scaffale, colonna, piano
         ORDER BY
@@ -2813,7 +2975,7 @@ def get_group_locations():
             wi.id_art,
             SUM(wi.qta) as total_qta
         FROM 
-            wms_items wi
+            wms_items2 wi
         WHERE 
             wi.id_art = ?
         GROUP BY 
@@ -2849,7 +3011,7 @@ def get_group_locations():
                     article = article_data['article']
                     cursor.execute("""
                         SELECT SUM(qta) as total_qta
-                        FROM wms_items
+                        FROM wms_items2
                         WHERE id_art = ? AND area = ? AND scaffale = ? AND colonna = ? AND piano = ?
                     """, (article, area, scaffale, colonna, piano))
                     qty_result = cursor.fetchone()
@@ -2907,9 +3069,9 @@ def undo_pacchi():
         cursor = conn.cursor()
         conn.autocommit = False  # Start transaction
         
-        # 1. Insert the quantity back into wms_items
+        # 1. Insert the quantity back into wms_items2
         insert_query = """
-        INSERT INTO wms_items (id_art, id_mov, area, scaffale, colonna, piano, qta, dimensione) 
+        INSERT INTO wms_items2 (id_art, id_mov, area, scaffale, colonna, piano, qta, dimensione) 
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """
         cursor.execute(insert_query, (
@@ -2955,10 +3117,12 @@ def undo_pacchi():
                     remaining_to_delete = Decimal(0)
         
         # Log the operation
-        operation_details = f"Annullamento prelievo articolo {articolo} da {area}-{scaffale}-{colonna}-{piano} - QTA: {quantity}"
+        operation_details = f"Annullamento prelievo articolo {articolo} da {area}-{scaffale}-{colonna}-{piano} - QTA: {int(quantity)}"
         log_operation(
-            operation_type="UNDO",
+            operation_type="REVERT",
             operation_details=operation_details,
+            can_undo=False,
+
             user="current_user",  # Replace with actual user info if available
             ip_address=request.remote_addr
         )
@@ -3034,7 +3198,7 @@ def batch_update_pacchi():
                 # Step 1: Check if total available quantity at the location is sufficient
                 total_quantity_query = """
                 SELECT SUM(qta) AS total_qta
-                FROM wms_items
+                FROM wms_items2
                 WHERE id_art = ?
                   AND area = ?
                   AND scaffale = ?
@@ -3065,7 +3229,7 @@ def batch_update_pacchi():
                 # Step 2: Retrieve all pacchi matching the articolo and location, ordered by quantity ascending
                 pacchi_query = """
                 SELECT id_pacco, qta, dimensione
-                FROM wms_items
+                FROM wms_items2
                 WHERE id_art = ?
                   AND area = ?
                   AND scaffale = ?
@@ -3109,11 +3273,11 @@ def batch_update_pacchi():
                     
                     if new_qta == 0:
                         # Remove the pacco
-                        delete_query = "DELETE FROM wms_items WHERE id_pacco = ?"
+                        delete_query = "DELETE FROM wms_items2 WHERE id_pacco = ?"
                         cursor.execute(delete_query, (id_pacco,))
                     else:
                         # Update the pacco's quantity
-                        update_query = "UPDATE wms_items SET qta = ? WHERE id_pacco = ?"
+                        update_query = "UPDATE wms_items2 SET qta = ? WHERE id_pacco = ?"
                         cursor.execute(update_query, (new_qta, id_pacco))
                     
                     # Calculate volume to add back to shelf
@@ -3141,12 +3305,17 @@ def batch_update_pacchi():
                     continue
                 
                 # Log the operation
-                operation_details = f"{f'ODL: {odl} - ' if odl else ''}Prelievo articolo {articolo} da {area}-{scaffale}-{colonna}-{piano} - QTA: {quantity}"
+                operation_details = f"{f'ODL: {odl} - ' if odl else ''}Prelievo articolo {articolo} da {area}-{scaffale}-{colonna}-{piano} - QTA: {int(quantity)}"
+                location = f"{area}-{scaffale}-{colonna}-{piano}"
                 log_operation(
-                    operation_type="UPDATE",
+                    operation_type="PRELIEVO",
                     operation_details=operation_details,
                     user="current_user",  # Replace with actual user info if available
-                    ip_address=request.remote_addr
+                    ip_address=request.remote_addr,
+                    article_code=articolo,
+                    source_location=location,
+                    quantity=quantity,
+                    can_undo=True
                 )
                 
                 # Only insert into wms_prelievi if odl is provided
@@ -3244,7 +3413,7 @@ def batch_undo_pacchi():
             
             # Insert the item back into inventory
             insert_query = """
-            INSERT INTO wms_items (id_art, area, scaffale, colonna, piano, qta, dimensione)
+            INSERT INTO wms_items2 (id_art, area, scaffale, colonna, piano, qta, dimensione)
             VALUES (?, ?, ?, ?, ?, ?, 'Zero')
             """
             cursor.execute(insert_query, (articolo, area, scaffale, colonna, piano, quantity))
@@ -3258,12 +3427,17 @@ def batch_undo_pacchi():
                 cursor.execute(delete_prelievo_query, (odl, articolo, area, scaffale, colonna, piano))
             
             # Log the operation
-            operation_details = f"{f'ODL: {odl} - ' if odl else ''}Annullamento prelievo articolo {articolo} da {area}-{scaffale}-{colonna}-{piano} - QTA: {quantity}"
+            operation_details = f"{f'ODL: {odl} - ' if odl else ''}Annullamento prelievo articolo {articolo} da {area}-{scaffale}-{colonna}-{piano} - QTA: {int(quantity)}"
+            location = f"{area}-{scaffale}-{colonna}-{piano}"
             log_operation(
-                operation_type="UNDO",
+                operation_type="INSERT",
                 operation_details=operation_details,
                 user="current_user",  # Replace with actual user info if available
-                ip_address=request.remote_addr
+                ip_address=request.remote_addr,
+                article_code=articolo,
+                destination_location=location,
+                quantity=quantity,
+                can_undo=True
             )
         
         # Commit all changes
@@ -3288,6 +3462,770 @@ def batch_undo_pacchi():
             cursor.close()
         if 'conn' in locals():
             conn.close()
+
+@app.route('/api/revert-operation', methods=['POST'])
+def revert_operation():
+    """
+    Revert an operation based on its log ID.
+    This endpoint uses the detailed information stored in the wms_log table
+    to perform the inverse operation and undo changes.
+    """
+    try:
+        data = request.json
+        log_id = data.get('log_id')
+        
+        if not log_id:
+            return jsonify({'error': 'Missing log_id parameter'}), 400
+        
+        conn = connect_to_db()
+        cursor = conn.cursor()
+        
+        # Get the operation details from the log
+        cursor.execute(
+            """SELECT id, operation_type, article_code, source_location, destination_location, 
+                    quantity, is_undone, can_undo, additional_data
+             FROM wms_log 
+             WHERE id = ?""", 
+            (log_id,)
+        )
+        log_entry = cursor.fetchone()
+        
+        if not log_entry:
+            conn.close()
+            return jsonify({'error': 'Log entry not found'}), 404
+        
+        # Check if the operation can be undone
+        if log_entry.is_undone:
+            conn.close()
+            return jsonify({'error': 'This operation has already been undone'}), 400
+        
+        if not log_entry.can_undo:
+            conn.close()
+            return jsonify({'error': 'This operation cannot be undone'}), 400
+        
+        # Extract operation details
+        operation_type = log_entry.operation_type
+        article_code = log_entry.article_code
+        source_location = log_entry.source_location
+        destination_location = log_entry.destination_location
+        quantity = float(log_entry.quantity) if log_entry.quantity else 0
+        additional_data = json.loads(log_entry.additional_data) if log_entry.additional_data else {}
+        
+        # Parse locations
+        if source_location:
+            source_parts = source_location.split('-')
+            if len(source_parts) >= 4:
+                source_area, source_scaffale, source_colonna, source_piano = source_parts[:4]
+            else:
+                conn.close()
+                return jsonify({'error': 'Invalid source location format in log'}), 400
+        
+        if destination_location:
+            dest_parts = destination_location.split('-')
+            if len(dest_parts) >= 4:
+                dest_area, dest_scaffale, dest_colonna, dest_piano = dest_parts[:4]
+            else:
+                conn.close()
+                return jsonify({'error': 'Invalid destination location format in log'}), 400
+        
+        # Perform the inverse operation based on operation_type
+        if operation_type == "PRELIEVO":
+            # For a PRELIEVO, we need to add the quantity back to the source location
+            # Check if the item still exists in the location
+            cursor.execute(
+                "SELECT qta FROM wms_items2 WHERE id_art = ? AND area = ? AND scaffale = ? AND colonna = ? AND piano = ?",
+                (article_code, source_area, source_scaffale, source_colonna, source_piano)
+            )
+            existing_item = cursor.fetchone()
+            
+            if existing_item:
+                # Update existing quantity
+                new_quantity = float(existing_item[0]) + quantity
+                cursor.execute(
+                    "UPDATE wms_items2 SET qta = ? WHERE id_art = ? AND area = ? AND scaffale = ? AND colonna = ? AND piano = ?",
+                    (new_quantity, article_code, source_area, source_scaffale, source_colonna, source_piano)
+                )
+            else:
+                # Create new entry
+                cursor.execute(
+                    "INSERT INTO wms_items2 (id_art, area, scaffale, colonna, piano, qta, dimensione) VALUES (?, ?, ?, ?, ?, ?, 'Zero')",
+                    (article_code, source_area, source_scaffale, source_colonna, source_piano, quantity)
+                )
+            
+            revert_details = f"Ripristino prelievo: Articolo {article_code} aggiunto a {source_location} - QTA: {int(quantity)}"
+        
+        elif operation_type == "TRANSFER":
+            # For a transfer, we need to move the package from the destination back to the source
+            # First, verify that the total quantity is available at the destination
+            cursor.execute(
+                """SELECT SUM(qta) as total_qta 
+                   FROM wms_items2 
+                   WHERE id_art = ? AND area = ? AND scaffale = ? AND colonna = ? AND piano = ?""",
+                (article_code, dest_area, dest_scaffale, dest_colonna, dest_piano)
+            )
+            total_result = cursor.fetchone()
+            
+            if not total_result or total_result.total_qta is None or float(total_result.total_qta) < quantity:
+                conn.close()
+                return jsonify({'error': f'Non è disponibile una quantità sufficiente al trasferimento. Richiesta: {int(quantity)}, Disponibile: {total_result.total_qta if total_result and total_result.total_qta is not None else 0}'}), 400
+            
+            # Check if we have the exact transfer package ID in additional_data
+            transfer_pacco_id = None
+            transfer_pacco_ids = []
+            
+            # Handle both single ID and multiple IDs scenarios
+            if additional_data:
+                if 'destination_pacco_id' in additional_data:
+                    transfer_pacco_id = additional_data['destination_pacco_id']
+                    transfer_pacco_ids = [transfer_pacco_id]
+                elif 'all_destination_pacco_ids' in additional_data:
+                    transfer_pacco_ids = additional_data['all_destination_pacco_ids']
+                    
+            if transfer_pacco_ids:
+                # First verify these packages exist and have sufficient quantity
+                placeholders = ','.join(['?'] * len(transfer_pacco_ids))
+                cursor.execute(
+                    f"""SELECT SUM(qta) as pacco_total 
+                       FROM wms_items2 
+                       WHERE id_pacco IN ({placeholders})
+                       AND id_art = ? AND area = ? AND scaffale = ? AND colonna = ? AND piano = ?""",
+                    transfer_pacco_ids + [article_code, dest_area, dest_scaffale, dest_colonna, dest_piano]
+                )
+                pacco_total_result = cursor.fetchone()
+                
+                if not pacco_total_result or pacco_total_result.pacco_total is None or float(pacco_total_result.pacco_total) < quantity:
+                    conn.close()
+                    return jsonify({'error': f'I pacchi identificati per questo trasferimento non contengono più una quantità sufficiente. Richiesta: {int(quantity)}, Disponibile nei pacchi: {pacco_total_result.pacco_total if pacco_total_result and pacco_total_result.pacco_total is not None else 0}, probabilmente è avvenuto un ulteriore trasferimento.'}), 400
+                
+                # Update all identified package locations directly
+                remaining_to_move = quantity
+                for pacco_id in transfer_pacco_ids:
+                    cursor.execute(
+                        """SELECT qta FROM wms_items2 WHERE id_pacco = ?""", 
+                        (pacco_id,)
+                    )
+                    pacco_qty_result = cursor.fetchone()
+                    
+                    if not pacco_qty_result:
+                        continue
+                        
+                    pacco_qty = float(pacco_qty_result[0])
+                    qty_to_move = min(pacco_qty, remaining_to_move)
+                    
+                    if qty_to_move == pacco_qty:
+                        # Move the entire package
+                        cursor.execute(
+                            """UPDATE wms_items2 
+                               SET area = ?, scaffale = ?, colonna = ?, piano = ? 
+                               WHERE id_pacco = ?""",
+                            (source_area, source_scaffale, source_colonna, source_piano, pacco_id)
+                        )
+                    else:
+                        # Split the package - reduce quantity at destination
+                        cursor.execute(
+                            """UPDATE wms_items2 SET qta = ? WHERE id_pacco = ?""",
+                            (pacco_qty - qty_to_move, pacco_id)
+                        )
+                        
+                        # Create new package at source with the moved quantity
+                        cursor.execute(
+                            """INSERT INTO wms_items2 
+                               (id_art, area, scaffale, colonna, piano, qta, dimensione) 
+                               SELECT id_art, ?, ?, ?, ?, ?, dimensione 
+                               FROM wms_items2 WHERE id_pacco = ?""",
+                            (source_area, source_scaffale, source_colonna, source_piano, qty_to_move, pacco_id)
+                        )
+                    
+                    remaining_to_move -= qty_to_move
+                    if remaining_to_move <= 0:
+                        break
+                
+                # Check if all quantity was moved
+                if remaining_to_move > 0:
+                    conn.close()
+                    return jsonify({'error': 'Failed to move all required quantity back to source'}), 400
+            else:
+                # Legacy approach - find packages at the destination with sufficient total quantity
+                cursor.execute(
+                    """SELECT id_pacco, qta 
+                       FROM wms_items2 
+                       WHERE id_art = ? AND area = ? AND scaffale = ? AND colonna = ? AND piano = ?
+                       ORDER BY qta DESC""",
+                    (article_code, dest_area, dest_scaffale, dest_colonna, dest_piano)
+                )
+                dest_items = cursor.fetchall()
+                
+                if not dest_items:
+                    conn.close()
+                    return jsonify({'error': 'Nessun articolo trovato nella posizione di destinazione'}), 400
+                
+                # Move packages until we've moved the required quantity
+                remaining_to_move = quantity
+                for dest_item in dest_items:
+                    item_id = dest_item.id_pacco
+                    item_qty = float(dest_item.qta)
+                    
+                    qty_to_move = min(item_qty, remaining_to_move)
+                    
+                    if qty_to_move == item_qty:
+                        # Move the entire package
+                        cursor.execute(
+                            """UPDATE wms_items2 
+                               SET area = ?, scaffale = ?, colonna = ?, piano = ? 
+                               WHERE id_pacco = ?""",
+                            (source_area, source_scaffale, source_colonna, source_piano, item_id)
+                        )
+                    else:
+                        # Split the package - reduce quantity at destination
+                        cursor.execute(
+                            """UPDATE wms_items2 SET qta = ? WHERE id_pacco = ?""",
+                            (item_qty - qty_to_move, item_id)
+                        )
+                        
+                        # Create new package at source with the moved quantity
+                        cursor.execute(
+                            """INSERT INTO wms_items2 
+                               (id_art, area, scaffale, colonna, piano, qta, dimensione) 
+                               SELECT id_art, ?, ?, ?, ?, ?, dimensione 
+                               FROM wms_items2 WHERE id_pacco = ?""",
+                            (source_area, source_scaffale, source_colonna, source_piano, qty_to_move, item_id)
+                        )
+                    
+                    remaining_to_move -= qty_to_move
+                    if remaining_to_move <= 0:
+                        break
+                
+                # Check if all quantity was moved
+                if remaining_to_move > 0:
+                    conn.close()
+                    return jsonify({'error': f'Impossibile ripristinare la quantità richiesta. Richiesta: {int(quantity)}, Quantità disponibile: {total_result.total_qta if total_result and total_result.total_qta is not None else 0}'}), 400
+            
+            revert_details = f"Ripristino trasferimento: Articolo {article_code} spostato da {destination_location} a {source_location} - QTA: {int(quantity)}"
+        
+        elif operation_type == "INSERT" or operation_type == "MULTIPLE_INSERT":
+            # For insert operations, we need to delete entries or reduce quantities
+            # The destination_location will contain the location where the item was inserted
+            if not destination_location:
+                conn.close()
+                return jsonify({
+                    'error': 'Operazione non annullabile: dati di posizione mancanti', 
+                    'details': 'Questa operazione di inserimento è stata effettuata prima dell\'implementazione del sistema di log completo e non può essere annullata. Per favore, esegui manualmente l\'operazione.'
+                }), 400
+                
+            # Check the total quantity at the destination location
+            cursor.execute(
+                """SELECT SUM(qta) as total_qta 
+                   FROM wms_items2 
+                   WHERE id_art = ? AND area = ? AND scaffale = ? AND colonna = ? AND piano = ?""",
+                (article_code, dest_area, dest_scaffale, dest_colonna, dest_piano)
+            )
+            total_result = cursor.fetchone()
+            
+            if not total_result or total_result.total_qta is None:
+                conn.close()
+                return jsonify({'error': 'No items found at the specified location'}), 400
+                
+            total_quantity = float(total_result.total_qta)
+            if total_quantity < quantity:
+                conn.close()
+                return jsonify({'error': f'La quantità totale corrente è minore della quantità da rimuovere. Richiesta: {int(quantity)}, Disponibile: {int(total_quantity)}'}), 400
+            
+            # Get all records at this location for this article, ordered by quantity (smallest first)
+            cursor.execute(
+                """SELECT id_pacco, qta 
+                   FROM wms_items2 
+                   WHERE id_art = ? AND area = ? AND scaffale = ? AND colonna = ? AND piano = ?
+                   ORDER BY qta ASC""",
+                (article_code, dest_area, dest_scaffale, dest_colonna, dest_piano)
+            )
+            all_items = cursor.fetchall()
+            
+            remaining_to_remove = quantity
+            
+            # Remove quantities from records until we've removed the total required amount
+            for item in all_items:
+                item_id = item.id_pacco
+                item_qty = float(item.qta)
+                
+                if item_qty <= remaining_to_remove:
+                    # Remove this entire record
+                    cursor.execute(
+                        "DELETE FROM wms_items2 WHERE id_pacco = ?",
+                        (item_id,)
+                    )
+                    remaining_to_remove -= item_qty
+                else:
+                    # Reduce this record's quantity
+                    new_qty = item_qty - remaining_to_remove
+                    cursor.execute(
+                        "UPDATE wms_items2 SET qta = ? WHERE id_pacco = ?",
+                        (new_qty, item_id)
+                    )
+                    remaining_to_remove = 0
+                
+                # If we've removed all we need, stop
+                if remaining_to_remove <= 0:
+                    break
+                    
+            if operation_type == "MULTIPLE_INSERT":
+                revert_details = f"Ripristino inserimento multiplo: Articolo {article_code} rimosso da {destination_location} - QTA: {int(quantity)}"
+            else:
+                revert_details = f"Ripristino inserimento: Articolo {article_code} rimosso da {destination_location} - QTA: {int(quantity)}"
+        
+        else:
+            conn.close()
+            return jsonify({'error': f'Cannot undo operation of type {operation_type}'}), 400
+        
+        # Mark the original operation as undone
+        cursor.execute(
+            "UPDATE wms_log SET is_undone = 't' WHERE id = ?",
+            (log_id,)
+        )
+        
+        # Log the revert operation
+        log_operation(
+            operation_type="REVERT",
+            operation_details=revert_details,
+            user="current_user",  # Replace with actual user info if available
+            ip_address=request.remote_addr,
+            article_code=article_code,
+            source_location=destination_location if operation_type == "TRANSFER" else None,
+            destination_location=source_location if operation_type == "TRANSFER" else 
+                                (destination_location if operation_type == "INSERT" or operation_type == "MULTIPLE_INSERT" else source_location),
+            quantity=quantity,
+            can_undo=False,
+            additional_data={"original_log_id": log_id}
+        )
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Operation successfully reverted',
+            'details': revert_details
+        }), 200
+        
+    except Exception as e:
+        print(f"Error reverting operation: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/batch-revert-operations', methods=['POST'])
+def batch_revert_operations():
+    """
+    Revert multiple operations at once based on their log IDs.
+    This endpoint processes all reversals in a single transaction.
+    """
+    try:
+        data = request.json
+        log_ids = data.get('log_ids', [])
+        
+        if not log_ids:
+            return jsonify({'error': 'No log_ids provided'}), 400
+        
+        conn = connect_to_db()
+        cursor = conn.cursor()
+        
+        # Start a transaction
+        conn.autocommit = False
+        
+        results = {
+            'success': [],
+            'failed': []
+        }
+        
+        for log_id in log_ids:
+            try:
+                # Get the operation details from the log
+                cursor.execute(
+                    """SELECT id, operation_type, article_code, source_location, destination_location, 
+                            quantity, is_undone, can_undo, additional_data
+                     FROM wms_log 
+                     WHERE id = ?""", 
+                    (log_id,)
+                )
+                log_entry = cursor.fetchone()
+                
+                if not log_entry:
+                    results['failed'].append({
+                        'log_id': log_id,
+                        'error': 'Log entry not found'
+                    })
+                    continue
+                
+                # Check if the operation can be undone
+                if log_entry.is_undone:
+                    results['failed'].append({
+                        'log_id': log_id,
+                        'error': 'This operation has already been undone'
+                    })
+                    continue
+                
+                if not log_entry.can_undo:
+                    results['failed'].append({
+                        'log_id': log_id,
+                        'error': 'This operation cannot be undone'
+                    })
+                    continue
+                
+                # Extract operation details
+                operation_type = log_entry.operation_type
+                article_code = log_entry.article_code
+                source_location = log_entry.source_location
+                destination_location = log_entry.destination_location
+                quantity = float(log_entry.quantity) if log_entry.quantity else 0
+                additional_data = json.loads(log_entry.additional_data) if log_entry.additional_data else {}
+                
+                # Parse locations
+                if source_location:
+                    source_parts = source_location.split('-')
+                    if len(source_parts) >= 4:
+                        source_area, source_scaffale, source_colonna, source_piano = source_parts[:4]
+                    else:
+                        results['failed'].append({
+                            'log_id': log_id,
+                            'error': 'Invalid source location format in log'
+                        })
+                        continue
+                
+                if destination_location:
+                    dest_parts = destination_location.split('-')
+                    if len(dest_parts) >= 4:
+                        dest_area, dest_scaffale, dest_colonna, dest_piano = dest_parts[:4]
+                    else:
+                        results['failed'].append({
+                            'log_id': log_id,
+                            'error': 'Invalid destination location format in log'
+                        })
+                        continue
+                
+                # Perform the inverse operation based on operation_type
+                if operation_type == "PRELIEVO":
+                    # For a PRELIEVO, we need to add the quantity back to the source location
+                    # Check if the item still exists in the location
+                    cursor.execute(
+                        "SELECT qta FROM wms_items2 WHERE id_art = ? AND area = ? AND scaffale = ? AND colonna = ? AND piano = ?",
+                        (article_code, source_area, source_scaffale, source_colonna, source_piano)
+                    )
+                    existing_item = cursor.fetchone()
+                    
+                    if existing_item:
+                        # Update existing quantity
+                        new_quantity = float(existing_item[0]) + quantity
+                        cursor.execute(
+                            "UPDATE wms_items2 SET qta = ? WHERE id_art = ? AND area = ? AND scaffale = ? AND colonna = ? AND piano = ?",
+                            (new_quantity, article_code, source_area, source_scaffale, source_colonna, source_piano)
+                        )
+                    else:
+                        # Create new entry
+                        cursor.execute(
+                            "INSERT INTO wms_items2 (id_art, area, scaffale, colonna, piano, qta, dimensione) VALUES (?, ?, ?, ?, ?, ?, 'Zero')",
+                            (article_code, source_area, source_scaffale, source_colonna, source_piano, quantity)
+                        )
+                    
+                    revert_details = f"Ripristino prelievo: Articolo {article_code} aggiunto a {source_location} - QTA: {int(quantity)}"
+                
+                elif operation_type == "TRANSFER":
+                    # For a transfer, we need to move the package from the destination back to the source
+                    # First, verify that the total quantity is available at the destination
+                    cursor.execute(
+                        """SELECT SUM(qta) as total_qta 
+                           FROM wms_items2 
+                           WHERE id_art = ? AND area = ? AND scaffale = ? AND colonna = ? AND piano = ?""",
+                        (article_code, dest_area, dest_scaffale, dest_colonna, dest_piano)
+                    )
+                    total_result = cursor.fetchone()
+                    
+                    if not total_result or total_result.total_qta is None or float(total_result.total_qta) < quantity:
+                        results['failed'].append({
+                            'log_id': log_id,
+                            'error': f'Not enough quantity at destination location to revert transfer. Required: {quantity}, Available: {total_result.total_qta if total_result and total_result.total_qta is not None else 0}'
+                        })
+                        continue
+                    
+                    # Check if we have the exact transfer package ID in additional_data
+                    transfer_pacco_id = None
+                    transfer_pacco_ids = []
+                    
+                    # Handle both single ID and multiple IDs scenarios
+                    if additional_data:
+                        if 'destination_pacco_id' in additional_data:
+                            transfer_pacco_id = additional_data['destination_pacco_id']
+                            transfer_pacco_ids = [transfer_pacco_id]
+                        elif 'all_destination_pacco_ids' in additional_data:
+                            transfer_pacco_ids = additional_data['all_destination_pacco_ids']
+                            
+                    if transfer_pacco_ids:
+                        # First verify these packages exist and have sufficient quantity
+                        placeholders = ','.join(['?'] * len(transfer_pacco_ids))
+                        cursor.execute(
+                            f"""SELECT SUM(qta) as pacco_total 
+                               FROM wms_items2 
+                               WHERE id_pacco IN ({placeholders})
+                               AND id_art = ? AND area = ? AND scaffale = ? AND colonna = ? AND piano = ?""",
+                            transfer_pacco_ids + [article_code, dest_area, dest_scaffale, dest_colonna, dest_piano]
+                        )
+                        pacco_total_result = cursor.fetchone()
+                        
+                        if not pacco_total_result or pacco_total_result.pacco_total is None or float(pacco_total_result.pacco_total) < quantity:
+                            results['failed'].append({
+                                'log_id': log_id,
+                                'error': f'The packages identified for this transfer no longer contain sufficient quantity. Required: {quantity}, Available in packages: {pacco_total_result.pacco_total if pacco_total_result and pacco_total_result.pacco_total is not None else 0}'
+                            })
+                            continue
+                        
+                        # Update all identified package locations directly
+                        remaining_to_move = quantity
+                        for pacco_id in transfer_pacco_ids:
+                            cursor.execute(
+                                """SELECT qta FROM wms_items2 WHERE id_pacco = ?""", 
+                                (pacco_id,)
+                            )
+                            pacco_qty_result = cursor.fetchone()
+                            
+                            if not pacco_qty_result:
+                                continue
+                                
+                            pacco_qty = float(pacco_qty_result[0])
+                            qty_to_move = min(pacco_qty, remaining_to_move)
+                            
+                            if qty_to_move == pacco_qty:
+                                # Move the entire package
+                                cursor.execute(
+                                    """UPDATE wms_items2 
+                                       SET area = ?, scaffale = ?, colonna = ?, piano = ? 
+                                       WHERE id_pacco = ?""",
+                                    (source_area, source_scaffale, source_colonna, source_piano, pacco_id)
+                                )
+                            else:
+                                # Split the package - reduce quantity at destination
+                                cursor.execute(
+                                    """UPDATE wms_items2 SET qta = ? WHERE id_pacco = ?""",
+                                    (pacco_qty - qty_to_move, pacco_id)
+                                )
+                                
+                                # Create new package at source with the moved quantity
+                                cursor.execute(
+                                    """INSERT INTO wms_items2 
+                                       (id_art, area, scaffale, colonna, piano, qta, dimensione) 
+                                       SELECT id_art, ?, ?, ?, ?, ?, dimensione 
+                                       FROM wms_items2 WHERE id_pacco = ?""",
+                                    (source_area, source_scaffale, source_colonna, source_piano, qty_to_move, pacco_id)
+                                )
+                            
+                            remaining_to_move -= qty_to_move
+                            if remaining_to_move <= 0:
+                                break
+                        
+                        # Check if all quantity was moved
+                        if remaining_to_move > 0:
+                            results['failed'].append({
+                                'log_id': log_id,
+                                'error': 'Failed to move all required quantity back to source'
+                            })
+                            continue
+                    else:
+                        # Legacy approach - find packages at the destination with sufficient total quantity
+                        cursor.execute(
+                            """SELECT id_pacco, qta 
+                               FROM wms_items2 
+                               WHERE id_art = ? AND area = ? AND scaffale = ? AND colonna = ? AND piano = ?
+                               ORDER BY qta DESC""",
+                            (article_code, dest_area, dest_scaffale, dest_colonna, dest_piano)
+                        )
+                        dest_items = cursor.fetchall()
+                        
+                        if not dest_items:
+                            results['failed'].append({
+                                'log_id': log_id,
+                                'error': 'No matching items found at destination location'
+                            })
+                            continue
+                        
+                        # Move packages until we've moved the required quantity
+                        remaining_to_move = quantity
+                        for dest_item in dest_items:
+                            item_id = dest_item.id_pacco
+                            item_qty = float(dest_item.qta)
+                            
+                            qty_to_move = min(item_qty, remaining_to_move)
+                            
+                            if qty_to_move == item_qty:
+                                # Move the entire package
+                                cursor.execute(
+                                    """UPDATE wms_items2 
+                                       SET area = ?, scaffale = ?, colonna = ?, piano = ? 
+                                       WHERE id_pacco = ?""",
+                                    (source_area, source_scaffale, source_colonna, source_piano, item_id)
+                                )
+                            else:
+                                # Split the package - reduce quantity at destination
+                                cursor.execute(
+                                    """UPDATE wms_items2 SET qta = ? WHERE id_pacco = ?""",
+                                    (item_qty - qty_to_move, item_id)
+                                )
+                                
+                                # Create new package at source with the moved quantity
+                                cursor.execute(
+                                    """INSERT INTO wms_items2 
+                                       (id_art, area, scaffale, colonna, piano, qta, dimensione) 
+                                       SELECT id_art, ?, ?, ?, ?, ?, dimensione 
+                                       FROM wms_items2 WHERE id_pacco = ?""",
+                                    (source_area, source_scaffale, source_colonna, source_piano, qty_to_move, item_id)
+                                )
+                            
+                            remaining_to_move -= qty_to_move
+                            if remaining_to_move <= 0:
+                                break
+                        
+                        # Check if all quantity was moved
+                        if remaining_to_move > 0:
+                            results['failed'].append({
+                                'log_id': log_id,
+                                'error': 'Failed to move all required quantity back to source'
+                            })
+                            continue
+                    
+                    revert_details = f"Ripristino trasferimento: Articolo {article_code} spostato da {destination_location} a {source_location} - QTA: {int(quantity)}"
+                
+                elif operation_type == "INSERT" or operation_type == "MULTIPLE_INSERT":
+                    # For an insert operation, we need to delete entries or reduce quantities
+                    # The destination_location will contain the location where the item was inserted
+                    if not destination_location:
+                        results['failed'].append({
+                            'log_id': log_id,
+                            'error': 'Operazione non annullabile: dati di posizione mancanti',
+                            'details': 'Questa operazione di inserimento è stata effettuata prima dell\'implementazione del sistema di log completo e non può essere annullata.'
+                        })
+                        continue
+                    
+                    # Check the total quantity at the destination location
+                    cursor.execute(
+                        """SELECT SUM(qta) as total_qta 
+                           FROM wms_items2 
+                           WHERE id_art = ? AND area = ? AND scaffale = ? AND colonna = ? AND piano = ?""",
+                        (article_code, dest_area, dest_scaffale, dest_colonna, dest_piano)
+                    )
+                    total_result = cursor.fetchone()
+                    
+                    if not total_result or total_result.total_qta is None:
+                        results['failed'].append({
+                            'log_id': log_id,
+                            'error': 'No items found at the specified location'
+                        })
+                        continue
+                        
+                    total_quantity = float(total_result.total_qta)
+                    if total_quantity < quantity:
+                        results['failed'].append({
+                            'log_id': log_id,
+                            'error': f'La quantità totale corrente è minore della quantità da rimuovere. Richiesta: {int(quantity)}, Disponibile: {int(total_quantity)}'
+                        })
+                        continue
+                    
+                    # Get all records at this location for this article, ordered by quantity (smallest first)
+                    cursor.execute(
+                        """SELECT id_pacco, qta 
+                           FROM wms_items2 
+                           WHERE id_art = ? AND area = ? AND scaffale = ? AND colonna = ? AND piano = ?
+                           ORDER BY qta ASC""",
+                        (article_code, dest_area, dest_scaffale, dest_colonna, dest_piano)
+                    )
+                    all_items = cursor.fetchall()
+                    
+                    remaining_to_remove = quantity
+                    
+                    # Remove quantities from records until we've removed the total required amount
+                    for item in all_items:
+                        item_id = item.id_pacco
+                        item_qty = float(item.qta)
+                        
+                        if item_qty <= remaining_to_remove:
+                            # Remove this entire record
+                            cursor.execute(
+                                "DELETE FROM wms_items2 WHERE id_pacco = ?",
+                                (item_id,)
+                            )
+                            remaining_to_remove -= item_qty
+                        else:
+                            # Reduce this record's quantity
+                            new_qty = item_qty - remaining_to_remove
+                            cursor.execute(
+                                "UPDATE wms_items2 SET qta = ? WHERE id_pacco = ?",
+                                (new_qty, item_id)
+                            )
+                            remaining_to_remove = 0
+                        
+                        # If we've removed all we need, stop
+                        if remaining_to_remove <= 0:
+                            break
+                        
+                    if operation_type == "MULTIPLE_INSERT":
+                        revert_details = f"Ripristino inserimento multiplo: Articolo {article_code} rimosso da {destination_location} - QTA: {int(quantity)}"
+                    else:
+                        revert_details = f"Ripristino inserimento: Articolo {article_code} rimosso da {destination_location} - QTA: {int(quantity)}"
+                
+                else:
+                    results['failed'].append({
+                        'log_id': log_id,
+                        'error': f'Cannot undo operation of type {operation_type}'
+                    })
+                    continue
+                
+                # Mark the original operation as undone
+                cursor.execute(
+                    "UPDATE wms_log SET is_undone = 't' WHERE id = ?",
+                    (log_id,)
+                )
+                
+                # Log the revert operation
+                log_operation(
+                    operation_type="REVERT",
+                    operation_details=revert_details,
+                    user="current_user",  # Replace with actual user info if available
+                    ip_address=request.remote_addr,
+                    article_code=article_code,
+                    source_location=destination_location if operation_type == "TRANSFER" else None,
+                    destination_location=source_location if operation_type == "TRANSFER" else 
+                                (destination_location if operation_type == "INSERT" or operation_type == "MULTIPLE_INSERT" else source_location),
+                    quantity=quantity,
+                    can_undo=False,
+                    additional_data={"original_log_id": log_id}
+                )
+                
+                results['success'].append({
+                    'log_id': log_id,
+                    'message': 'Operation successfully reverted'
+                })
+                
+            except Exception as e:
+                # Log the error but continue with other operations
+                results['failed'].append({
+                    'log_id': log_id,
+                    'error': str(e)
+                })
+        
+        # Commit the transaction if there were any successful operations
+        if results['success']:
+            conn.commit()
+        
+        conn.close()
+        
+        return jsonify({
+            'summary': {
+                'total': len(log_ids),
+                'successful': len(results['success']),
+                'failed': len(results['failed'])
+            },
+            'results': results
+        }), 200
+        
+    except Exception as e:
+        if 'conn' in locals():
+            conn.rollback()
+            conn.close()
+        print(f"Error in batch revert operations: {str(e)}")
+        return jsonify({'error': str(e)}), 500
 if __name__ == '__main__':
     # Run with SSL context for HTTPS
     app.run(host='172.16.16.66', port=5000, debug=True, 

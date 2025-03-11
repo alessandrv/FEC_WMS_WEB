@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { Input, Button, Table, Layout, Space, message, Tooltip, Spin, Tag, Modal, InputNumber, Pagination, Form, Alert, Typography, Checkbox } from 'antd';
+import { Input,ConfigProvider, Button, Table, Layout, Space, message, Tooltip, Spin, Tag, Modal, InputNumber, Pagination, Form, Alert, Typography, Checkbox } from 'antd';
 import axios from 'axios';
 import { SettingOutlined, PlusOutlined, MinusOutlined } from '@ant-design/icons';
 
@@ -2103,7 +2103,7 @@ const Picking = () => {
                         >
                             ✓
                         </Button>
-                        {canTakeAll && (
+                        {/* {canTakeAll && (
                             <Button
                                 type="link"
                                 onClick={() => {
@@ -2113,7 +2113,7 @@ const Picking = () => {
                             >
                                 Seleziona questa locazione per l'intera quantità
                             </Button>
-                        )}
+                        )} */}
                     </Space>
                 );
             },
@@ -4018,6 +4018,7 @@ const Picking = () => {
             });
             return;
         }
+       
 
         // Create confirmation modal
         Modal.confirm({
