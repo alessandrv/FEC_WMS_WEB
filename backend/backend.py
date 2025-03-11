@@ -5,6 +5,11 @@ from decimal import Decimal
 import uuid
 from datetime import datetime
 import json
+import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 app = Flask(__name__)
 
@@ -19,8 +24,12 @@ def format_delivery_date(date_str):
     except ValueError:
         return date_str  # Return the original string if the date format is invalid
 
-# Define your connection string
-connection_string = 'DSN=fec;UID=informix;PWD=informix;'
+# Define your connection string using environment variables
+DB_DSN = os.getenv('DB_DSN', 'fec')
+DB_USER = os.getenv('DB_USER', 'informix')
+DB_PASSWORD = os.getenv('DB_PASSWORD', 'informix')
+connection_string = f'DSN={DB_DSN};UID={DB_USER};PWD={DB_PASSWORD};'
+
 def connect_to_db():
     try:
         return pyodbc.connect(connection_string)
@@ -4227,8 +4236,16 @@ def batch_revert_operations():
         print(f"Error in batch revert operations: {str(e)}")
         return jsonify({'error': str(e)}), 500
 if __name__ == '__main__':
-    # Run with SSL context for HTTPS
-    app.run(host='172.16.16.66', port=5000, debug=True, 
+    # Get configuration from environment variables with defaults
+    HOST = os.getenv('FLASK_HOST', '0.0.0.0')
+    PORT = int(os.getenv('FLASK_PORT', 5000))
+    DEBUG = os.getenv('FLASK_DEBUG', 'True').lower() == 'true'
+    
+    # Run the Flask application
+    app.run(
+        host=HOST,
+        port=PORT,
+        debug=DEBUG,
     )
 
 
