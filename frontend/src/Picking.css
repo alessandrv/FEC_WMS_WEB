@@ -181,3 +181,135 @@
   padding-bottom: 16px !important;
 }
 
+/* Animation styles for expandable rows */
+.expanded-row .ant-table-expanded-row-fixed {
+  animation: fadeInDown 0.3s ease-in-out;
+}
+
+.expanded-children-container {
+  animation: slideDown 0.4s ease-in-out;
+  transform-origin: top;
+  overflow: hidden;
+}
+
+.expanded-child-row {
+  animation: fadeIn 0.5s ease-in-out;
+  animation-fill-mode: both;
+}
+
+/* Animation for expanding the container */
+@keyframes slideDown {
+  0% {
+    max-height: 0;
+    opacity: 0;
+  }
+  100% {
+    max-height: 1000px;
+    opacity: 1;
+  }
+}
+
+/* Animation for fading in children */
+@keyframes fadeIn {
+  0% {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Animation for the row expansion */
+@keyframes fadeInDown {
+  0% {
+    opacity: 0;
+    transform: translateY(-15px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Add a rotation animation for the expand icon */
+.row-expand-icon {
+  transition: transform 0.3s ease;
+}
+
+.row-expand-icon:hover {
+  transform: scale(1.2);
+}
+
+/* Add rotation for the expanded icon */
+.row-expand-icon-expanded {
+  transform: rotate(180deg);
+}
+
+.row-expand-icon-expanded:hover {
+  transform: rotate(180deg) scale(1.2);
+}
+
+/* Animations for Ant Design's expandable rows */
+.ant-table-expanded-row {
+  animation: rowExpand 0.3s ease-in-out;
+  overflow: hidden;
+}
+
+/* Apply animations to the child rows using Ant Design's classes */
+.expanded-row .ant-table-expanded-row-fixed {
+  animation: fadeInContent 0.4s ease-in-out;
+}
+
+/* For child rows in the expanded section */
+.ant-table-expanded-row .child-row {
+  animation: fadeInChild 0.5s ease-in-out forwards;
+  opacity: 0;
+}
+
+.ant-table-expanded-row .child-row:nth-child(1) { animation-delay: 0.05s; }
+.ant-table-expanded-row .child-row:nth-child(2) { animation-delay: 0.1s; }
+.ant-table-expanded-row .child-row:nth-child(3) { animation-delay: 0.15s; }
+.ant-table-expanded-row .child-row:nth-child(4) { animation-delay: 0.2s; }
+.ant-table-expanded-row .child-row:nth-child(5) { animation-delay: 0.25s; }
+.ant-table-expanded-row .child-row:nth-child(6) { animation-delay: 0.3s; }
+.ant-table-expanded-row .child-row:nth-child(7) { animation-delay: 0.35s; }
+.ant-table-expanded-row .child-row:nth-child(8) { animation-delay: 0.4s; }
+.ant-table-expanded-row .child-row:nth-child(9) { animation-delay: 0.45s; }
+.ant-table-expanded-row .child-row:nth-child(10) { animation-delay: 0.5s; }
+
+/* Keyframes for row expansion */
+@keyframes rowExpand {
+  0% {
+    max-height: 0;
+  }
+  100% {
+    max-height: 1000px;
+  }
+}
+
+/* Keyframes for content fading in */
+@keyframes fadeInContent {
+  0% {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Keyframes for child rows fading in */
+@keyframes fadeInChild {
+  0% {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+

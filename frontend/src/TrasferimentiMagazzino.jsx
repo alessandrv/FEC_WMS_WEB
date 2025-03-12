@@ -603,6 +603,13 @@ const handleRemoveLocation = (record) => {
     setIsTransferConfirmationOpen(true);
   };
 
+  useEffect(() => {
+    if (activeTab === '2') {
+      handleMovimentoLocationSearch();
+    } else if (activeTab === '4') {
+      handleScaffaleLocationSearch();
+    }
+  }, [locationOTP[3]]); // Runs only when locationOTP changes
 // Update the handleShelfClickSelection function to work with both tabs
 const handleShelfClickSelection = (shelf) => {
   setHighlightedShelf(shelf);
@@ -613,7 +620,7 @@ const handleShelfClickSelection = (shelf) => {
   // Set values based on which tab is active
   if (activeTab === '1') {
     setOtp(['A', scaffale, colonna, piano]);
-  } else if (activeTab === '2') {
+  } else if (activeTab === '2' || activeTab === '4') {
     setLocationOTP(['A', scaffale, colonna, piano]);
   }
   
@@ -1479,6 +1486,52 @@ const handleLocationKeyDown = (index, e) => {
   }
 };
 
+const handleScaffaleLocationSearch = async () => {
+  const [area, scaffale, colonna, piano] = locationOTP;
+  
+
+  setLoadingLocationItems(true);
+  try {
+    const response = await axios.get(`${process.env.REACT_APP_API_URL}/api/scaffale-location-items`, {
+      params: {
+        area,
+        scaffale,
+        colonna,
+        piano
+      }
+    });
+    
+   
+    const groupedItems = response.data.reduce((acc, item) => {
+      const existingGroup = acc.find(g => g.id_art === item.id_art);
+      if (existingGroup) {
+        existingGroup.qta += item.qta;
+        existingGroup.originalItems.push(item);
+      } else {
+        acc.push({
+          ...item,
+          id: `${item.id_art}-${Date.now()}`, // Unique ID for the group
+          qta: item.qta,
+          originalItems: [item] // Store original items for transfer
+        });
+      }
+      return acc;
+    }, []);
+
+    setLocationItems(groupedItems);
+ 
+  } catch (error) {
+    console.error('Search error:', error);
+    notification.error({
+      message: 'Errore nella ricerca',
+      placement: 'bottomRight',
+      duration: 5,
+    });
+  } finally {
+    setLoadingLocationItems(false);
+  }
+};
+
 const handleMovimentoLocationSearch = async () => {
   const [area, scaffale, colonna, piano] = locationOTP;
   if (!movimentoTransfer || locationOTP.some(field => !field)) {
@@ -1616,7 +1669,7 @@ const handleLocationTransferComplete = (destLocation) => {
     }
     
     // Handle Trasferimento da Movimento (tab "2")
-    else if (activeTab === '2') {
+    else if (activeTab === '2' || activeTab === '4') {
       const [srcArea, srcScaffale, srcColonna, srcPiano] = locationOTP;
 
       const items = selectedLocationRows.map(id => {
@@ -1748,7 +1801,7 @@ const TransferConfirmationModal = () => (
           setOtp(['', '', '', '']);
           setTransferQuantity(0);
         }
-        else if (activeTab === '2') {
+        else if (activeTab === '2' || activeTab === '4') {
           const updatedItems = locationItems.map(item => {
             if (selectedLocationRows.includes(item.id)) {
               return { ...item, transferred: true };
@@ -1757,7 +1810,12 @@ const TransferConfirmationModal = () => (
           });
           setLocationItems(updatedItems);
           setSelectedLocationRows([]);
-          handleMovimentoLocationSearch();
+          if (activeTab === '2') {
+            handleMovimentoLocationSearch();
+          }
+          else if (activeTab === '4') {
+            handleScaffaleLocationSearch();
+          }
         }
         else if (activeTab === '3') {
           const updatedArticles = magazziniArticles.map(article => {
@@ -2092,7 +2150,103 @@ return (
     </Form>
   </Card>
 </Tabs.TabPane>
-   
+<Tabs.TabPane  tab="Trasferimento locazione" key="4">
+    <Card>
+        <Form layout="vertical">
+         
+          
+          <Form.Item label="Posizione">
+  <div style={{ display: 'flex', marginBottom: '20px', alignItems: 'flex-end' }}>
+    {['AREA', 'SCAFFALE', 'COLONNA', 'PIANO'].map((label, index) => (
+      <div key={index} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+        <span style={{ marginBottom: '4px' }}>{label}</span>
+        <Input
+          ref={locationInputRefs[index]}
+          value={locationOTP[index]}
+          onChange={(e) => handleLocationChange(index, e.target.value)}
+          onKeyDown={(e) => handleLocationKeyDown(index, e)}
+          maxLength={index === 2 ? 2 : 1}
+          style={{
+            width: '60px',
+            textAlign: 'center',
+            marginRight: '8px'
+          }}
+        />
+      </div>
+    ))}
+    
+    <Button 
+      icon={<FullscreenOutlined />}
+      onClick={() => {
+        setCurrentPage(1);
+        setIsWarehouseMapOpen(true);
+      }}
+      style={{ marginLeft: '10px' }}
+    />
+  </div>
+</Form.Item>
+
+          <Button
+            type="primary"
+            onClick={handleScaffaleLocationSearch}
+            loading={loadingLocationItems}
+          >
+            Cerca Articoli Locazione
+          </Button>
+        </Form>
+
+        {locationItems.length > 0 && (
+          <Table
+            rowKey="id"
+            rowSelection={{
+              selectedRowKeys: selectedLocationRows,
+              onChange: (selectedKeys) => {
+                const validKeys = selectedKeys.filter(key => 
+                  locationItems.some(item => item.id === key)
+                );
+                setSelectedLocationRows(validKeys);
+              },
+              getCheckboxProps: (record) => ({
+                disabled: record.deposited
+              })
+            }}
+            columns={movimentoLocationColumns}
+            dataSource={locationItems}
+            pagination={false}
+            footer={() => (
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <Button
+                  type="primary"
+                  onClick={() => {
+                    if (selectedLocationRows.length === 0) {
+                      notification.warning({
+                        message: 'Seleziona almeno un articolo',
+                        placement: 'bottomRight',
+                        duration: 5,
+                      });
+                      return;
+                    }
+                    setMultiplePartialQuantity(0);
+                    setIsLocationWarehouseMapOpen(true);
+                  }}
+                  disabled={selectedLocationRows.length === 0}
+                >
+                  Trasferisci selezionati ({selectedLocationRows.length})
+                </Button>
+                
+                <Button
+                  type="primary"
+                  onClick={handleLocationMultiplePartial}
+                  disabled={!checkLocationRowsQuantity()}
+                >
+                  Trasferimento parziale multiplo
+                </Button>
+              </div>
+            )}
+          />
+        )}
+      </Card>
+    </Tabs.TabPane>
   </Tabs>
      <Modal
      style={{width:"50%"}}

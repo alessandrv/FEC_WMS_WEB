@@ -1268,7 +1268,7 @@ def update_pacchi():
                 cursor.execute(update_query, (new_qta, id_pacco))
 
             # Calculate volume to add back to shelf
-            total_volume_to_add += volume_mapping[dimensione] * (qta_to_remove / qta)
+            total_volume_to_add += volume_mapping[dimensione] * (int(qta_to_remove) / int(qta))
             remaining_quantity -= qta_to_remove
             updated = True
 
@@ -2783,9 +2783,60 @@ def get_movimento_location_items():
                              AND wi.scaffale = ?
                              AND wi.colonna = ?
                              AND wi.piano = ?
-                             AND wi.id_art IN ({placeholders})"""
+                             AND wi.id_art IN ({placeholders})
+                             order by wi.id_art
+"""
         
         params = [area, scaffale, colonna, piano] + movimento_items
+        cursor.execute(location_query, params)
+        
+        # Convert results to JSON
+        columns = [column[0] for column in cursor.description]
+        result = [dict(zip(columns, row)) for row in cursor.fetchall()]
+        
+        return jsonify(result)
+
+    except pyodbc.Error as e:
+        app.logger.error(f"Database error: {str(e)}")
+        return jsonify({'error': 'Database error occurred.'}), 500
+    except Exception as ex:
+        app.logger.error(f"Unexpected error: {str(ex)}")
+        return jsonify({'error': 'An unexpected error occurred.'}), 500
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        if 'conn' in locals():
+            conn.close()
+@app.route('/api/scaffale-location-items', methods=['GET'])
+def get_scaffale_location_items():
+    area = request.args.get('area')
+    scaffale = request.args.get('scaffale')
+    colonna = request.args.get('colonna')
+    piano = request.args.get('piano')
+    
+    if not all([area, scaffale, colonna, piano]):
+        return jsonify({'error': 'Missing required parameters'}), 400
+
+    try:
+        conn = connect_to_db()
+        cursor = conn.cursor()
+        
+        # First get movimento items
+       
+        
+
+
+        # Get items in location that match movimento items
+        location_query = f"""SELECT wi.* 
+                           FROM wms_items2 wi
+                           WHERE wi.area = ? 
+                             AND wi.scaffale = ?
+                             AND wi.colonna = ?
+                             AND wi.piano = ?
+                             order by wi.id_art
+                             """
+        
+        params = [area, scaffale, colonna, piano] 
         cursor.execute(location_query, params)
         
         # Convert results to JSON
@@ -3290,7 +3341,7 @@ def batch_update_pacchi():
                         cursor.execute(update_query, (new_qta, id_pacco))
                     
                     # Calculate volume to add back to shelf
-                    total_volume_to_add += volume_mapping[dimensione] * (qta_to_remove / qta)
+                    total_volume_to_add += volume_mapping[dimensione] * (int(qta_to_remove) / int(qta))
                     remaining_quantity -= qta_to_remove
                     updated = True
                     
@@ -3547,16 +3598,9 @@ def revert_operation():
             )
             existing_item = cursor.fetchone()
             
-            if existing_item:
-                # Update existing quantity
-                new_quantity = float(existing_item[0]) + quantity
-                cursor.execute(
-                    "UPDATE wms_items2 SET qta = ? WHERE id_art = ? AND area = ? AND scaffale = ? AND colonna = ? AND piano = ?",
-                    (new_quantity, article_code, source_area, source_scaffale, source_colonna, source_piano)
-                )
-            else:
+            
                 # Create new entry
-                cursor.execute(
+            cursor.execute(
                     "INSERT INTO wms_items2 (id_art, area, scaffale, colonna, piano, qta, dimensione) VALUES (?, ?, ?, ?, ?, ?, 'Zero')",
                     (article_code, source_area, source_scaffale, source_colonna, source_piano, quantity)
                 )
@@ -4235,6 +4279,179 @@ def batch_revert_operations():
             conn.close()
         print(f"Error in batch revert operations: {str(e)}")
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/location-items', methods=['GET'])
+def get_location_items():
+    """
+    Get all items in a specific location (area, scaffale, colonna, piano) with details.
+    Similar structure to ordine-lavoro endpoint, but filters by location instead of work order.
+    """
+    area = request.args.get('area')
+    scaffale = request.args.get('scaffale')
+    colonna = request.args.get('colonna')
+    piano = request.args.get('piano')
+
+    # Build filter conditions based on provided parameters
+    filter_conditions = []
+    params = []
+    
+    if area:
+        filter_conditions.append("area = ?")
+        params.append(area)
+    if scaffale:
+        filter_conditions.append("scaffale = ?")
+        params.append(scaffale)
+    if colonna:
+        filter_conditions.append("colonna = ?")
+        params.append(colonna)
+    if piano:
+        filter_conditions.append("piano = ?")
+        params.append(piano)
+
+    if not filter_conditions:
+        return jsonify({'error': 'At least one location parameter (area, scaffale, colonna, piano) is required'}), 400
+
+    try:
+        # Connect to the database
+        conn = connect_to_db()
+        cursor = conn.cursor()
+
+        # Query wms_items2 for items at the specified location
+        query_wms = f"""
+        SELECT 
+            id_art, 
+            id_pacco,
+            id_mov,
+            fornitore, 
+            area, 
+            scaffale, 
+            colonna, 
+            piano, 
+            qta,
+            dimensione,
+            CASE 
+                WHEN scaffale IN ('S', 'R') THEN 1 
+                ELSE 0 
+            END AS scaffale_order
+        FROM 
+            wms_items2
+        WHERE 
+            {' AND '.join(filter_conditions)}
+            AND qta > 0
+        ORDER BY
+            scaffale_order,
+            area,
+            scaffale,
+            colonna,
+            piano,
+            id_pacco ASC;
+        """
+        cursor.execute(query_wms, params)
+        wms_rows = cursor.fetchall()
+
+        # Group by article and gather all packages for each
+        article_groups = {}
+        
+        for row in wms_rows:
+            id_art = row.id_art.strip() if row.id_art else ''
+            
+            if id_art not in article_groups:
+                # Get article description from mganag table
+                query_desc = """
+                    SELECT amg_desc, amg_des2
+                    FROM mganag
+                    WHERE amg_code = ?
+                """
+                cursor.execute(query_desc, (id_art,))
+                desc_row = cursor.fetchone()
+                
+                if desc_row:
+                    occ_desc_combined = f"{desc_row.amg_desc} {desc_row.amg_des2}".strip()
+                else:
+                    occ_desc_combined = 'Descrizione non disponibile'
+                
+          
+                mpl_padre = None
+                
+                # Initialize article group
+                article_groups[id_art] = {
+                    'id_art': id_art,
+                    'occ_arti': id_art,
+                    'occ_desc_combined': occ_desc_combined,
+                    'locations': [],
+                    'total_quantity': 0,
+                    'mpl_padre': mpl_padre  # Include distinta parent if exists
+                }
+            
+            # Add location info
+            location_key = (row.area, row.scaffale, row.colonna, row.piano)
+            location_exists = False
+            
+            for loc in article_groups[id_art]['locations']:
+                if (loc['area'], loc['scaffale'], loc['colonna'], loc['piano']) == location_key:
+                    # Location already exists, add package
+                    loc['pacchi'].append({
+                        'id_pacco': row.id_pacco,
+                        'quantity': float(row.qta),
+                        'id_mov': row.id_mov
+                    })
+                    loc['total_quantity'] += float(row.qta)
+                    location_exists = True
+                    break
+            
+            if not location_exists:
+                # Add new location
+                article_groups[id_art]['locations'].append({
+                    'area': row.area,
+                    'scaffale': row.scaffale,
+                    'colonna': row.colonna,
+                    'piano': row.piano,
+                    'pacchi': [{
+                        'id_pacco': row.id_pacco,
+                        'quantity': float(row.qta),
+                        'id_mov': row.id_mov
+                    }],
+                    'total_quantity': float(row.qta)
+                })
+            
+            # Update total quantity
+            article_groups[id_art]['total_quantity'] += float(row.qta)
+        
+        # Format the results to match the ordine-lavoro response structure
+        detailed_results = []
+        
+        for article_id, article_data in article_groups.items():
+            # For each location, create an entry
+            for location in article_data['locations']:
+                detailed_results.append({
+                    'occ_arti': article_data['occ_arti'],
+                    'occ_desc_combined': article_data['occ_desc_combined'],
+                    'status': 'available',
+                    'pacchi': location['pacchi'],
+                    'location': {
+                        'area': location['area'],
+                        'scaffale': location['scaffale'],
+                        'colonna': location['colonna'],
+                        'piano': location['piano'],
+                    },
+                    'available_quantity': str(int(location['total_quantity'])),
+                    'total_quantity': str(int(location['total_quantity'])),
+                    **({"mpl_padre": article_data['mpl_padre']} if article_data['mpl_padre'] else {})
+                })
+        
+        # Sort results by article ID
+        detailed_results.sort(key=lambda x: x['occ_arti'])
+        
+        return jsonify(detailed_results), 200
+
+    except Exception as e:
+        print(f"Error in get_location_items: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        if 'conn' in locals():
+            conn.close()
 if __name__ == '__main__':
     # Get configuration from environment variables with defaults
     HOST = os.getenv('FLASK_HOST', '0.0.0.0')
