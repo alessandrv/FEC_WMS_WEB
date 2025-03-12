@@ -2331,8 +2331,9 @@ const handlePageChange = (page) => {
     };
     
   useEffect(() => {
-    
-    handleLocazione();
+    if (locationOTP[3] !== '') {
+        handleLocazione();
+    }
     
   }, [locationOTP[3]]); // Runs only when locationOTP changes
     const handleOTPChange = (index, value) => {
