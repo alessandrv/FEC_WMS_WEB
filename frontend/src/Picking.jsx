@@ -435,17 +435,46 @@ const handlePageChange = (page) => {
                         const canSelect = !record.isParent &&
                             record.status !== 'completed' &&
                             !highlightedRows.has(record.id) &&
-                            record.location; // Must have a location
+                            record.location &&
+                            !record.missing &&
+                            !record.isSpacer; // Must have a location and not be a special row
+
+                        if (!canSelect) {
+                            // If not selectable, show a disabled checkbox with appropriate style
+                            return (
+                                <Tooltip 
+                                    title={
+                                        highlightedRows.has(record.id) 
+                                            ? "Articolo già prelevato" 
+                                            : record.status === 'completed'
+                                                ? "Articolo già completato"
+                                                : !record.location
+                                                    ? "Posizione non disponibile" 
+                                                    : record.missing
+                                                        ? "Articolo mancante"
+                                                        : "Non selezionabile"
+                                    }
+                                >
+                                    <span>
+                                        <Checkbox
+                                            checked={false}
+                                            disabled={true}
+                                            style={{
+                                                opacity: 0.5,
+                                                cursor: 'not-allowed'
+                                            }}
+                                        />
+                                    </span>
+                                </Tooltip>
+                            );
+                        }
 
                         return (
                             <Checkbox
                                 checked={selectedRows.some(row => row.id === record.id)}
                                 onChange={(e) => {
-                                    if (canSelect) {
-                                        handleRowSelect(record, e.target.checked);
-                                    }
+                                    handleRowSelect(record, e.target.checked);
                                 }}
-                                disabled={!canSelect || record.missing || record.status === 'completed' || highlightedRows.has(record.id)}
                             />
                         );
                     }
@@ -488,6 +517,11 @@ const handlePageChange = (page) => {
 
     // 3. Add logging to handleRowSelect
     const handleRowSelect = (record, selected) => {
+        // If the row is highlighted, it can't be selected
+        if (highlightedRows.has(record.id)) {
+            return;
+        }
+
         if (selected) {
             const newSelectedRows = [...selectedRows, record];
             setSelectedRows(newSelectedRows);
@@ -501,38 +535,18 @@ const handlePageChange = (page) => {
 
 
 
-    // 7. Add a button to enable multi-select mode and handle multiple location changes
-    // Add this to your layout where appropriate
-    const MultiSelectControls = () => (
-        <>
-            {!multiSelectMode ? (
-                <Button
-                    type="primary"
-                    onClick={() => {
-                        toggleMultiSelectMode();
-                    }}
-                    style={{ marginBottom: 16 }}
-                >
-                    Cambia locazione multipla
-                </Button>
-            ) : (
-                <Space style={{ marginBottom: 16 }}>
-                    <Button onClick={() => {
-                        toggleMultiSelectMode();
-                    }}>
-                        Annulla
-                    </Button>
-                    <Button
-                        type="primary"
-                        onClick={openMultiLocationModal}
-                        disabled={selectedRows.length === 0}
-                        loading={loadingLocations} // Add loading state to button
-                    >
-                        Cambia locazione ({selectedRows.length})
-                    </Button>
-                </Space>
-            )}
-        </>
+
+    // This button only activates the multi-select mode for location change
+    const LocationChangeButton = () => (
+        <Button
+            type="primary"
+            onClick={() => {
+                toggleMultiSelectMode();
+            }}
+            style={{ marginBottom: 16 }}
+        >
+            Cambio Locazione Multiplo
+        </Button>
     );
 
    
@@ -4108,31 +4122,108 @@ const handlePageChange = (page) => {
 
     // Add a function to handle picking all items at once
     const handlePickAll = async () => {
-        // Filter rows that can be picked
-        const pickableRows = tableData.filter(row =>
+        // When in multi-select mode, use the selected rows
+        const rowsToProcess = multiSelectMode ? selectedRows : tableData.filter(row =>
             !row.isParent &&
             canPickRow(row) &&
             !highlightedRows.has(row.id)
         );
 
-        if (pickableRows.length === 0) {
+        if (rowsToProcess.length === 0) {
             notification.warning({
-                message: 'Nessun articolo disponibile',
-                description: 'Non ci sono articoli disponibili da prelevare',
+                message: 'Nessun articolo selezionato',
+                description: 'Seleziona almeno un articolo da prelevare',
                 placement: 'bottomRight'
             });
             return;
         }
 
-        // Create confirmation modal
+        // Group articles by code for the summary
+        const articleSummary = {};
+        rowsToProcess.forEach(row => {
+            const articleCode = row.occ_arti;
+            const quantity = parseFloat(row.available_quantity || 0);
+            
+            if (articleSummary[articleCode]) {
+                articleSummary[articleCode].quantity += quantity;
+                articleSummary[articleCode].locations.push(`${row.location.area}-${row.location.scaffale}-${row.location.colonna}-${row.location.piano}`);
+            } else {
+                articleSummary[articleCode] = {
+                    desc: row.occ_desc_combined,
+                    quantity: quantity,
+                    locations: [`${row.location.area}-${row.location.scaffale}-${row.location.colonna}-${row.location.piano}`]
+                };
+            }
+        });
+
+        // Create data source for the summary table
+        const tableDataSource = Object.entries(articleSummary).map(([code, info], index) => ({
+            key: index,
+            code: code,
+            description: info.desc,
+            quantity: info.quantity,
+            locations: info.locations.join(', ')
+        }));
+
+        // Define columns for the summary table
+        const summaryColumns = [
+            {
+                title: 'Codice',
+                dataIndex: 'code',
+                key: 'code',
+                render: text => <strong>{text}</strong>
+            },
+            {
+                title: 'Descrizione',
+                dataIndex: 'description',
+                key: 'description',
+                ellipsis: true
+            },
+            {
+                title: 'Quantità',
+                dataIndex: 'quantity',
+                key: 'quantity',
+                align: 'right',
+                render: qty => <strong>{qty}</strong>
+            },
+            {
+                title: 'Posizioni',
+                dataIndex: 'locations',
+                key: 'locations',
+                ellipsis: true
+            }
+        ];
+
+        // Create confirmation modal with table summary
         Modal.confirm({
             title: 'Conferma prelievo multiplo',
             content: (
-                <div>
-                    <p>Stai per prelevare {pickableRows.length} articoli. Vuoi continuare?</p>
-                    <p>Questa operazione può essere annullata successivamente.</p>
+                <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
+                    <p>Stai per prelevare i seguenti articoli:</p>
+                    <Table 
+                        dataSource={tableDataSource} 
+                        columns={summaryColumns} 
+                        size="small"
+                        pagination={false}
+                        bordered
+                        summary={() => (
+                            <Table.Summary>
+                                <Table.Summary.Row>
+                                    <Table.Summary.Cell index={0} colSpan={2}><strong>Totale</strong></Table.Summary.Cell>
+                                    <Table.Summary.Cell index={1} align="right">
+                                        <strong>{tableDataSource.reduce((acc, item) => acc + item.quantity, 0)}</strong>
+                                    </Table.Summary.Cell>
+                                    <Table.Summary.Cell index={2}>
+                                        <strong>{rowsToProcess.length} righe</strong>
+                                    </Table.Summary.Cell>
+                                </Table.Summary.Row>
+                            </Table.Summary>
+                        )}
+                    />
+                    <p style={{ marginTop: '10px' }}>Questa operazione può essere annullata successivamente.</p>
                 </div>
             ),
+            width: 700,
             okText: 'Conferma',
             cancelText: 'Annulla',
             onOk: async () => {
@@ -4143,7 +4234,7 @@ const handlePageChange = (page) => {
                     const batchId = uuidv4();
 
                     // Prepare batch data for API
-                    const batchData = pickableRows.map(row => ({
+                    const batchData = rowsToProcess.map(row => ({
                         articolo: row.occ_arti,
                         quantity: parseFloat(row.available_quantity || 0),
                         area: row.location.area,
@@ -4169,15 +4260,15 @@ const handlePageChange = (page) => {
                         id: batchId,
                         timestamp: new Date().toISOString(),
                         type: 'batchPick',
-                        description: `Prelievo multiplo di ${pickableRows.length} articoli`,
-                        articles: pickableRows.map(row => row.occ_arti),
+                        description: `Prelievo multiplo di ${rowsToProcess.length} articoli`,
+                        articles: rowsToProcess.map(row => row.occ_arti),
                         operations: []
                     };
 
                     if (response.data.results) {
                         // Process each result
                         response.data.results.forEach((result, index) => {
-                            const row = pickableRows[index];
+                            const row = rowsToProcess[index];
 
                             if (result.success) {
                                 // Store operation for undo
@@ -4206,6 +4297,11 @@ const handlePageChange = (page) => {
                                     newSet.add(row.id);
                                     return newSet;
                                 });
+                                
+                                // Remove picked rows from selectedRows to uncheck them in the UI
+                                setSelectedRows(prevSelected => 
+                                    prevSelected.filter(selectedRow => selectedRow.id !== row.id)
+                                );
                             } else {
                                 // Add to failed picks
                                 failedPicks.push(row.occ_arti);
@@ -4216,7 +4312,7 @@ const handlePageChange = (page) => {
                         if (successfulPicks.length > 0) {
                             batchOperation.successCount = successfulPicks.length;
                             batchOperation.failCount = failedPicks.length;
-                            setPickOperations(prev => [...prev, batchOperation]);
+                            setPickOperations(prev => [...prev]);
                         }
 
                         // Show result notification
@@ -4660,7 +4756,7 @@ const handlePageChange = (page) => {
                 )}
             </Modal>
 
-            <Sider width={"50%"} style={{ background: '#fff' }}>
+            <Sider width={"55%"} style={{ background: '#fff' }}>
                 <Space direction="vertical" style={{ width: '100%', padding: '20px' }}>
                     {/* Add the MultiSelectControls here, above your tabs */}
 
@@ -4784,28 +4880,53 @@ const handlePageChange = (page) => {
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                     <div>
                                         {activeTab !== '3' && (
-                                        <>
-                                        <MultiSelectControls />
-                                        <Button
-                                            type="primary"
-                                            onClick={handlePickAll}
-                                            style={{ marginLeft: 8 }}
-                                            loading={confirmLoading}
-                                        >
-                                            Preleva Tutto
-                                        </Button>
-                                        </>
+                                            <>
+                                            {!multiSelectMode ? (
+                                                <>
+                                                <LocationChangeButton />
+                                                <Button
+                                                    type="primary"
+                                                    onClick={toggleMultiSelectMode}
+                                                    style={{ marginLeft: 8 }}
+                                                >
+                                                    Prelievo Multiplo
+                                                </Button>
+                                                <Button
+                                                    type="primary"
+                                                    danger
+                                                    onClick={handleUndoAll}
+                                                    style={{ marginLeft: 8 }}
+                                                    loading={confirmLoading}
+                                                    disabled={pickOperations.filter(op => canUndoOperation(op)).length === 0}
+                                                >
+                                                    Annulla Tutto
+                                                </Button>
+                                                </>
+                                            ) : (
+                                                <Space>
+                                                    <Button onClick={toggleMultiSelectMode}>
+                                                        Annulla Selezione
+                                                    </Button>
+                                                    <Button
+                                                        type="primary"
+                                                        onClick={openMultiLocationModal}
+                                                        disabled={selectedRows.length === 0}
+                                                        loading={loadingLocations}
+                                                    >
+                                                        Cambia locazione ({selectedRows.length})
+                                                    </Button>
+                                                    <Button
+                                                        type="primary"
+                                                        onClick={handlePickAll}
+                                                        disabled={selectedRows.length === 0}
+                                                        loading={confirmLoading}
+                                                    >
+                                                        Preleva Selezionati ({selectedRows.length})
+                                                    </Button>
+                                                </Space>
+                                            )}
+                                            </>
                                         )}
-                                        <Button
-                                            type="primary"
-                                            danger
-                                            onClick={handleUndoAll}
-                                            style={{ marginLeft: 8 }}
-                                            loading={confirmLoading}
-                                            disabled={pickOperations.filter(op => canUndoOperation(op)).length === 0}
-                                        >
-                                            Annulla Tutto
-                                        </Button>
                                     </div>
                                     <div>
                                         <Button
@@ -4833,12 +4954,48 @@ const handlePageChange = (page) => {
                                             const canSelect = !record.isParent &&
                                                 record.status !== 'completed' &&
                                                 !highlightedRows.has(record.id) &&
-                                                record.location;
+                                                record.location &&
+                                                !record.missing &&
+                                                !record.isSpacer; // Must have a location and not be a special row
 
-                                            if (canSelect) {
-                                                const isSelected = selectedRows.some(row => row.id === record.id);
-                                                handleRowSelect(record, !isSelected);
+                                            if (!canSelect) {
+                                                // If not selectable, show a disabled checkbox with appropriate style
+                                                return (
+                                                    <Tooltip 
+                                                        title={
+                                                            highlightedRows.has(record.id) 
+                                                                ? "Articolo già prelevato" 
+                                                                : record.status === 'completed'
+                                                                    ? "Articolo già completato"
+                                                                    : !record.location
+                                                                        ? "Posizione non disponibile" 
+                                                                        : record.missing
+                                                                            ? "Articolo mancante"
+                                                                            : "Non selezionabile"
+                                                        }
+                                                    >
+                                                        <span>
+                                                            <Checkbox
+                                                                checked={false}
+                                                                disabled={true}
+                                                                style={{
+                                                                    opacity: 0.5,
+                                                                    cursor: 'not-allowed'
+                                                                }}
+                                                            />
+                                                        </span>
+                                                    </Tooltip>
+                                                );
                                             }
+
+                                            return (
+                                                <Checkbox
+                                                    checked={selectedRows.some(row => row.id === record.id)}
+                                                    onChange={(e) => {
+                                                        handleRowSelect(record, e.target.checked);
+                                                    }}
+                                                />
+                                            );
                                         }
                                     }
                                 }
