@@ -3203,8 +3203,6 @@ const handlePageChange = (page) => {
 
             setTableData(updatedTableData);
             setMultiLocationModalVisible(false);
-            setSelectedRows([]);
-            setMultiSelectMode(false);
 
             notification.success({
                 message: 'Successo',
