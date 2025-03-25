@@ -4452,17 +4452,21 @@ def get_location_items():
             cursor.close()
         if 'conn' in locals():
             conn.close()
+
+# Start the server with waitress if this file is run directly
 if __name__ == '__main__':
-    # Get configuration from environment variables with defaults
-    HOST = os.getenv('FLASK_HOST', '0.0.0.0')
-    PORT = int(os.getenv('FLASK_PORT', 5000))
-    DEBUG = os.getenv('FLASK_DEBUG', 'True').lower() == 'true'
+    from waitress import serve
+    import socket
     
-    # Run the Flask application
-    app.run(
-        host=HOST,
-        port=PORT,
-        debug=DEBUG,
-    )
-
-
+    # Get local IP address
+    hostname = socket.gethostname()
+    local_ip = socket.gethostbyname(hostname)
+    
+    # Default port
+    port = int(os.getenv('PORT', 5000))
+    
+    print(f"Starting Waitress server on {local_ip}:{port}")
+    print("Press Ctrl+C to quit")
+    
+    # Start waitress server
+    serve(app, host='0.0.0.0', port=port, threads=6)
