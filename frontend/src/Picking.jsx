@@ -4500,6 +4500,31 @@ const handlePageChange = (page) => {
         });
     };
 
+    // Add a function to handle picking all rows at once
+    const handlePrelevaTutto = () => {
+        // Find all rows that can be picked
+        const pickableRows = tableData.filter(row =>
+            !row.isParent &&
+            canPickRow(row) &&
+            !highlightedRows.has(row.id)
+        );
+
+        if (pickableRows.length === 0) {
+            notification.warning({
+                message: 'Nessun articolo disponibile',
+                description: 'Non ci sono articoli disponibili da prelevare',
+                placement: 'bottomRight'
+            });
+            return;
+        }
+
+        // Set the selected rows to all pickable rows
+        setSelectedRows(pickableRows);
+        
+        // Call handlePickAll to process the selected rows
+        handlePickAll();
+    };
+
     return (
         <Layout style={{ minHeight: '100%' }}>
 
@@ -4891,6 +4916,14 @@ const handlePageChange = (page) => {
                                                 </Button>
                                                 <Button
                                                     type="primary"
+                                                    onClick={handlePrelevaTutto}
+                                                    style={{ marginLeft: 8 }}
+                                                    loading={confirmLoading}
+                                                >
+                                                    Preleva Tutto
+                                                </Button>
+                                                <Button
+                                                    type="primary"
                                                     danger
                                                     onClick={handleUndoAll}
                                                     style={{ marginLeft: 8 }}
@@ -4920,6 +4953,14 @@ const handlePageChange = (page) => {
                                                         loading={confirmLoading}
                                                     >
                                                         Preleva Selezionati ({selectedRows.length})
+                                                    </Button>
+                                                    <Button
+                                                        type="primary"
+                                                        onClick={handlePrelevaTutto}
+                                                        style={{ marginLeft: 8 }}
+                                                        loading={confirmLoading}
+                                                    >
+                                                        Preleva Tutto
                                                     </Button>
                                                 </Space>
                                             )}
