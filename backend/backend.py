@@ -185,13 +185,13 @@ def log_operation(operation_type, operation_details, user=None, ip_address=None,
         INSERT INTO wms_log 
         (timestamp, operation_type, operation_details, user, ip_address, 
          article_code, source_location, destination_location, quantity, can_undo, additional_data) 
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (today, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         
         cursor.execute(
             query, 
             (
-                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+             
                 operation_type,
                 operation_details,
                 user,
@@ -4446,6 +4446,473 @@ def get_location_items():
 
     except Exception as e:
         print(f"Error in get_location_items: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        if 'conn' in locals():
+            conn.close()
+
+@app.route('/api/shelf-inspection', methods=['GET'])
+def get_shelf_inspection():
+    """
+    Retrieve all shelf inspection records.
+    Returns a list of shelf inspection status records where scaffale column
+    contains the combined scaffale-colonna identifier.
+    Only returns non-archived (current) inspections.
+    """
+    try:
+        conn = connect_to_db()
+        cursor = conn.cursor()
+        
+        # Try to query with archived flag first
+        try:
+            # Query to get all non-archived inspection records
+            query = "SELECT scaffale, last_check, status FROM wms_ispezione WHERE archived IS NULL OR archived = 0"
+            cursor.execute(query)
+        except pyodbc.ProgrammingError:
+            # If archived column doesn't exist, query without it
+            query = "SELECT scaffale, last_check, status FROM wms_ispezione"
+            cursor.execute(query)
+        
+        # Convert rows to a list of dictionaries
+        columns = [column[0] for column in cursor.description]
+        inspection_records = [dict(zip(columns, row)) for row in cursor.fetchall()]
+        
+        return jsonify(inspection_records)
+    
+    except pyodbc.Error as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        if 'conn' in locals():
+            conn.close()
+
+@app.route('/api/shelf-inspection/<shelf_id>', methods=['GET'])
+def get_single_shelf_inspection(shelf_id):
+    """
+    Get the inspection status for a specific shelf.
+    The shelf_id parameter should be the combined scaffale-colonna identifier (e.g., 'A-01').
+    If the shelf doesn't exist in the inspection table, it will be inserted with status "to_check".
+    Returns the most recent non-archived inspection record.
+    """
+    try:
+        conn = connect_to_db()
+        cursor = conn.cursor()
+        
+        # Query to check if the shelf exists in the inspection table
+        try:
+            # Try to query with archived flag
+            query = "SELECT scaffale, last_check, status FROM wms_ispezione WHERE scaffale = ? AND (archived IS NULL OR archived = 0)"
+            cursor.execute(query, (shelf_id,))
+        except pyodbc.ProgrammingError:
+            # If archived column doesn't exist, query without it
+            query = "SELECT scaffale, last_check, status FROM wms_ispezione WHERE scaffale = ?"
+            cursor.execute(query, (shelf_id,))
+        
+        result = cursor.fetchone()
+        
+        # If the shelf doesn't exist, insert it with status "to_check"
+        if not result:
+            current_date = datetime.now().strftime("%Y-%m-%d")
+            
+            # Check if archived column exists
+            try:
+                insert_query = """
+                INSERT INTO wms_ispezione (scaffale, last_check, status, archived)
+                VALUES (?, ?, 'to_check', 0)
+                """
+                cursor.execute(insert_query, (shelf_id, current_date))
+            except pyodbc.ProgrammingError:
+                insert_query = """
+                INSERT INTO wms_ispezione (scaffale, last_check, status)
+                VALUES (?, ?, 'to_check')
+                """
+                cursor.execute(insert_query, (shelf_id, current_date))
+            
+            conn.commit()
+            
+            # Get the newly inserted record
+            cursor.execute(query, (shelf_id,))
+            result = cursor.fetchone()
+        
+        if result:
+            columns = [column[0] for column in cursor.description]
+            inspection_record = dict(zip(columns, result))
+            
+            # Add a field to indicate if this inspection is newer than 6 months
+            if inspection_record.get('last_check'):
+                try:
+                    # Handle both string and datetime.date objects
+                    last_check = inspection_record['last_check']
+                    if isinstance(last_check, str):
+                        last_check_date = datetime.strptime(last_check, "%Y-%m-%d")
+                    else:
+                        # last_check is already a date object
+                        last_check_date = datetime.combine(last_check, datetime.min.time())
+                        
+                    today = datetime.now()
+                    months_diff = (today.year - last_check_date.year) * 12 + today.month - last_check_date.month
+                    inspection_record['needs_new_inspection'] = months_diff >= 6
+                    
+                    # Convert date to string for JSON serialization
+                    if not isinstance(last_check, str):
+                        inspection_record['last_check'] = last_check.strftime("%Y-%m-%d")
+                    
+                except (ValueError, TypeError):
+                    inspection_record['needs_new_inspection'] = True
+            else:
+                inspection_record['needs_new_inspection'] = True
+                
+            return jsonify(inspection_record)
+        
+        return jsonify({'error': f'Failed to retrieve or create shelf inspection record for {shelf_id}'}), 500
+    
+    except pyodbc.Error as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        if 'conn' in locals():
+            conn.close()
+
+@app.route('/api/shelf-inspection/<shelf_id>', methods=['POST'])
+def update_shelf_inspection(shelf_id):
+    """
+    Update the inspection status for a specific shelf.
+    The shelf_id parameter should be the combined scaffale-colonna identifier (e.g., 'A-01').
+    Accepts status and creates a new inspection if 6 months have passed since the last one.
+    """
+    data = request.get_json()
+    status = data.get('status')
+    
+    # Validate status
+    valid_statuses = ['buono', 'warning', 'danger', 'to_check']
+    if not status or status not in valid_statuses:
+        return jsonify({'error': f'Invalid status. Must be one of: {", ".join(valid_statuses)}'}), 400
+    
+    try:
+        conn = connect_to_db()
+        cursor = conn.cursor()
+        
+        # Get the current date and time
+        current_date = datetime.now().strftime("%Y-%m-%d")
+        
+        # Check if there's an existing inspection and when it was performed
+        check_query = "SELECT scaffale, last_check, status FROM wms_ispezione WHERE scaffale = ?"
+        cursor.execute(check_query, (shelf_id,))
+        
+        existing_inspection = cursor.fetchone()
+        create_new_inspection = True
+        
+        if existing_inspection:
+            # If there's an existing inspection, check if it's less than 6 months old
+            if existing_inspection[1]:  # last_check is not None
+                try:
+                    # Handle both string and datetime.date objects
+                    last_check = existing_inspection[1]
+                    if isinstance(last_check, str):
+                        last_check_date = datetime.strptime(last_check, "%Y-%m-%d")
+                    else:
+                        # last_check is already a date object
+                        last_check_date = datetime.combine(last_check, datetime.min.time())
+                        
+                    today = datetime.now()
+                    months_diff = (today.year - last_check_date.year) * 12 + today.month - last_check_date.month
+                    
+                    # If less than 6 months have passed, update the existing inspection
+                    if months_diff < 6:
+                        create_new_inspection = False
+                except (ValueError, TypeError):
+                    # If date parsing fails, default to creating a new inspection
+                    pass
+        
+        if create_new_inspection:
+            # Either no existing inspection or it's older than 6 months - create a new one
+            # First, if there's an existing one, mark it as archived
+            if existing_inspection:
+                archive_query = """
+                UPDATE wms_ispezione 
+                SET archived = 1
+                WHERE scaffale = ?
+                """
+                try:
+                    cursor.execute(archive_query, (shelf_id,))
+                except pyodbc.ProgrammingError:
+                    # Add the archived column if it doesn't exist
+                    try:
+                        cursor.execute("ALTER TABLE wms_ispezione ADD archived SMALLINT DEFAULT 0")
+                        cursor.execute(archive_query, (shelf_id,))
+                    except:
+                        # If altering table fails, continue without archiving
+                        pass
+            
+            # Insert a new inspection record
+            insert_query = """
+            INSERT INTO wms_ispezione (scaffale, last_check, status, archived)
+            VALUES (?, ?, ?, 0)
+            """
+            cursor.execute(insert_query, (shelf_id, current_date, status))
+            
+            # Also clear any existing question responses for this shelf in wms_ispezione_domande
+            # New responses will be added later via the questions API endpoint
+            try:
+                cursor.execute("DELETE FROM wms_ispezione_domande WHERE scaffale = ?", (shelf_id,))
+            except:
+                # If table doesn't exist yet, continue
+                pass
+        else:
+            # Update the existing inspection record if less than 6 months old
+            update_query = """
+            UPDATE wms_ispezione 
+            SET status = ?, last_check = ?
+            WHERE scaffale = ? AND (archived IS NULL OR archived = 0)
+            """
+            cursor.execute(update_query, (status, current_date, shelf_id))
+        
+        conn.commit()
+        
+        # Log the operation
+        operation_details = f"Aggiornato stato ispezione per scaffale {shelf_id} a '{status}'"
+        log_operation(
+            operation_type="UPDATE",
+            operation_details=operation_details,
+            user="current_user",  # Replace with actual user info if available
+            ip_address=request.remote_addr,
+            can_undo=False
+        )
+        
+        return jsonify({
+            'scaffale': shelf_id,
+            'status': status,
+            'last_check': current_date,
+            'new_inspection': create_new_inspection
+        })
+    
+    except pyodbc.Error as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        if 'conn' in locals():
+            conn.close()
+            
+# Add a table creation script for reference
+"""
+-- SQL script to create or modify the wms_ispezione table to include inspection_form
+-- Execute this script manually if the table does not already have the inspection_form column
+
+CREATE TABLE IF NOT EXISTS wms_ispezione (
+    id SERIAL NOT NULL PRIMARY KEY,
+    scaffale VARCHAR(20) NOT NULL,
+    last_check DATE,
+    status VARCHAR(20) NOT NULL,
+    inspection_form TEXT
+);
+
+-- If table exists but needs the new column, execute this instead:
+-- ALTER TABLE wms_ispezione ADD COLUMN inspection_form TEXT;
+"""
+
+# Add the following API endpoints after the existing shelf inspection endpoints
+
+@app.route('/api/shelf-inspection-questions/<shelf_id>', methods=['GET'])
+def get_shelf_inspection_questions(shelf_id):
+    """
+    Get all inspection question responses for a specific shelf.
+    The shelf_id parameter should be the combined scaffale-colonna identifier (e.g., 'A-01').
+    Returns an array of question responses for this shelf's current inspection.
+    """
+    try:
+        conn = connect_to_db()
+        cursor = conn.cursor()
+        
+        # Get all question responses for this shelf regardless of the date
+        # We'll filter by scaffale only to avoid date formatting issues
+        query = """
+        SELECT scaffale, last_check, domanda, risposta, note 
+        FROM wms_ispezione_domande 
+        WHERE scaffale = ?
+        """
+        cursor.execute(query, (shelf_id,))
+        
+        # Convert rows to a list of dictionaries
+        columns = [column[0] for column in cursor.description]
+        question_responses = []
+        
+        for row in cursor.fetchall():
+            response = dict(zip(columns, row))
+            
+            # Convert date objects to strings for JSON serialization
+            if 'last_check' in response and response['last_check'] and not isinstance(response['last_check'], str):
+                try:
+                    response['last_check'] = response['last_check'].strftime("%Y-%m-%d")
+                except:
+                    response['last_check'] = str(response['last_check'])
+                
+            question_responses.append(response)
+        
+        return jsonify(question_responses)
+    
+    except pyodbc.Error as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        if 'conn' in locals():
+            conn.close()
+
+@app.route('/api/shelf-inspection-questions/<shelf_id>', methods=['POST'])
+def save_shelf_inspection_questions(shelf_id):
+    """
+    Save inspection question responses for a specific shelf.
+    The shelf_id parameter should be the combined scaffale-colonna identifier (e.g., 'A-01').
+    Accepts an array of question responses with domanda, risposta, and optional note fields.
+    Only allows saving responses for current (non-archived) inspections.
+    """
+    data = request.get_json()
+    
+    if not isinstance(data, list):
+        return jsonify({'error': 'Expected an array of question responses'}), 400
+    
+    try:
+        conn = connect_to_db()
+        cursor = conn.cursor()
+        
+        # First, check if there's a current (non-archived) inspection
+        try:
+            cursor.execute("SELECT scaffale, last_check FROM wms_ispezione WHERE scaffale = ? AND (archived IS NULL OR archived = 0)", 
+                          (shelf_id,))
+        except pyodbc.ProgrammingError:
+            cursor.execute("SELECT scaffale, last_check FROM wms_ispezione WHERE scaffale = ?", 
+                          (shelf_id,))
+        
+        current_inspection = cursor.fetchone()
+        
+        if not current_inspection:
+            return jsonify({'error': 'No active inspection found for this shelf'}), 404
+        
+        # First delete any existing responses for this shelf
+        delete_query = "DELETE FROM wms_ispezione_domande WHERE scaffale = ?"
+        cursor.execute(delete_query, (shelf_id,))
+        
+        # Get today's date using a format that works with Informix
+        today = datetime.now().strftime("%Y-%m-%d")
+        
+        # Insert new responses
+        insert_query = """
+        INSERT INTO wms_ispezione_domande (scaffale, last_check, domanda, risposta, note)
+        VALUES (?, ?, ?, ?, ?)
+        """
+        
+        inserted_count = 0
+        for question in data:
+            domanda = question.get('domanda')
+            risposta = question.get('risposta')
+            note = question.get('note', '')
+            
+            if not domanda or not risposta:
+                continue  # Skip if missing required fields
+            
+            cursor.execute(insert_query, (shelf_id, today, domanda, risposta, note))
+            inserted_count += 1
+        
+        conn.commit()
+        
+        # Log the operation
+        operation_details = f"Aggiornate risposte ispezione per scaffale {shelf_id}"
+        log_operation(
+            operation_type="UPDATE",
+            operation_details=operation_details,
+            user="current_user",  # Replace with actual user info if available
+            ip_address=request.remote_addr,
+            can_undo=False
+        )
+        
+        # Update the inspection's last_check date to today
+        try:
+            update_query = """
+            UPDATE wms_ispezione 
+            SET last_check = ?
+            WHERE scaffale = ? AND (archived IS NULL OR archived = 0)
+            """
+            cursor.execute(update_query, (today, shelf_id))
+            conn.commit()
+        except Exception as e:
+            # If we can't update the date, continue anyway - the questions are saved
+            print(f"Warning: Could not update inspection date: {e}")
+        
+        return jsonify({
+            'message': f'Successfully saved {inserted_count} question responses for shelf {shelf_id}',
+            'last_check': today
+        })
+    
+    except pyodbc.Error as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        if 'conn' in locals():
+            conn.close()
+
+@app.route('/api/shelf-inspection-history/<shelf_id>', methods=['GET'])
+def get_shelf_inspection_history(shelf_id):
+    """
+    Get inspection history for a specific shelf.
+    The shelf_id parameter should be the combined scaffale-colonna identifier (e.g., 'A-01').
+    Returns a list of all inspection records for this shelf, including archived ones,
+    sorted by date (newest first).
+    """
+    try:
+        conn = connect_to_db()
+        cursor = conn.cursor()
+        
+        # Get all inspection records for this shelf
+        # Don't use ORDER BY on last_check to avoid date formatting issues
+        query = "SELECT scaffale, last_check, status FROM wms_ispezione WHERE scaffale = ?"
+        cursor.execute(query, (shelf_id,))
+        
+        # Convert rows to a list of dictionaries
+        columns = [column[0] for column in cursor.description]
+        inspection_records = []
+        
+        for row in cursor.fetchall():
+            inspection = dict(zip(columns, row))
+            
+            # Handle date conversion safely
+            if 'last_check' in inspection and inspection['last_check']:
+                try:
+                    if not isinstance(inspection['last_check'], str):
+                        inspection['last_check'] = inspection['last_check'].strftime("%Y-%m-%d")
+                except Exception as e:
+                    # Fallback for any date conversion errors
+                    inspection['last_check'] = str(inspection['last_check'])
+            
+            # Get question responses for this inspection without relying on date matching
+            # This is a simplification to avoid date formatting issues
+            questions_query = """
+            SELECT domanda, risposta, note 
+            FROM wms_ispezione_domande 
+            WHERE scaffale = ?
+            """
+            cursor.execute(questions_query, (shelf_id,))
+            
+            # Convert rows to a list of dictionaries
+            question_columns = [column[0] for column in cursor.description]
+            questions = [dict(zip(question_columns, row)) for row in cursor.fetchall()]
+            
+            inspection['questions'] = questions
+            
+            inspection_records.append(inspection)
+        
+        # Sort records manually using the already-formatted date strings
+        # This avoids date handling issues in the database
+        inspection_records.sort(key=lambda x: x.get('last_check', ''), reverse=True)
+        
+        return jsonify(inspection_records)
+    
+    except pyodbc.Error as e:
         return jsonify({'error': str(e)}), 500
     finally:
         if 'cursor' in locals():

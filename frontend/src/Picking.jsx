@@ -11,6 +11,7 @@ import { InfoCircleOutlined } from '@ant-design/icons';
 import { Tabs } from 'antd';
 import { CloseCircleOutlined } from '@ant-design/icons';
 import WarehouseGridSystem from './WarehouseGridSystem';
+import { WMSLayout, WarehouseLayouts } from './layouts';
 const { Text } = Typography;
 
 const { TabPane } = Tabs;
@@ -38,258 +39,8 @@ const Picking = () => {
     const [confirmLoading, setConfirmLoading] = useState(false); // State to manage loading
     const [quantityNeeded, setQuantityNeeded] = useState(0);
 
-    const layouts = {
-        1: [
-            {
-                id: 'A',
-                startRow: 0,
-                startCol: 0,
-                width: 8,
-                height: 4,
-                shelfPattern: 'regular'
-            },
-            {
-                id: 'B',
-                startRow: 7,
-                startCol: 0,
-                width: 7,
-                height: 4,
-                shelfPattern: 'regular'
-            },
-            {
-                id: 'C',
-                startRow: 11,
-                startCol: 0,
-                width: 7,
-                height: 5,
-                shelfPattern: 'regular'
-            },
-            {
-                id: 'D',
-                startRow: 19,
-                startCol: 0,
-                width: 2,
-                height: 6,
-                shelfPattern: 'regular'
-            },
-            {
-                id: 'D',
-                startRow: 19,
-                startCol: 3,
-                width: 5,
-                height: 6,
-                startingValue: 3,
-                shelfPattern: 'regular'
-            },
-            {
-                id: 'X',
-                startRow: 25,
-                startCol: 3,
-                width: 5,
-                height: 2,
-                startingValue: 1,
-                startingFloor: -1,
-                spanRow: 2,
-                spanCol: 5,
-                shelfPattern: 'regular'
-            },
-            {
-                id: 'M',
-                startRow: 18,
-                startCol: 6,
-                width: 2,
-                height: 1,
-                startingValue: 40,
-                startingFloor: 0,
-                spanCol: 2,
-                shelfPattern: 'regular'
-            }, {
-                id: 'TEXT1',
-                type: 'customText',
-                customText: 'SCALE',
-                rotateText: false, // or false for horizontal text
-                startRow: 27,
-                startCol: 4,
-                width: 4,
-                height: 2,
-                spanRow: 3,
-                spanCol: 4
-            },
-            {
-                id: 'TEXT1',
-                type: 'customText',
-                customText: '↓ PRODUZIONE ↓',
-                rotateText: false, // or false for horizontal text
-                startRow: 29,
-                startCol: 1,
-                width: 2,
-                height: 1,
-                spanRow: 1,
-                spanCol: 2
-            },
-
-        ],
-        2: [
-            {
-                id: 'E',
-                startRow: 11,
-                startCol: 0,
-                width: 10,
-                height: 5,
-                shelfPattern: 'regular',
-                spanCol: 2
-            },
-            {
-                id: 'M',
-                startRow: 11,
-                startCol: 10,
-                width: 2,
-                height: 5,
-                shelfPattern: 'regular',
-                spanCol: 2,
-                spanRow: 5,
-                startingValue: 32,
-                startingFloor: -4,
-            },
-            {
-                id: 'E',
-                startRow: 11,
-                startCol: 12,
-                width: 4,
-                height: 5,
-                shelfPattern: 'regular',
-                spanCol: 2,
-                startingValue: 7,
-            },
-            {
-                id: 'R',
-                startRow: 3,
-                startCol: 9,
-                width: 2,
-                height: 2,
-                startingValue: 1,
-                shelfPattern: 'horizontal',
-                startingFloor: 1,
-                rotateText: true,
-                spanRow: 2
-            },
-            {
-                id: 'R',
-                startRow: 3,
-                startCol: 11,
-                width: 3,
-                height: 2,
-                startingValue: 1,
-                shelfPattern: 'horizontal',
-                startingFloor: 0,
-                rotateText: true,
-
-                startingValue: 2,
-                spanRow: 2,
-                borderBottom: false,
-
-                borderLeft: false,
-                showText: false,
-                spanCol: 3
-            },
-            {
-                id: 'R',
-                startRow: 5,
-                startCol: 9,
-                width: 5,
-                height: 4,
-                startingValue: 2,
-                borderTop: false,
-
-                shelfPattern: 'horizontal',
-                startingFloor: 0,
-                rotateText: true,
-                spanRow: 4,
-                spanCol: 5
-            },
-
-            {
-                id: 'M',
-                startRow: 2,
-                startCol: 18,
-                width: 2,
-                height: 11,
-                startingFloor: -10,
-                startingValue: 48,
-                spanRow: 11,
-                spanCol: 2,
-                shelfPattern: 'regular'
-            },
-            {
-                id: 'M',
-                startRow: 3,
-                startCol: 14,
-                width: 2,
-                height: 6,
-                startingFloor: -5,
-                startingValue: 97,
-                spanRow: 6,
-                spanCol: 2,
-                shelfPattern: 'regular',
-            },
-            {
-                id: 'TEXT2',
-                type: 'customText',
-                customText: '↓ UFFICI ↓',
-                rotateText: false,
-                startRow: 15,
-                startCol: 16,
-                width: 2,
-                spanCol: 2,
-                height: 1,
-            },
-            {
-                id: 'TEXT3',
-                type: 'customText',
-                customText: 'POS. DOMENICO',
-                rotateText: false,
-                startRow: 0,
-                startCol: 0,
-                width: 2,
-                spanCol: 2,
-                height: 1,
-            },
-            {
-                id: 'TEXT8',
-                type: 'customText',
-                customText: '↑ MAGAZZINO ↑',
-                rotateText: false,
-                startRow: 0,
-                startCol: 2,
-                width: 2,
-                spanCol: 2,
-                height: 1,
-            },
-            {
-                id: 'TEXT9',
-                type: 'customText',
-                customText: 'PRODUZIONE',
-                rotateText: false,
-                startRow: 2,
-                startCol: 0,
-                width: 3,
-                spanCol: 3,
-                height: 8,
-                spanRow: 8,
-            },
-            {
-                id: 'TEXT4',
-                type: 'customText',
-                customText: '↑ MAGAZZINO ↑',
-                rotateText: false,
-                startRow: 0,
-                startCol: 16,
-                width: 2,
-                spanCol: 2,
-                height: 1,
-            }
-        ]
-    };
+    // Use the imported layouts from the shared file
+    const layouts = WarehouseLayouts;
 
     const getShelfStatus = (shelfId) => {
         if (shelfId === selectedShelf) return 'selected';
@@ -3131,6 +2882,12 @@ const handlePageChange = (page) => {
 
             // Create a copy of the current table data
             let updatedTableData = [...tableData];
+            
+            // We'll collect the updated rows that need to be in our selectedRows
+            let updatedSelectedRows = [];
+            
+            // Track IDs of rows that will be removed from the table
+            const removedRowIds = new Set();
 
             // Group selected rows by article code for merging
             const articleGroups = {};
@@ -3164,8 +2921,12 @@ const handlePageChange = (page) => {
                     // Update existing row at target location
                     existingTargetRow.available_quantity =
                         parseFloat(existingTargetRow.available_quantity || 0) + totalQuantity;
+                        
+                    // Add this updated target row to our updated selected rows
+                    updatedSelectedRows.push({...existingTargetRow});
 
                     // Remove all selected rows for this article
+                    rowsToProcess.forEach(row => removedRowIds.add(row.id));
                     updatedTableData = updatedTableData.filter(row =>
                         !rowsToProcess.some(selected => selected.id === row.id)
                     );
@@ -3179,6 +2940,8 @@ const handlePageChange = (page) => {
                                 ...updatedTableData[rowIndex],
                                 location: { area, scaffale, colonna, piano }
                             };
+                            // Add this updated row to our updated selected rows
+                            updatedSelectedRows.push({...updatedTableData[rowIndex]});
                         }
                     } else {
                         // Multiple rows to merge
@@ -3190,7 +2953,13 @@ const handlePageChange = (page) => {
                                 location: { area, scaffale, colonna, piano },
                                 available_quantity: totalQuantity
                             };
+                            
+                            // Add this updated row to our updated selected rows
+                            updatedSelectedRows.push({...updatedTableData[firstRowIndex]});
 
+                            // Track which rows will be removed (except the first one)
+                            rowsToProcess.slice(1).forEach(row => removedRowIds.add(row.id));
+                            
                             // Remove the other rows for this article
                             updatedTableData = updatedTableData.filter(row =>
                                 row.id === rowsToProcess[0].id ||
@@ -3201,7 +2970,12 @@ const handlePageChange = (page) => {
                 }
             }
 
+            // Update the tableData state
             setTableData(updatedTableData);
+            
+            // Update the selectedRows state with our newly updated rows
+            setSelectedRows(updatedSelectedRows);
+            
             setMultiLocationModalVisible(false);
 
             notification.success({
@@ -4589,7 +4363,7 @@ const handlePageChange = (page) => {
                     <div>
                         <Text>Quantità disponibile in questa posizione: </Text>
                         <Text strong>{maxAvailableQuantity}</Text>
-                    </div>
+                            </div>
                     <div>
                         <Text>Quantità nella riga selezionata: </Text>
                         <Text strong>{tableData.find(row => row.id === selectedRowId)?.available_quantity || 0}</Text>
@@ -4667,7 +4441,7 @@ const handlePageChange = (page) => {
                 <Space direction="vertical" style={{ width: '100%' }}>
                     <div>
                         <Text strong>Quantità totale richiesta:</Text> {quantityNeeded}
-                    </div>
+                            </div>
                     <div>
                         <Text strong>Quantità disponibile in questa posizione:</Text>
                         {calculateAvailableQuantity(selectedLocation, articleFilter)}
@@ -4827,22 +4601,22 @@ const handlePageChange = (page) => {
                                     style={{ flexGrow: 7 }} // Represents 70% proportionally
                                     onKeyPress={handleKeyPressArticolo}
                                 />
-                                <InputNumber
-                                    min={1}
-                                    value={articoloQuantity}
+                                        <InputNumber
+                                            min={1}
+                                            value={articoloQuantity}
                                     onChange={(value) => setArticoloQuantity(value)}
                                     style={{ flexGrow: 1 }} // Represents 10% proportionally
                                     onKeyPress={handleKeyPressArticolo}
-                                />
-                                <Button
-                                    type="primary"
+                                        />
+                                    <Button
+                                        type="primary"
                                     loading={articoloLoading}
-                                    onClick={handleArticoloPicking}
+                                        onClick={handleArticoloPicking}
                                     style={{ flexGrow: 2 }} // Represents 20% proportionally
-                                >
+                                    >
                                     Cerca Articolo
-                                </Button>
-                            </div>
+                                    </Button>
+                                </div>
 
                         </TabPane>
                         <TabPane tab="LOCAZIONE" key="3">
@@ -4861,8 +4635,8 @@ const handlePageChange = (page) => {
                                                 textAlign: 'center',
                                                 marginRight: '8px'
                                             }}
-                                        />
-                                    </div>
+                                />
+                            </div>
                                 ))}
 
                                 <Button
@@ -4891,68 +4665,28 @@ const handlePageChange = (page) => {
                             <Spin indicator={<LoadingOutlined style={{ fontSize: 48 }} spin />} />
                         </div>
                     ) : (
-                        <Table
+                            <Table
                             columns={multiSelectMode ? getColumnConfig() : columns}
                             dataSource={groupDataByParent(tableData.filter(row => row.available_quantity > 0))}
-                            pagination={false}
+                                pagination={false}
                             scroll={{ y: 'calc(100vh - 250px)' }}
-                            rowKey="id"
-                            rowClassName={rowClassName}
+                                                rowKey="id"
+                                                rowClassName={rowClassName}
                             style={tableStyle}
                             footer={() => tableData.length > 0 ? (
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                    <div>
-                                        {activeTab !== '3' && (
-                                            <>
-                                            {!multiSelectMode ? (
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                        <div>
+                                            {activeTab !== '3' && (
                                                 <>
-                                                <LocationChangeButton />
-                                                <Button
-                                                    type="primary"
-                                                    onClick={toggleMultiSelectMode}
-                                                    style={{ marginLeft: 8 }}
-                                                >
-                                                    Prelievo Multiplo
-                                                </Button>
-                                                <Button
-                                                    type="primary"
-                                                    onClick={handlePrelevaTutto}
-                                                    style={{ marginLeft: 8 }}
-                                                    loading={confirmLoading}
-                                                >
-                                                    Preleva Tutto
-                                                </Button>
-                                                <Button
-                                                    type="primary"
-                                                    danger
-                                                    onClick={handleUndoAll}
-                                                    style={{ marginLeft: 8 }}
-                                                    loading={confirmLoading}
-                                                    disabled={pickOperations.filter(op => canUndoOperation(op)).length === 0}
-                                                >
-                                                    Annulla Tutto
-                                                </Button>
-                                                </>
-                                            ) : (
-                                                <Space>
-                                                    <Button onClick={toggleMultiSelectMode}>
-                                                        Annulla Selezione
-                                                    </Button>
+                                                {!multiSelectMode ? (
+                                                    <>
+                                                    <LocationChangeButton />
                                                     <Button
                                                         type="primary"
-                                                        onClick={openMultiLocationModal}
-                                                        disabled={selectedRows.length === 0}
-                                                        loading={loadingLocations}
+                                                        onClick={toggleMultiSelectMode}
+                                                        style={{ marginLeft: 8 }}
                                                     >
-                                                        Cambia locazione ({selectedRows.length})
-                                                    </Button>
-                                                    <Button
-                                                        type="primary"
-                                                        onClick={handlePickAll}
-                                                        disabled={selectedRows.length === 0}
-                                                        loading={confirmLoading}
-                                                    >
-                                                        Preleva Selezionati ({selectedRows.length})
+                                                        Prelievo Multiplo
                                                     </Button>
                                                     <Button
                                                         type="primary"
@@ -4962,15 +4696,66 @@ const handlePageChange = (page) => {
                                                     >
                                                         Preleva Tutto
                                                     </Button>
-                                                </Space>
+                                                    <Button
+                                                        type="primary"
+                                                        danger
+                                                        onClick={handleUndoAll}
+                                                        style={{ marginLeft: 8 }}
+                                                        loading={confirmLoading}
+                                                        disabled={pickOperations.filter(op => canUndoOperation(op)).length === 0}
+                                                    >
+                                                        Annulla Tutto
+                                                    </Button>
+                                                    </>
+                                                ) : (
+                                                    <Space>
+                                                        <Button onClick={toggleMultiSelectMode}>
+                                                            Annulla Selezione
+                                                        </Button>
+                                                        <Button
+                                                            type="primary"
+                                                            onClick={openMultiLocationModal}
+                                                            disabled={selectedRows.length === 0}
+                                                            loading={loadingLocations}
+                                                        >
+                                                            Cambia locazione ({selectedRows.length})
+                                                        </Button>
+                                                        <Button
+                                                            type="primary"
+                                                            onClick={handlePickAll}
+                                                            disabled={selectedRows.length === 0}
+                                                            loading={confirmLoading}
+                                                        >
+                                                            Preleva Selezionati ({selectedRows.length})
+                                                        </Button>
+                                                        <Button
+                                                            type="primary"
+                                                            onClick={handlePrelevaTutto}
+                                                            style={{ marginLeft: 8 }}
+                                                            loading={confirmLoading}
+                                                        >
+                                                            Preleva Tutto
+                                                        </Button>
+                                                         <Button
+                                                        type="primary"
+                                                        danger
+                                                        onClick={handleUndoAll}
+                                                        style={{ marginLeft: 8 }}
+                                                        loading={confirmLoading}
+                                                        disabled={pickOperations.filter(op => canUndoOperation(op)).length === 0}
+                                                    >
+                                                        Annulla Tutto
+                                                    </Button>
+                                                    
+                                                    </Space>
+                                                )}
+                                                </>
                                             )}
-                                            </>
-                                        )}
-                                    </div>
-                                    <div>
-                                        <Button
-                                            icon={<SettingOutlined />}
-                                            onClick={() => setSettingsModalVisible(true)}
+                                        </div>
+                                        <div>
+                                            <Button
+                                                icon={<SettingOutlined />}
+                                                onClick={() => setSettingsModalVisible(true)}
                                             type="default"
                                         >
                                         </Button>
@@ -5102,9 +4887,9 @@ const handlePageChange = (page) => {
                                         showSizeChanger={false}
                                         simple
                                     />
-                                </div>
-                            </div>
-                        )}
+                                        </div>
+                                    </div>
+                                )}
                     </div>
 
 

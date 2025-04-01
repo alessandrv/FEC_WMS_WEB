@@ -8,7 +8,9 @@ const WarehouseGridSystem = ({
   tooltipContent, 
   GRID_ROWS, 
   GRID_COLS,
-  highlightedShelves 
+  highlightedShelves,
+  showFloorNumber = true,
+  cellRenderer
 }) => {
     const createEmptyGrid = () => {
       return Array(GRID_ROWS).fill(null).map(() => 
@@ -113,6 +115,7 @@ const WarehouseGridSystem = ({
                   newGrid[gridRow][gridCol] = {
                     type: 'shelf',
                     id: shelfId,
+                    columnId: `${id}-${String(shelfNumber).padStart(2, '0')}`,
                     section: id,
                     isSpanStart: true,
                     spanRow,
@@ -132,6 +135,7 @@ const WarehouseGridSystem = ({
                   newGrid[gridRow][gridCol] = {
                     type: 'shelf',
                     id: shelfId,
+                    columnId: `${id}-${String(shelfNumber).padStart(2, '0')}`,
                     section: id,
                     isSpanStart: false,
                     hidden: true
@@ -156,8 +160,6 @@ const WarehouseGridSystem = ({
       setGroupBoundaries(boundaries);
     }, [warehouseLayout]);
 
-    // Rest of the component remains the same...
-    
     const getCellClassName = useCallback((cell) => {
       if (!cell) return 'empty-cell';
       if (cell.type === 'blocked') return 'blocked-cell';
@@ -165,12 +167,10 @@ const WarehouseGridSystem = ({
       if (cell.type === 'shelf') {
         if (cell.hidden) return 'hidden-cell';
         
-        const classNames = ['shelf-cell'];
+        const classNames = ['shelf-cell', 'grid-item'];
         
         const status = getShelfStatus(cell.id);
-        if (status === 'available') classNames.push('available');
-        if (status === 'full') classNames.push('full');
-        if (status === 'selected') classNames.push('selected');
+        if (status) classNames.push(status);
         
         if (highlightedShelves?.has(cell.id)) {
           classNames.push('highlighted');
@@ -202,6 +202,13 @@ const WarehouseGridSystem = ({
     };
 
     const renderCellContent = useCallback((cell) => {
+      if (cellRenderer && cell) {
+        const customRenderedCell = cellRenderer(cell);
+        if (customRenderedCell !== null) {
+          return customRenderedCell;
+        }
+      }
+
       if (cell?.type === 'customText') {
         return (
           <div
@@ -238,7 +245,7 @@ const WarehouseGridSystem = ({
               writingMode: cell.rotateText ? 'vertical-rl' : 'none'
             }}
           >
-            {cell.showText && cell.id}
+            {cell.showText && (showFloorNumber ? cell.id : cell.columnId)}
           </div>
         );
       }
@@ -252,7 +259,7 @@ const WarehouseGridSystem = ({
           }}
         />
       );
-    }, [getCellClassName, onCellClick, tooltipContent]);
+    }, [getCellClassName, onCellClick, tooltipContent, cellRenderer, showFloorNumber]);
   
     return (
       <div style={{ width: '100%', height: '80vh'}}>
@@ -266,6 +273,7 @@ const WarehouseGridSystem = ({
             height: '100%',
             background: '#f0f0f0'
           }}
+          className="warehouse-grid"
         >
           {gridData.map((row, rowIndex) => (
             row.map((cell, colIndex) => (

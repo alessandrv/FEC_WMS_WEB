@@ -184,3 +184,206 @@
   display: flex;
   justify-content: center;
 }
+
+/* Status colors for shelves */
+.grid-item.good {
+  background-color: #4caf50; /* Green */
+  color: white;
+}
+
+.grid-item.warning {
+  background-color: #ff9800; /* Orange */
+  color: white;
+}
+
+.grid-item.danger {
+  background-color: #f44336; /* Red */
+  color: white;
+}
+
+.grid-item.to_check {
+  background-color: #ffffff; /* White */
+  border: 1px solid #ccc;
+}
+
+.grid-item.full {
+  background-color: #ffcdd2; /* Light red */
+}
+
+.grid-item.available {
+  background-color: #f0f0f0; /* Light gray */
+}
+
+/* Fullscreen modal styles */
+.fullscreen-modal {
+  padding: 0 !important;
+  width: 100vw !important;
+}
+
+.fullscreen-modal .ant-modal-content {
+  height: 100vh;
+  border-radius: 0;
+  width: 100%;
+}
+
+.fullscreen-modal .ant-modal-header {
+  border-radius: 0;
+  padding: 16px 24px;
+}
+
+.fullscreen-modal .ant-modal-body {
+  padding: 16px 24px;
+  pointer-events: auto !important; /* Force pointer events to be active */
+  position: relative;
+  z-index: 1;
+  width: 100%;
+}
+
+.fullscreen-modal .ant-modal-footer {
+  border-top: 1px solid #f0f0f0;
+  padding: 10px 24px;
+}
+
+/* Improve form click areas */
+.ant-radio-button-wrapper {
+  position: relative;
+  z-index: 1;
+}
+
+.ant-radio-button-wrapper::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: -1;
+}
+
+/* Ensure radio buttons are at the front layer */
+.ant-radio-group {
+  position: relative;
+  z-index: 2;
+}
+
+/* Make form items more clickable */
+.ant-form-item {
+  position: relative;
+  z-index: 1;
+}
+
+/* Ensure question rows have proper stacking context */
+.question-row {
+  position: relative;
+  z-index: 1;
+}
+
+/* Make cards fully clickable */
+.question-card {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.09);
+  transition: all 0.3s ease;
+  position: relative;
+  z-index: 1;
+  pointer-events: auto !important;
+}
+
+.question-card:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  transform: translateY(-2px);
+}
+
+.question-card .ant-card-body {
+  padding: 16px;
+  position: relative;
+  z-index: 1;
+}
+
+/* Ensure the inputs and radio buttons get clicks */
+.ant-input, 
+.ant-radio-button-wrapper {
+  pointer-events: auto !important;
+  position: relative;
+  z-index: 10;
+}
+
+/* Ensure cards get their own stacking context */
+.inspection-form-container .ant-card {
+  isolation: isolate;
+}
+
+/* Fix any potential issues with hidden elements blocking clicks */
+.question-container {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+}
+
+.question-container:before {
+  display: none !important;
+}
+
+/* Compact card styles for no-scroll layout */
+.question-card.compact {
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.07);
+  margin-bottom: 4px;
+  width: 100%;
+  border: 1px solid #f0f0f0;
+}
+
+.question-card.compact .ant-card-body {
+  padding: 8px;
+  width: 100%;
+}
+
+/* Fixed height for the entire card grid */
+.inspection-form-container {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+/* Allow text to truncate with ellipsis in list view */
+.question-card.compact .ant-typography {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  max-height: 32px;
+  line-height: 1.3;
+}
+
+/* Smaller form elements */
+.question-card.compact .ant-form-item {
+  margin-bottom: 4px;
+  width: 100%;
+}
+
+/* Fix for Ant Design radio buttons in compact mode */
+.question-card.compact .ant-radio-button-wrapper {
+  padding: 0 4px;
+}
+
+/* Ensure card rows are aligned properly */
+.question-card.compact .ant-row {
+  flex-wrap: nowrap;
+  width: 100%;
+}
+
+/* Make card content vertically centered */
+.question-card.compact .ant-card-body {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+/* Ensure form rows span full width */
+.inspection-form-container .ant-form {
+  width: 100%;
+}
+
+.inspection-form-container .ant-form-item-control-input,
+.inspection-form-container .ant-form-item-control-input-content {
+  width: 100%;
+}

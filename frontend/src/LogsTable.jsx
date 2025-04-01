@@ -97,8 +97,8 @@ const LogsTable = () => {
       dataIndex: 'timestamp',
       key: 'timestamp',
       render: (date) => (
-        <Tooltip title={new Date(date).toLocaleString('it-IT', { timeZone: 'UTC' })}>
-          {new Date(date).toLocaleString('en-GB', { timeZone: 'UTC' })}
+        <Tooltip title={new Date(date).toLocaleString('it-IT', { timeZone: 'Europe/Rome' })}>
+          {new Date(date).toLocaleString('it-IT', { timeZone: 'Europe/Rome' })}
         </Tooltip>
       ),
       sorter: (a, b) => new Date(a.timestamp) - new Date(b.timestamp),

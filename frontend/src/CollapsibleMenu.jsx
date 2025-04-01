@@ -15,6 +15,7 @@ import {
   DeliveredProcedureOutlined,
   InsertRowAboveOutlined,
   DatabaseFilled,
+  AppstoreOutlined
 } from '@ant-design/icons';
 
 const { Title } = Typography;
@@ -203,6 +204,14 @@ const handleHelpRequest = async () => {
               to="/logs"
               icon={<DatabaseFilled />}
               title="Log sistema"
+              onClick={closeDrawer}
+            />
+          </Col>
+          <Col span={8}>
+            <MenuCard
+              to="/ispezione-scaffali"
+              icon={<AppstoreOutlined />}
+              title="Ispezione Scaffali"
               onClick={closeDrawer}
             />
           </Col>

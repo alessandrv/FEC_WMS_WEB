@@ -21,6 +21,7 @@ import Accettazione from './Accettazione';
 import IncomingItemsTable from './IncomingItemsTable';
 import FiveInputPage from './FiveInputPage';
 import Incongurenze from './Incongruenze';
+import IspezioneScaffali from './IspezioneScaffali';
 
 const { Content } = Layout;
 
@@ -80,6 +81,7 @@ root.render(
               <Route path="/test" element={<Picking2 />} />
               <Route path="/logs" element={<LogsTable />} />
               <Route path="/incongurenze" element={<Incongurenze />} />
+              <Route path="/ispezione-scaffali" element={<IspezioneScaffali />} />
             </Routes>
           </Content>
         </Layout>
