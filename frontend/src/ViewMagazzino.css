@@ -387,3 +387,32 @@
 .inspection-form-container .ant-form-item-control-input-content {
   width: 100%;
 }
+
+/* Existing CSS for column status */
+.column.good { background-color: #4caf50; }
+.column.warning { background-color: #ff9800; }
+.column.danger { background-color: #f44336; }
+.column.to_check { background-color: white; border: 1px solid #ccc; }
+.column.needs_reinspection { 
+  background-color: #8a2be2; /* Purple color for reinspection */
+  border: 2px dashed #ffffff; /* White dashed border to make it stand out */
+  animation: pulse 2s infinite; /* Add pulsing animation */
+}
+
+/* Add a pulsing animation for the reinspection status */
+@keyframes pulse {
+  0% { opacity: 0.7; }
+  50% { opacity: 1; }
+  100% { opacity: 0.7; }
+}
+
+/* Existing CSS for shelf */
+.shelf.good .shelf-label { background-color: #4caf50; }
+.shelf.warning .shelf-label { background-color: #ff9800; }
+.shelf.danger .shelf-label { background-color: #f44336; }
+.shelf.to_check .shelf-label { background-color: white; border: 1px solid #ccc; }
+.shelf.needs_reinspection .shelf-label { 
+  background-color: #8a2be2; 
+  border: 2px dashed #ffffff;
+  animation: pulse 2s infinite;
+}

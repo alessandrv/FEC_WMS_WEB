@@ -310,6 +310,22 @@ const WarehouseGridSystem = ({
           .shelf-cell.highlighted {
             background: #ffeb3b;
           }
+          .shelf-cell.good {
+            background: #4caf50;
+            color: white;
+          }
+          .shelf-cell.warning {
+            background: #ff9800;
+            color: white;
+          }
+          .shelf-cell.danger {
+            background: #f44336;
+            color: white;
+          }
+          .shelf-cell.to_check {
+            background: #ffffff;
+            border: 1px solid #ccc;
+          }
           .shelf-cell.border-top {
             border-top: 1px solid #000;
           }

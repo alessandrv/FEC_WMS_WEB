@@ -3,24 +3,22 @@
 
 -- Create the primary inspection status table if it doesn't exist
 -- This table stores the overall inspection status for each shelf
-CREATE TABLE IF NOT EXISTS wms_ispezione (
-    scaffale VARCHAR(20) NOT NULL,
-    last_check DATE,
-    status VARCHAR(20) NOT NULL,
-    archived SMALLINT DEFAULT 0,
-    PRIMARY KEY (scaffale, last_check)
+CREATE TABLE wms_inspections (
+    id SERIAL PRIMARY KEY,
+    shelf_id VARCHAR(20),
+    inspection_date DATE,
+    status VARCHAR(20), 
+    is_current INT DEFAULT 1,
+ 
+    UNIQUE(shelf_id, inspection_date)
 );
-
--- Create the inspection questions responses table if it doesn't exist
--- This table stores the individual question responses for each inspection
-CREATE TABLE IF NOT EXISTS wms_ispezione_domande (
-    scaffale VARCHAR(6) NOT NULL,
-    last_check DATE NOT NULL,
-    domanda VARCHAR(255) NOT NULL,
-    risposta VARCHAR(4) NOT NULL,
-    note VARCHAR(255) DEFAULT NULL,
-    -- The primary key is the combination of shelf ID, inspection date, and question
-    PRIMARY KEY (scaffale, last_check, domanda)
+CREATE TABLE wms_inspection_responses (
+    id SERIAL PRIMARY KEY,
+    inspection_id INTEGER,
+    question VARCHAR(255),
+    answer VARCHAR(10), -- 'SI', 'NO', 'NA'
+    notes VARCHAR(255),
+    FOREIGN KEY (inspection_id) REFERENCES wms_inspections(id) ON DELETE CASCADE
 );
 
 -- Add indexes for better performance

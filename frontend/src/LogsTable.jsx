@@ -16,20 +16,16 @@ const LogsTable = () => {
 
   useEffect(() => {
     fetchLogs(currentPage);
-  }, [currentPage]);
+  }, [currentPage, pageSize]);
 
   const fetchLogs = async (page) => {
     setLoading(true);
     try {
       const params = { 
         page, 
-        per_page: pageSize
+        per_page: pageSize,
+        search_text: searchText.trim()
       };
-      
-      // Only add search text if it's not empty
-      if (searchText) {
-        params.operation_details = searchText;
-      }
       
       const response = await axios.get(`${process.env.REACT_APP_API_URL}/api/operation-logs`, { params });
       setLogs(response.data.logs || []);
@@ -42,6 +38,7 @@ const LogsTable = () => {
       }
     } catch (error) {
       console.error('Error fetching logs:', error);
+      message.error('Errore durante il caricamento dei log');
     } finally {
       setLoading(false);
     }
@@ -54,6 +51,14 @@ const LogsTable = () => {
   const handleSearch = () => {
     setCurrentPage(1);
     fetchLogs(1);
+  };
+
+  const handleSearchChange = (e) => {
+    setSearchText(e.target.value);
+    if (!e.target.value) {
+      setCurrentPage(1);
+      fetchLogs(1);
+    }
   };
 
   const handleRevertOperation = (logId) => {
@@ -214,7 +219,7 @@ const LogsTable = () => {
             enterButton="Cerca"
             size="large"
             value={searchText}
-            onChange={(e) => setSearchText(e.target.value)}
+            onChange={handleSearchChange}
             onSearch={handleSearch}
             style={{ width: 300 }}
           />

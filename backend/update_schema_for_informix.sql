@@ -8,18 +8,18 @@ CREATE TABLE IF NOT EXISTS wms_ispezione (
     last_check DATE,
     status VARCHAR(20) NOT NULL,
     archived SMALLINT DEFAULT 0,
-    PRIMARY KEY (scaffale)
+    PRIMARY KEY (scaffale, last_check)
 );
 
 -- Create the inspection questions table if it doesn't exist
 -- This table stores question responses for each inspection
 CREATE TABLE IF NOT EXISTS wms_ispezione_domande (
-    scaffale VARCHAR(6) NOT NULL,
+    scaffale VARCHAR(20) NOT NULL,
     last_check DATE,
     domanda VARCHAR(255) NOT NULL,
-    risposta VARCHAR(4) NOT NULL,
+    risposta VARCHAR(10) NOT NULL,
     note VARCHAR(255) DEFAULT NULL,
-    PRIMARY KEY (scaffale, domanda)
+    PRIMARY KEY (scaffale, last_check, domanda)
 );
 
 -- Add indexes for better performance
