@@ -63,6 +63,9 @@ const IspezioneScaffali = () => {
   const [selectedCycle, setSelectedCycle] = useState('current');
   const [loadingCycles, setLoadingCycles] = useState(false);
   const [creatingCycle, setCreatingCycle] = useState(false);
+  const [showStatoModal, setShowStatoModal] = useState(false);
+  const [pendingSaveStatus, setPendingSaveStatus] = useState(null);
+  const [pendingSave, setPendingSave] = useState(false);
 
   // Inspection questions
   const inspectionQuestions = [
@@ -287,26 +290,13 @@ const IspezioneScaffali = () => {
   };
 
   // Update saveInspectionForm to remove 6-month checks
-  const saveInspectionForm = async () => {
+  const saveInspectionForm = async (status) => {
     if (!selectedColumn) return;
-    
-    // Basic form validation
-    try {
-      await form.validateFields();
-    } catch (error) {
-      message.error('Per favore completa tutti i campi obbligatori');
-      return;
-    }
-    
-    setSavingForm(true);
+    setPendingSave(true);
     try {
       const formValues = form.getFieldsValue();
-      
-      // Prepare question responses
       const questionResponsesToSave = [];
-      
       inspectionQuestions.forEach(question => {
-        // Only include questions that have a response
         if (formValues[question.id]) {
           questionResponsesToSave.push({
             domanda: question.text,
@@ -315,24 +305,14 @@ const IspezioneScaffali = () => {
           });
         }
       });
-      
-      // Use the combined endpoint to save both status and questions in one call
-      console.log(`Saving inspection with ${questionResponsesToSave.length} questions`);
       const response = await axios.post(`${process.env.REACT_APP_API_URL}/api/shelf-inspection-complete/${selectedColumn}`, {
-        status: selectedInspectionStatus,
+        status: status,
         questions: questionResponsesToSave,
         cycle: selectedCycle
       });
-      
-      // Get response details
       const questionsSaved = response.data.questions_saved || 0;
-      
-      // Show success message, with warnings if there are any
       if (response.data.warnings) {
-        // There were some issues but overall the operation succeeded
-        message.success(`Dati ispezione salvati con successo: stato "${selectedInspectionStatus}" e ${questionsSaved} risposte`, 3);
-        
-        // After a short delay, show the warning details
+        message.success(`Dati ispezione salvati con successo: stato "${status}" e ${questionsSaved} risposte`, 3);
         setTimeout(() => {
           Modal.warning({
             title: 'Avvertenza',
@@ -352,40 +332,29 @@ const IspezioneScaffali = () => {
           });
         }, 1500);
       } else {
-        message.success(`Dati ispezione salvati con successo: stato "${selectedInspectionStatus}" e ${questionsSaved} risposte`);
+        message.success(`Dati ispezione salvati con successo: stato "${status}" e ${questionsSaved} risposte`);
       }
-      
       setInspectionForm(formValues);
-      
-      // Update the inspection data with the new status
       setInspectionData(prev => ({
         ...prev,
         [selectedColumn]: {
           ...prev[selectedColumn],
-          status: selectedInspectionStatus,
+          status: status,
           last_check: response.data.last_check || prev[selectedColumn]?.last_check
         }
       }));
-      
-      // Refresh data to ensure consistency
       const parts = selectedColumn.split('-');
       const scaffale = parts[0];
       const colonna = parseInt(parts[1], 10);
       await fetchShelfInspectionStatus(scaffale, colonna);
-      
-      // Also update the full inspection data to reflect changes across the grid
       await fetchInspectionData(selectedCycle);
-      
-      // Refresh history
       await fetchInspectionHistory(selectedColumn);
-      
+      setShowStatoModal(false);
+      setModalVisible(false);
     } catch (error) {
       console.error('Error saving inspection:', error);
-      
-      // Enhanced error reporting with more details
       if (error.response && error.response.data) {
         const errorData = error.response.data;
-        
         if (errorData.error) {
           message.error(`Errore durante il salvataggio: ${errorData.error}`);
         } else if (errorData.error_details && errorData.error_details.length > 0) {
@@ -409,7 +378,7 @@ const IspezioneScaffali = () => {
         message.error('Errore durante il salvataggio dell\'ispezione');
       }
     } finally {
-      setSavingForm(false);
+      setPendingSave(false);
     }
   };
 
@@ -782,37 +751,29 @@ const IspezioneScaffali = () => {
 
   // Add renderInspectionCycleInfo function after the countCompletedQuestions function
   const renderInspectionCycleInfo = () => {
-    if (!selectedColumn || !inspectionData[selectedColumn]) return null;
-    
-    const lastCheck = inspectionData[selectedColumn]?.last_check;
-    
+    const lastCheck = selectedColumn && inspectionData[selectedColumn]?.last_check;
     return (
       <Card 
-        style={{ marginBottom: '16px' }} 
         className="current-inspection-cycle"
         bordered={true}
-        styles={{ 
-          body: { 
-            padding: '10px', 
-            backgroundColor: '#e6f7ff',
-            border: '1px solid #91d5ff'
-          }
-        }}
+        size="small"
+        style={{ minWidth: 260, marginLeft: 16, background: '#e6f7ff', border: '1px solid #91d5ff', padding: 0 }}
+        bodyStyle={{ padding: 10 }}
       >
         <Row gutter={[8, 0]} align="middle">
-          <Col span={2}>
-            <CheckCircleOutlined style={{ fontSize: '24px', color: '#1890ff' }} />
+          <Col>
+            <CheckCircleOutlined style={{ fontSize: '20px', color: '#1890ff' }} />
           </Col>
-          <Col span={22}>
-            <Title level={5} style={{ margin: 0 }}>
+          <Col>
+            <div style={{ fontWeight: 600, fontSize: 14 }}>
               {selectedCycle === 'current' ? 'CICLO DI ISPEZIONE CORRENTE' : 'CICLO DI ISPEZIONE STORICO'}
-            </Title>
-            <Text>
+            </div>
+            <div style={{ fontSize: 12 }}>
               {selectedCycle === 'current' 
-                ? `Ispezione in corso nel ciclo attuale. Ultima verifica: ${formatInspectionDate(lastCheck)}` 
-                : `Visualizzazione storica. Data ispezione: ${formatInspectionDate(lastCheck)}`
+                ? `Ultima verifica: ${formatInspectionDate(lastCheck)}` 
+                : `Data ispezione: ${formatInspectionDate(lastCheck)}`
               }
-            </Text>
+            </div>
           </Col>
         </Row>
       </Card>
@@ -851,58 +812,10 @@ const IspezioneScaffali = () => {
     );
   };
 
-  // Update the renderInspectionForm function to remove references to needsReinspection
+  // Remove Stato selector from renderInspectionForm
   const renderInspectionForm = () => {
     return (
       <div className="inspection-form-container">
-
-        <Card 
-          title={
-            <Space>
-              <span>Stato Ispezione</span>
-            </Space>
-          } 
-          style={{ marginBottom: '16px' }}
-        >
-          <Row gutter={[16, 16]} align="middle">
-            <Col span={6}>
-              <Text strong>Stato:</Text>
-            </Col>
-            <Col span={18}>
-              <Select
-                value={selectedInspectionStatus}
-                style={{ width: '100%' }}
-                onChange={(value) => setSelectedInspectionStatus(value)}
-              >
-                <Option value="buono">
-                  <div style={{ display: 'flex', alignItems: 'center' }}>
-                    <div style={{ width: '12px', height: '12px', backgroundColor: '#4caf50', marginRight: '8px', borderRadius: '50%' }}></div>
-                    Buono
-                  </div>
-                </Option>
-                <Option value="warning">
-                  <div style={{ display: 'flex', alignItems: 'center' }}>
-                    <div style={{ width: '12px', height: '12px', backgroundColor: '#ff9800', marginRight: '8px', borderRadius: '50%' }}></div>
-                    Warning
-                  </div>
-                </Option>
-                <Option value="danger">
-                  <div style={{ display: 'flex', alignItems: 'center' }}>
-                    <div style={{ width: '12px', height: '12px', backgroundColor: '#f44336', marginRight: '8px', borderRadius: '50%' }}></div>
-                    Danger
-                  </div>
-                </Option>
-                <Option value="to_check">
-                  <div style={{ display: 'flex', alignItems: 'center' }}>
-                    <div style={{ width: '12px', height: '12px', backgroundColor: '#e0e0e0', marginRight: '8px', borderRadius: '50%' }}></div>
-                    Da Ispezionare
-                  </div>
-                </Option>
-              </Select>
-            </Col>
-          </Row>
-        </Card>
-
         <Form
           form={form}
           layout="vertical"
@@ -946,6 +859,55 @@ const IspezioneScaffali = () => {
     );
   };
 
+  // New: Stato selection modal
+  const renderStatoModal = () => (
+    <Modal
+      title="Seleziona Stato Ispezione"
+      open={showStatoModal}
+      onCancel={() => setShowStatoModal(false)}
+      onOk={() => {
+        if (pendingSaveStatus) {
+          setShowStatoModal(false);
+          saveInspectionForm(pendingSaveStatus);
+        } else {
+          message.error('Seleziona uno stato per continuare');
+        }
+      }}
+      okText="Salva Ispezione"
+      cancelText="Annulla"
+      confirmLoading={pendingSave}
+    >
+      <Radio.Group
+        value={pendingSaveStatus}
+        onChange={e => setPendingSaveStatus(e.target.value)}
+        style={{ width: '100%' }}
+      >
+        <Space direction="vertical" style={{ width: '100%' }}>
+          <Radio value="buono">
+            <span style={{ color: '#4caf50', fontWeight: 'bold' }}>Buono</span>
+          </Radio>
+          <Radio value="warning">
+            <span style={{ color: '#ff9800', fontWeight: 'bold' }}>Attenzione</span>
+          </Radio>
+          <Radio value="danger">
+            <span style={{ color: '#f44336', fontWeight: 'bold' }}>Pericolo</span>
+          </Radio>
+        </Space>
+      </Radio.Group>
+    </Modal>
+  );
+
+  // Modified save button handler
+  const handleSaveButton = async () => {
+    try {
+      await form.validateFields();
+      setShowStatoModal(true);
+      setPendingSaveStatus(null); // Reset selection
+    } catch (error) {
+      message.error('Per favore completa tutti i campi obbligatori');
+    }
+  };
+
   const createNewInspectionCycle = async () => {
     setCreatingCycle(true);
     try {
@@ -981,63 +943,53 @@ const IspezioneScaffali = () => {
 
   return (
     <div style={{ padding: '20px' }}>
-      <Title level={2}>Ispezione Scaffali</Title>
-      <Text>Clicca su una colonna di scaffali per visualizzare i dettagli del suo contenuto.</Text>
-      
-      <Card style={{ marginTop: '20px', marginBottom: '20px' }}>
-        <Row gutter={[16, 16]} align="middle">
-          <Col span={16}>
-            <Space>
-              <Text strong>Visualizza ciclo di ispezione:</Text>
-              {selectedCycle !== 'current' && (
-                <Tag color="purple">Visualizzazione storica</Tag>
-              )}
-            </Space>
-          </Col>
-          <Col span={8}>
-            <Space style={{ width: '100%', justifyContent: 'space-between' }}>
-              <Select 
-                loading={loadingCycles}
-                value={selectedCycle}
-                onChange={(value) => {
-                  setSelectedCycle(value);
-                  fetchInspectionData(value);
-                }}
-                placeholder="Seleziona ciclo di ispezione"
-              >
-                {inspectionCycles.map(cycle => (
-                  <Option key={cycle.id} value={cycle.id}>
-                    {cycle.label}
-                  </Option>
-                ))}
-              </Select>
-              
-              <Button 
-                type="primary"
-                onClick={() => createNewInspectionCycle()}
-                icon={<PlusCircleOutlined />}
-                loading={creatingCycle}
-              >
-                Nuovo Ciclo
-              </Button>
-            </Space>
-          </Col>
-        </Row>
-        
-        {selectedCycle !== 'current' && (
-          <Row style={{ marginTop: '10px' }}>
-            <Col span={24}>
-              <div style={{ padding: '8px', backgroundColor: '#f6f6f6', borderRadius: '4px' }}>
-                <Text type="secondary">
-                  <InfoCircleOutlined style={{ marginRight: '8px' }} />
-                  Stai visualizzando dati storici. In questa modalità non è possibile modificare le ispezioni.
-                  Seleziona "Ispezione Corrente" per tornare alla visualizzazione attuale.
-                </Text>
-              </div>
-            </Col>
-          </Row>
-        )}
-      </Card>
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, marginBottom: 16 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <Title level={2} style={{ marginBottom: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Ispezione Scaffali</Title>
+          <Text>Clicca su una colonna di scaffali per visualizzare i dettagli del suo contenuto.</Text>
+        </div>
+        <div style={{ flexShrink: 0, minWidth: 340, maxWidth: 400 }}>
+          <Card size="small" bordered style={{ marginBottom: 0 }}>
+            <div style={{ marginBottom: 8 }}>
+              <Space>
+                <Text strong>Visualizza ciclo di ispezione:</Text>
+                {selectedCycle !== 'current' && (
+                  <Tag color="purple">Visualizzazione storica</Tag>
+                )}
+              </Space>
+            </div>
+            <div style={{ marginBottom: 8 }}>
+              <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+                <Select 
+                  loading={loadingCycles}
+                  value={selectedCycle}
+                  onChange={(value) => {
+                    setSelectedCycle(value);
+                    fetchInspectionData(value);
+                  }}
+                  placeholder="Seleziona ciclo di ispezione"
+                  style={{ minWidth: 180 }}
+                >
+                  {inspectionCycles.map(cycle => (
+                    <Option key={cycle.id} value={cycle.id}>
+                      {cycle.label}
+                    </Option>
+                  ))}
+                </Select>
+                <Button 
+                  type="primary"
+                  onClick={() => createNewInspectionCycle()}
+                  icon={<PlusCircleOutlined />}
+                  loading={creatingCycle}
+                >
+                  Nuovo Ciclo
+                </Button>
+              </Space>
+            </div>
+            
+          </Card>
+        </div>
+      </div>
       
       <Card style={{ marginTop: '20px' }}>
         <Row gutter={[16, 16]}>
@@ -1059,11 +1011,11 @@ const IspezioneScaffali = () => {
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center' }}>
                       <div style={{ width: '20px', height: '20px', backgroundColor: '#ff9800', marginRight: '5px' }}></div>
-                      <span>Warning</span>
+                      <span>Attenzione</span>
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center' }}>
                       <div style={{ width: '20px', height: '20px', backgroundColor: '#f44336', marginRight: '5px' }}></div>
-                      <span>Danger</span>
+                      <span>Pericolo</span>
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center' }}>
                       <div style={{ width: '20px', height: '20px', backgroundColor: '#ffffff', border: '1px solid #ccc', marginRight: '5px' }}></div>
@@ -1115,8 +1067,8 @@ const IspezioneScaffali = () => {
             <Button 
               key="submit" 
               type="primary" 
-              loading={savingForm} 
-              onClick={saveInspectionForm}
+              loading={pendingSave} 
+              onClick={handleSaveButton}
               icon={<SaveOutlined />}
             >
               Salva Ispezione
@@ -1134,6 +1086,7 @@ const IspezioneScaffali = () => {
           </div>
         )}
       </Modal>
+      {renderStatoModal()}
     </div>
   );
 };
