@@ -1,13 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { Table, Input, Spin, Button } from 'antd';
+import { Table, Input, Spin, Button, Switch } from 'antd';
 import { FixedSizeList } from 'react-window';
 import axios from 'axios';
 import * as XLSX from "xlsx";
 import { saveAs } from "file-saver";
+
 const SystemQuantitiesTable = () => {
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(false);
   const [filter, setFilter] = useState('');
+  const [groupByArticle, setGroupByArticle] = useState(false);
 
   useEffect(() => {
     const savedCounts = JSON.parse(localStorage.getItem('warehouseCounts') || '{}');
@@ -65,6 +67,24 @@ const SystemQuantitiesTable = () => {
   const filteredData = data.filter(item =>
     item.id_art.toLowerCase().includes(filter.toLowerCase())
   );
+
+  const groupedData = groupByArticle
+    ? filteredData.reduce((acc, item) => {
+        const existingGroup = acc.find(group => group.id_art === item.id_art);
+        if (existingGroup) {
+          existingGroup.children.push(item);
+        } else {
+          acc.push({
+            ...item,
+            children: [item],
+            system_quantity: item.system_quantity,
+            total_wms_qty: item.total_wms_qty,
+            difference: item.difference,
+          });
+        }
+        return acc;
+      }, [])
+    : filteredData;
 
   const columns = [
     {
@@ -200,22 +220,32 @@ const SystemQuantitiesTable = () => {
 };
   return (
     <div>
-      <Button onClick={exportExcel}></Button>
-      <div style={{ marginBottom: 16 }}>
+      <div style={{ marginBottom: 16, display: 'flex', gap: '16px', alignItems: 'center' }}>
         <Input.Search
           placeholder="Filtra ID articolo"
           onChange={(e) => setFilter(e.target.value)}
           style={{ width: 300 }}
         />
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span>Raggruppa per articolo:</span>
+          <Switch
+            checked={groupByArticle}
+            onChange={setGroupByArticle}
+          />
+        </div>
+        <Button onClick={exportExcel}>Esporta Excel</Button>
       </div>
       
       <Spin spinning={loading}>
         <Table
           columns={columns}
-          dataSource={filteredData}
+          dataSource={groupedData}
           pagination={false}
           width="100%"
-  
+          expandable={{
+            defaultExpandAllRows: false,
+            rowExpandable: record => record.children && record.children.length > 0,
+          }}
         />
       </Spin>
     </div>

@@ -99,7 +99,7 @@ const WarehouseGridSystem = ({
               
                 if (shelfPattern === 'horizontal') {
                   // For horizontal shelves, increment by column
-                  shelfNumber = startingValue;
+                  shelfNumber = startingValue + Math.floor(r / spanRow);
                   floorNumber = startingFloor + c;
                 } else {
                   // For vertical shelves (regular pattern)
@@ -172,7 +172,7 @@ const WarehouseGridSystem = ({
         const status = getShelfStatus(cell.id);
         if (status) classNames.push(status);
         
-        if (highlightedShelves?.has(cell.id)) {
+        if (highlightedShelves?.has(cell.columnId)) {
           classNames.push('highlighted');
         }
 
@@ -309,6 +309,20 @@ const WarehouseGridSystem = ({
           }
           .shelf-cell.highlighted {
             background: #ffeb3b;
+            border: 3px solid #ff9800 !important;
+            box-shadow: 0 0 0 2px #ff9800;
+            position: relative;
+            z-index: 2;
+          }
+          .shelf-cell.highlighted::after {
+            content: '✓';
+            color: #ff9800;
+            font-size: 1.5em;
+            position: absolute;
+            top: 2px;
+            right: 6px;
+            font-weight: bold;
+            pointer-events: none;
           }
           .shelf-cell.good {
             background: #4caf50;

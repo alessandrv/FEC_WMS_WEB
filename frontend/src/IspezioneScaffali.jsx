@@ -37,6 +37,33 @@ const createColumnBasedLayout = (originalLayout) => {
   });
 };
 
+// Function to create a rotated layout with spanCol properties for horizontal column-based view
+const createRotatedColumnBasedLayout = (originalLayout) => {
+  if (!originalLayout || !Array.isArray(originalLayout)) {
+    return [];
+  }
+
+  return originalLayout.map(section => {
+    const modifiedSection = { ...section };
+    
+    // If the section has a width, add spanCol equal to that width
+    if (modifiedSection.width) {
+      modifiedSection.spanCol = modifiedSection.width;
+    }
+    
+    // For shelf sections, we want to group them by row instead of column (rotated 90 degrees)
+    if (modifiedSection.shelfPattern === 'regular' || modifiedSection.shelfPattern === 'horizontal') {
+      // Set colspan to make each shelf span horizontally by its width
+      modifiedSection.spanCol = modifiedSection.width;
+      
+      // Add a property to indicate this is a rotated column-based view
+      modifiedSection.rotatedColumnBasedView = true;
+    }
+    
+    return modifiedSection;
+  });
+};
+
 const IspezioneScaffali = () => {
   const [loading, setLoading] = useState(false);
   const [modalLoading, setModalLoading] = useState(false);
@@ -66,6 +93,8 @@ const IspezioneScaffali = () => {
   const [showStatoModal, setShowStatoModal] = useState(false);
   const [pendingSaveStatus, setPendingSaveStatus] = useState(null);
   const [pendingSave, setPendingSave] = useState(false);
+  const [multiSelectMode, setMultiSelectMode] = useState(false);
+  const [selectedColumns, setSelectedColumns] = useState([]);
 
   // Inspection questions
   const inspectionQuestions = [
@@ -291,66 +320,28 @@ const IspezioneScaffali = () => {
 
   // Update saveInspectionForm to remove 6-month checks
   const saveInspectionForm = async (status) => {
-    if (!selectedColumn) return;
+    if (!selectedColumns.length) return;
     setPendingSave(true);
     try {
       const formValues = form.getFieldsValue();
-      const questionResponsesToSave = [];
-      inspectionQuestions.forEach(question => {
-        if (formValues[question.id]) {
-          questionResponsesToSave.push({
-            domanda: question.text,
-            risposta: formValues[question.id],
-            note: formValues[`${question.id}_note`] || ''
-          });
-        }
-      });
-      const response = await axios.post(`${process.env.REACT_APP_API_URL}/api/shelf-inspection-complete/${selectedColumn}`, {
-        status: status,
-        questions: questionResponsesToSave,
-        cycle: selectedCycle
-      });
-      const questionsSaved = response.data.questions_saved || 0;
-      if (response.data.warnings) {
-        message.success(`Dati ispezione salvati con successo: stato "${status}" e ${questionsSaved} risposte`, 3);
-        setTimeout(() => {
-          Modal.warning({
-            title: 'Avvertenza',
-            content: (
-              <div>
-                <p>Alcune risposte potrebbero essere state troncate o modificate per rispettare i limiti del database.</p>
-                {response.data.error_details && (
-                  <ul>
-                    {response.data.error_details.map((error, index) => (
-                      <li key={index}>{error.message || 'Errore sconosciuto'}</li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            ),
-            okText: 'Ho capito'
-          });
-        }, 1500);
-      } else {
-        message.success(`Dati ispezione salvati con successo: stato "${status}" e ${questionsSaved} risposte`);
-      }
-      setInspectionForm(formValues);
-      setInspectionData(prev => ({
-        ...prev,
-        [selectedColumn]: {
-          ...prev[selectedColumn],
-          status: status,
-          last_check: response.data.last_check || prev[selectedColumn]?.last_check
-        }
+      const questionResponsesToSave = inspectionQuestions.map(question => ({
+        domanda: question.text,
+        risposta: formValues[question.id],
+        note: formValues[`${question.id}_note`] || ''
       }));
-      const parts = selectedColumn.split('-');
-      const scaffale = parts[0];
-      const colonna = parseInt(parts[1], 10);
-      await fetchShelfInspectionStatus(scaffale, colonna);
+      await Promise.all(selectedColumns.map(async (columnId) => {
+        await axios.post(`${process.env.REACT_APP_API_URL}/api/shelf-inspection-complete/${columnId}`, {
+          status,
+          questions: questionResponsesToSave,
+          cycle: selectedCycle
+        });
+      }));
+      message.success(`Dati ispezione salvati per ${selectedColumns.length} colonne`);
       await fetchInspectionData(selectedCycle);
-      await fetchInspectionHistory(selectedColumn);
       setShowStatoModal(false);
       setModalVisible(false);
+      setSelectedColumns([]);
+      setSelectedColumn(null);
     } catch (error) {
       console.error('Error saving inspection:', error);
       if (error.response && error.response.data) {
@@ -426,24 +417,21 @@ const IspezioneScaffali = () => {
   };
 
   const handleCellClick = (shelfId) => {
-    // For column-based view, extract column from shelf ID
     const parts = shelfId.split('-');
     if (parts.length >= 2) {
       const columnId = `${parts[0]}-${parts[1]}`;
-      handleColumnClick(columnId);
-    }
-  };
-
-  const handleColumnClick = (columnId) => {
-    // Parse column ID (format: "A-01")
-    const parts = columnId.split('-');
-    if (parts.length >= 2) {
-      const scaffale = parts[0];
-      const colonna = parseInt(parts[1], 10);
-      
-      setSelectedColumn(columnId);
-      setModalVisible(true);
-      fetchColumnDetails(scaffale, colonna);
+      if (multiSelectMode) {
+        setSelectedColumns(prev =>
+          prev.includes(columnId)
+            ? prev.filter(id => id !== columnId)
+            : [...prev, columnId]
+        );
+      } else {
+        setSelectedColumn(columnId);
+        setSelectedColumns([columnId]);
+        setModalVisible(true);
+        fetchColumnDetails(parts[0], parseInt(parts[1], 10));
+      }
     }
   };
 
@@ -512,6 +500,9 @@ const IspezioneScaffali = () => {
   };
 
   const renderWarehouseSection = () => {
+    // Debug: log what's in selectedColumns
+    console.log("Selected columns:", selectedColumns);
+    
     if (currentPage === 1) {
       return (
         <div className="warehouse-grid-container">
@@ -523,6 +514,7 @@ const IspezioneScaffali = () => {
             getShelfStatus={getShelfStatus}
             tooltipContent={getColumnTooltip}
             showFloorNumber={false}
+            highlightedShelves={new Set(selectedColumns)}
           />
         </div>
       );
@@ -537,10 +529,24 @@ const IspezioneScaffali = () => {
             getShelfStatus={getShelfStatus}
             tooltipContent={getColumnTooltip}
             showFloorNumber={false}
+            highlightedShelves={new Set(selectedColumns)}
           />
         </div>
       );
-    }
+    }else if (currentPage === 3) {
+      return (
+          <div>
+              <WarehouseGridSystem
+                  GRID_ROWS={9}
+                  GRID_COLS={50}
+                  warehouseLayout={createRotatedColumnBasedLayout[3]}
+                  onCellClick={handleCellClick}
+                  getShelfStatus={getShelfStatus}
+                  tooltipContent={getColumnTooltip}
+                  highlightedShelves={new Set(selectedColumns)}
+              />
+          </div>)
+  }
     return null;
   };
 
@@ -1001,9 +1007,36 @@ const IspezioneScaffali = () => {
                 </div>
               ) : (
                 <div className="view-magazzino">
+                  <div style={{ marginBottom: 12 }}>
+                    <Button
+                      type={multiSelectMode ? 'primary' : 'default'}
+                      onClick={() => {
+                        setMultiSelectMode(m => !m);
+                        setSelectedColumns([]);
+                      }}
+                    >
+                      {multiSelectMode ? 'Disattiva Selezione Multipla' : 'Selezione Multipla'}
+                    </Button>
+                    
+                    {multiSelectMode && selectedColumns.length > 0 && (
+                    <Button
+                      type="primary"
+                      style={{ margin: '12px' }}
+                      onClick={() => {
+                        setModalVisible(true);
+                        setSelectedColumn(selectedColumns[0]); // for legacy logic
+                        const parts = selectedColumns[0].split('-');
+                        if (parts.length >= 2) fetchColumnDetails(parts[0], parseInt(parts[1], 10));
+                      }}
+                    >
+                      Ispeziona Colonne Selezionate
+                    </Button>
+                  )}
+                  </div>
                   <div className="grid-container">
                     {renderWarehouseSection()}
                   </div>
+                  
                   <div className="color-legend" style={{ marginTop: '10px', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
                     <div style={{ display: 'flex', alignItems: 'center' }}>
                       <div style={{ width: '20px', height: '20px', backgroundColor: '#4caf50', marginRight: '5px' }}></div>
@@ -1021,11 +1054,17 @@ const IspezioneScaffali = () => {
                       <div style={{ width: '20px', height: '20px', backgroundColor: '#ffffff', border: '1px solid #ccc', marginRight: '5px' }}></div>
                       <span>Da Ispezionare</span>
                     </div>
+                    {multiSelectMode && (
+                      <div style={{ display: 'flex', alignItems: 'center' }}>
+                        <div style={{ width: '20px', height: '20px', backgroundColor: '#ffeb3b', border: '2px solid #ff9800', marginRight: '5px' }}></div>
+                        <span>Selezionato</span>
+                      </div>
+                    )}
                   </div>
                   <div className="pagination-container">
                     <Pagination
                       current={currentPage}
-                      total={2}
+                      total={3}
                       pageSize={1}
                       onChange={(page) => setCurrentPage(page)}
                       showSizeChanger={false}
@@ -1040,7 +1079,9 @@ const IspezioneScaffali = () => {
       </Card>
 
       <Modal
-        title={`Ispezione Scaffale: ${selectedColumn || ''}`}
+        title={selectedColumns.length > 1
+          ? `Ispezione Collettiva: ${selectedColumns.length} colonne`
+          : `Ispezione Scaffale: ${selectedColumn || ''}`}
         open={modalVisible}
         onCancel={() => setModalVisible(false)}
         width="100%"
@@ -1076,6 +1117,14 @@ const IspezioneScaffali = () => {
           ),
         ].filter(Boolean)}
       >
+        {selectedColumns.length > 1 && (
+          <Alert
+            message={`Colonne selezionate: ${selectedColumns.join(', ')}`}
+            type="info"
+            showIcon
+            style={{ marginBottom: 16 }}
+          />
+        )}
         {modalLoading ? (
           <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '40px' }}>
             <Spin size="large" />

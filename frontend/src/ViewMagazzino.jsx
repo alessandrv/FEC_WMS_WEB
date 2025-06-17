@@ -57,30 +57,45 @@ const ViewMagazzino = ({
   const renderWarehouseSection = () => {
     if (currentPage === 1) {
         return (
-    <div>
-    <WarehouseGridSystem
-    warehouseLayout={layouts[1]}
-    GRID_ROWS = {30}
-    GRID_COLS = {9}
-    onCellClick={handleShelfClick}
-    getShelfStatus={getShelfStatus}
-    tooltipContent={getTooltipContent}
+            <div>
+                <WarehouseGridSystem
+                    warehouseLayout={layouts[1]}
+                    GRID_ROWS={30}
+                    GRID_COLS={9}
+                    onCellClick={handleShelfClick}
+                    getShelfStatus={getShelfStatus}
+                    tooltipContent={getTooltipContent}
 
-  />
-</div>)}
-else if (currentPage === 2) {
-    return (
-<div>
-<WarehouseGridSystem
-GRID_ROWS = {16}
-GRID_COLS = {22}
-warehouseLayout={layouts[2]}
-onCellClick={handleShelfClick}
-getShelfStatus={getShelfStatus}
-tooltipContent={getTooltipContent}
+                />
+            </div>)
+    }
+    else if (currentPage === 2) {
+        return (
+            <div>
+                <WarehouseGridSystem
+                    GRID_ROWS={16}
+                    GRID_COLS={22}
+                    warehouseLayout={layouts[2]}
+                    onCellClick={handleShelfClick}
+                    getShelfStatus={getShelfStatus}
+                    tooltipContent={getTooltipContent}
 
-/>
-</div>)}
+                />
+            </div>)
+    }
+    else if (currentPage === 3) {
+        return (
+            <div>
+                <WarehouseGridSystem
+                    GRID_ROWS={9}
+                    GRID_COLS={50}
+                    warehouseLayout={layouts[3]}
+                    onCellClick={handleShelfClick}
+                    getShelfStatus={getShelfStatus}
+                    tooltipContent={getTooltipContent}
+                />
+            </div>)
+    }
 };
 
   // Fetch volumes on component mount
@@ -372,7 +387,7 @@ const postMultipleShelfData = async (data) => {
           <div className="pagination-container">
             <Pagination
               current={currentPage}
-              total={2}
+              total={3}
               pageSize={1}
               onChange={(page) => setCurrentPage(page)}
               showSizeChanger={false}

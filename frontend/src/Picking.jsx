@@ -1552,6 +1552,20 @@ const handlePageChange = (page) => {
                     />
                 </div>)
         }
+        else if (currentPage === 3) {
+            return (
+                <div>
+                    <WarehouseGridSystem
+                        GRID_ROWS={9}
+                        GRID_COLS={50}
+                        warehouseLayout={layouts[3]}
+                        onCellClick={handleShelfClick}
+                        getShelfStatus={getShelfStatus}
+                        tooltipContent={getTooltipContent}
+                        highlightedShelves={highlightedShelves}
+                    />
+                </div>)
+        }
     };
     const handleGroupLocationModalVisible = (record) => {
         // Use our new function instead
@@ -3386,6 +3400,19 @@ const handlePageChange = (page) => {
       
       />
       </div>)}
+      else if (currentPage === 3) {
+        return (
+            <div>
+                <WarehouseGridSystem
+                    GRID_ROWS={9}
+                    GRID_COLS={50}
+                    warehouseLayout={layouts[3]}
+                    onCellClick={handleShelfClick}
+                    getShelfStatus={getShelfStatus}
+                    tooltipContent={getTooltipContent}
+                />
+            </div>)
+    }
       };
       const handleShelfClickSelection = (shelf) => {
         setHighlightedShelf(shelf);
@@ -4881,7 +4908,7 @@ const handlePageChange = (page) => {
                                 <div className="pagination-container">
                                     <Pagination
                                         current={currentPage}
-                                        total={2}
+                                        total={3}
                                         pageSize={1}
                                         onChange={(page) => setCurrentPage(page)}
                                         showSizeChanger={false}
@@ -4911,7 +4938,7 @@ const handlePageChange = (page) => {
         <div className="pagination-container" style={{ marginTop: '20px', textAlign: 'center' }}>
           <Pagination
             current={currentPage}
-            total={2}
+            total={3}
             pageSize={1}
             onChange={handlePageChange}
             showSizeChanger={false}
