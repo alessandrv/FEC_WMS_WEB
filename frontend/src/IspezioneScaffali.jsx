@@ -119,6 +119,15 @@ const IspezioneScaffali = () => {
     });
     return modifiedLayouts;
   }, []);
+  
+  // Create rotated layouts for horizontal column-based view
+  const rotatedColumnBasedLayouts = useMemo(() => {
+    const modifiedLayouts = {};
+    Object.keys(WarehouseLayouts).forEach(key => {
+      modifiedLayouts[key] = createRotatedColumnBasedLayout(WarehouseLayouts[key]);
+    });
+    return modifiedLayouts;
+  }, []);
 
   // Fetch shelves data when component mounts
   useEffect(() => {
@@ -533,20 +542,22 @@ const IspezioneScaffali = () => {
           />
         </div>
       );
-    }else if (currentPage === 3) {
+    } else if (currentPage === 3) {
       return (
-          <div>
+          <div className="warehouse-grid-container">
               <WarehouseGridSystem
                   GRID_ROWS={9}
                   GRID_COLS={50}
-                  warehouseLayout={createRotatedColumnBasedLayout[3]}
+                  warehouseLayout={rotatedColumnBasedLayouts[3]}
                   onCellClick={handleCellClick}
                   getShelfStatus={getShelfStatus}
                   tooltipContent={getColumnTooltip}
+                  showFloorNumber={false}
                   highlightedShelves={new Set(selectedColumns)}
               />
-          </div>)
-  }
+          </div>
+      );
+    }
     return null;
   };
 
