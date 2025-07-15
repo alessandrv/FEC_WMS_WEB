@@ -1,7 +1,7 @@
 from flask import Flask, jsonify, request
 import pyodbc
 from flask_cors import CORS
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 import uuid
 from datetime import datetime
 import json
@@ -5252,6 +5252,151 @@ def create_inspection_cycle():
     finally:
         if 'cursor' in locals():
             cursor.close()
+        if 'conn' in locals():
+            conn.close()
+
+@app.route('/api/update-location-quantity', methods=['PUT'])
+def update_location_quantity():
+    """Update quantity for a specific location and article"""
+    try:
+        data = request.get_json()
+        
+        # Extract parameters
+        id_art = data.get('id_art')
+        area = data.get('area')
+        scaffale = data.get('scaffale')
+        colonna = data.get('colonna')
+        piano = data.get('piano')
+        new_quantity = data.get('new_quantity')
+        old_quantity = data.get('old_quantity')
+        
+        # Validate input parameters
+        if not all([id_art, area, scaffale, colonna, piano, new_quantity, old_quantity]):
+            return jsonify({'error': 'Missing required parameters'}), 400
+        
+        # Convert quantity to Decimal
+        try:
+            new_quantity = Decimal(str(new_quantity))
+            old_quantity = Decimal(str(old_quantity))
+        except (ValueError, TypeError, InvalidOperation):
+            return jsonify({'error': 'Invalid quantity value'}), 400
+        
+        # Validate that new quantity is not negative
+        if new_quantity < 0:
+            return jsonify({'error': 'Quantity cannot be negative'}), 400
+        
+        conn = connect_to_db()
+        cursor = conn.cursor()
+        conn.autocommit = False  # Start transaction
+        
+        try:
+            # First, verify the current total quantity at this location
+            verify_query = """
+            SELECT SUM(qta) AS total_qta
+            FROM wms_items
+            WHERE id_art = ?
+              AND area = ?
+              AND scaffale = ?
+              AND colonna = ?
+              AND piano = ?
+            """
+            cursor.execute(verify_query, (id_art, area, scaffale, colonna, piano))
+            result = cursor.fetchone()
+            
+            if not result or result.total_qta is None:
+                return jsonify({'error': 'No items found at the specified location'}), 404
+            
+            current_total = Decimal(str(result.total_qta))
+            
+            # Verify that the old quantity matches what we expect
+            if current_total != old_quantity:
+                return jsonify({'error': f'Quantity mismatch. Expected: {old_quantity}, Current: {current_total}'}), 400
+            
+            # Calculate the difference
+            quantity_diff = new_quantity - old_quantity
+            
+            if quantity_diff == 0:
+                return jsonify({'message': 'No change in quantity'}), 200
+            
+            if quantity_diff > 0:
+                # Adding quantity - create a new package
+                insert_query = """
+                INSERT INTO wms_items (id_art, area, scaffale, colonna, piano, qta, dimensione)
+                VALUES (?, ?, ?, ?, ?, ?, 'Zero')
+                """
+                cursor.execute(insert_query, (id_art, area, scaffale, colonna, piano, quantity_diff))
+                
+            else:
+                # Removing quantity - need to remove from existing packages
+                remaining_to_remove = abs(quantity_diff)
+                
+                # Get all packages at this location, ordered by quantity (smallest first)
+                packages_query = """
+                SELECT id_pacco, qta
+                FROM wms_items
+                WHERE id_art = ?
+                  AND area = ?
+                  AND scaffale = ?
+                  AND colonna = ?
+                  AND piano = ?
+                ORDER BY qta ASC
+                """
+                cursor.execute(packages_query, (id_art, area, scaffale, colonna, piano))
+                packages = cursor.fetchall()
+                
+                for package in packages:
+                    if remaining_to_remove <= 0:
+                        break
+                    
+                    package_id = package.id_pacco
+                    package_qty = Decimal(str(package.qta))
+                    
+                    if package_qty <= remaining_to_remove:
+                        # Remove entire package
+                        cursor.execute("DELETE FROM wms_items WHERE id_pacco = ?", (package_id,))
+                        remaining_to_remove -= package_qty
+                    else:
+                        # Reduce package quantity
+                        new_package_qty = package_qty - remaining_to_remove
+                        cursor.execute("UPDATE wms_items SET qta = ? WHERE id_pacco = ?", (new_package_qty, package_id))
+                        remaining_to_remove = 0
+                
+                if remaining_to_remove > 0:
+                    conn.rollback()
+                    return jsonify({'error': 'Insufficient quantity to remove'}), 400
+            
+            # Log the operation
+            operation_details = f"Quantità aggiornata per articolo {id_art} in {area}-{scaffale}-{colonna}-{piano}: {old_quantity} a {new_quantity}"
+            
+            log_operation(
+                operation_type="AGGIORNAMENTO_QUANTITA",
+                operation_details=operation_details,
+                article_code=id_art,
+                source_location=f"{area}-{scaffale}-{colonna}-{piano}",
+                quantity=abs(quantity_diff),
+                additional_data={
+                    'old_quantity': float(old_quantity),
+                    'new_quantity': float(new_quantity),
+                    'quantity_change': float(quantity_diff)
+                }
+            )
+            
+            conn.commit()
+            
+            return jsonify({
+                'message': 'Quantity updated successfully',
+                'old_quantity': float(old_quantity),
+                'new_quantity': float(new_quantity),
+                'quantity_change': float(quantity_diff)
+            }), 200
+            
+        except Exception as e:
+            conn.rollback()
+            raise e
+            
+    except Exception as e:
+        return jsonify({'error': f'Failed to update quantity: {str(e)}'}), 500
+    finally:
         if 'conn' in locals():
             conn.close()
 

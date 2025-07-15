@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { Table, Spin, Input, Button, Pagination, Row, Col, message, Modal, notification, Tooltip, Typography } from 'antd';
 import axios from 'axios';
-import { LoadingOutlined, ReloadOutlined, FullscreenOutlined, InfoCircleOutlined, CloseCircleOutlined } from '@ant-design/icons';
+import { LoadingOutlined, ReloadOutlined, FullscreenOutlined, InfoCircleOutlined, CloseCircleOutlined, EditOutlined, CheckOutlined, CloseOutlined } from '@ant-design/icons';
 import WarehouseGrid from './GridComponent';
 import './GridComponent.css';
 import WarehouseGridSystem from './WarehouseGridSystem';
@@ -35,6 +35,11 @@ const GroupedItemsTable = () => {
   
   const [locationFilter, setLocationFilter] = useState(['A', '', '', '']); // [area, scaffale, colonna, piano]
 const locationInputRefs = [useRef(), useRef(), useRef(), useRef()];
+
+  // State for inline editing
+  const [editingKey, setEditingKey] = useState('');
+  const [editingQuantity, setEditingQuantity] = useState('');
+  const [editingLoading, setEditingLoading] = useState(false);
 
   const groupSubitemsByLocationAndMovement = (subitems) => {
     const groupedItems = {};
@@ -229,6 +234,68 @@ const locationInputRefs = [useRef(), useRef(), useRef(), useRef()];
   const getTooltipContent = (shelf) => {
     return shelf;
   };
+
+  // Functions for inline quantity editing
+  const startEditing = (record) => {
+    setEditingKey(record.key);
+    setEditingQuantity(record.totalQta.toString());
+  };
+
+  const cancelEditing = () => {
+    setEditingKey('');
+    setEditingQuantity('');
+  };
+
+  const saveQuantity = async (record) => {
+    if (!editingQuantity || isNaN(editingQuantity) || parseFloat(editingQuantity) < 0) {
+      message.error('Please enter a valid quantity');
+      return;
+    }
+
+    const newQuantity = parseFloat(editingQuantity);
+    if (newQuantity === record.totalQta) {
+      cancelEditing();
+      return;
+    }
+
+    setEditingLoading(true);
+    try {
+      const response = await axios.put(`${process.env.REACT_APP_API_URL}/api/update-location-quantity`, {
+        id_art: record.id_art,
+        area: record.area,
+        scaffale: record.scaffale,
+        colonna: record.colonna,
+        piano: record.piano,
+        old_quantity: record.totalQta,
+        new_quantity: newQuantity
+      });
+
+      if (response.data.message) {
+        message.success('Quantità aggiornata con successo');
+        // Refresh the data
+        fetchItems(currentPage, pageSize);
+        cancelEditing();
+      }
+    } catch (error) {
+      console.error('Error updating quantity:', error);
+      const errorMessage = error.response?.data?.error || 'Errore durante l\'aggiornamento della quantità';
+      message.error(errorMessage);
+    } finally {
+      setEditingLoading(false);
+    }
+  };
+
+  const handleQuantityChange = (e) => {
+    setEditingQuantity(e.target.value);
+  };
+
+  const handleQuantityKeyPress = (e, record) => {
+    if (e.key === 'Enter') {
+      saveQuantity(record);
+    } else if (e.key === 'Escape') {
+      cancelEditing();
+    }
+  };
   const renderWarehouseSection = () => {
     if (currentPage2 === 1) {
         return (
@@ -327,6 +394,50 @@ highlightedShelves={highlightedShelves}
       dataIndex: 'totalQta',
       key: 'totalQta',
       sorter: (a, b) => a.totalQta - b.totalQta,
+      render: (text, record) => {
+        const isEditing = editingKey === record.key;
+        
+        if (isEditing) {
+          return (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Input
+                value={editingQuantity}
+                onChange={handleQuantityChange}
+                onKeyPress={(e) => handleQuantityKeyPress(e, record)}
+                style={{ width: '80px' }}
+                autoFocus
+              />
+              <Button
+                type="primary"
+                size="small"
+                icon={<CheckOutlined />}
+                onClick={() => saveQuantity(record)}
+                loading={editingLoading}
+                style={{ minWidth: '32px' }}
+              />
+              <Button
+                size="small"
+                icon={<CloseOutlined />}
+                onClick={cancelEditing}
+                style={{ minWidth: '32px' }}
+              />
+            </div>
+          );
+        }
+        
+        return (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span>{text}</span>
+            <Button
+              type="text"
+              size="small"
+              icon={<EditOutlined />}
+              onClick={() => startEditing(record)}
+              style={{ padding: '0', minWidth: '24px' }}
+            />
+          </div>
+        );
+      },
     },
     {
       title: 'Descrizione',
@@ -368,6 +479,7 @@ const expandableConfig = {
     <Table
       dataSource={record.subItems ? groupSubitemsByLocationAndMovement(record.subItems).map(item => ({
         key: `${item.id_mov}-${item.locazione}`,
+        id_art: record.id_art, // Add the parent article ID
         id_mov: item.id_mov,
         area: item.area,
         scaffale: item.scaffale,

@@ -1,153 +1,150 @@
 .missing-row {
-    background-color: red !important; /* Red background for missing items */
-    color: white; /* Optional: change text color for better visibility */
-  }
-  .missing-row:hover td{
-    background-color: rgba(107, 3, 3, 0.342) !important; /* Red background for missing items */
-  }.completed-row {
-    background-color: #93f893 !important;
+  background-color: red !important; /* Red background for missing items */
+  color: white; /* Optional: change text color for better visibility */
+}
+.missing-row:hover td{
+  background-color: rgba(107, 3, 3, 0.342) !important; /* Red background for missing items */
+}.completed-row {
+  background-color: #93f893 !important;
 }
 .completed-row:hover td {
-  background-color: #7bda7b !important;
+background-color: #7bda7b !important;
 }
-  .highlighted {
-    background-color: #adc6ff; /* Step 2: Highlight color */
-  }
+.highlighted {
+  background-color: #adc6ff; /* Step 2: Highlight color */
+}
 
-  .highlighted-row {
-    background-color: #60ff60 !important; /* Light green background */
-  }
-  .highlighted-row:hover td{
-    background-color: #54c054 !important; /* Light green background */
-  }
-  /* Add these styles to your existing CSS */
+.highlighted-row {
+  background-color: #60ff60 !important; /* Light green background */
+}
+.highlighted-row:hover td{
+  background-color: #54c054 !important; /* Light green background */
+}
+/* Add these styles to your existing CSS */
 .already-picked-row {
-  background-color: #d9f7be !important;
+background-color: #d9f7be !important;
 }
 .already-picked-row:hover {
-  background-color: #b7eb8f !important;
+background-color: #b7eb8f !important;
 }
-  /* styles.css */
+/* styles.css */
 
-  .rectangle {
-    z-index: 0;
-    width: 100%;
-    height: 20%;  /* You can adjust the height as needed */
-    background-color: rgb(230 45 58);  /* Rectangle background color */
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    margin-bottom: 10px;  /* Adds some space between the rectangle and the grid */
+.rectangle {
+  z-index: 0;
+  width: 100%;
+  height: 20%;  /* You can adjust the height as needed */
+  background-color: rgb(230 45 58);  /* Rectangle background color */
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin-bottom: 10px;  /* Adds some space between the rectangle and the grid */
 }
 
 .rectangle-text {
-    color: white;  /* Text color */
-    font-size: 16px;  /* Text size */
-    font-weight: bold;
+  color: white;  /* Text color */
+  font-size: 16px;  /* Text size */
+  font-weight: bold;
 }
 
 
 .dark-row {
-  background: #444; /* Background for table cells */
-  color: #fff; /* Text color for table cells */
+background: #444; /* Background for table cells */
+color: #fff; /* Text color for table cells */
 }
 .custom-row-hover:hover td {background: rgba(224, 248, 232, 1)!important;}
 
 /* Optional: Customize hover effects */
 .dark-row:hover td{
-  background: #555 !important; /* Row hover effect */
+background: #555 !important; /* Row hover effect */
 }
 
 .striped-table .ant-table-row:nth-child(odd) {
-    background-color: #f5f5f5;
+  background-color: #f5f5f5;
 }
 
 .striped-table .ant-table-row:nth-child(even) {
-    background-color: #ffffff;
+  background-color: #ffffff;
 }
 
 /* Optional: Add hover effect */
 .striped-table .ant-table-row:hover td {
-    background-color: rgba(233, 93, 102, 0.466) !important;
+  background-color: rgba(233, 93, 102, 0.466) !important;
 }
 
 /* Mobile-first styles */
 .picking-container {
-    flex-direction: column;
+  flex-direction: column;
 }
 
 .table-sider {
-    height: auto !important;
-    max-height: 60vh;
-    overflow: auto;
+  height: auto !important;
+  max-height: 60vh;
+  overflow: auto;
 }
 
 .map-layout {
-    height: 50vh;
+  height: 50vh;
 }
 
 .mobile-warehouse-container {
-    height: 100%;
-    position: relative;
+  height: 100%;
+  position: relative;
 }
 
 .pagination-container {
-    position: absolute;
-    bottom: 10px;
-    left: 50%;
-    transform: translateX(-50%);
-    z-index: 1;
+  position: absolute;
+  bottom: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1;
 }
 
 /* Desktop styles */
 @media (min-width: 768px) {
-    .picking-container {
-        flex-direction: row;
-    }
-    
-    .table-sider {
-        height: 100vh !important;
-        max-height: none;
-    }
+  .picking-container {
+      flex-direction: row;
+  }
+  
+  .table-sider {
+      height: 100vh !important;
+      max-height: none;
+  }
 
-    .map-layout {
-        height: auto;
-    }
+  .map-layout {
+      height: auto;
+  }
 
-    .pagination-container {
-        position: static;
-        transform: none;
-        margin-top: 20px;
-    }
+  .pagination-container {
+      position: static;
+      transform: none;
+      margin-top: 20px;
+  }
 }
 
 
 /* Style for expanded rows container */
-.ant-table-expanded-row > .ant-table-cell {
-    background-color: #ffffff;
-    padding: 0 !important;
-}
+
 
 /* Add background color for all child rows */
 .child-row {
-    background-color: #ffffe9 ; /* Light grayish-blue background */
+  background-color: #ffffe9 ; /* Light grayish-blue background */
 }
 
 .child-row:hover td {
-    background-color: transparent !important; /* Slightly darker on hover */
+  background-color: transparent !important; /* Slightly darker on hover */
 }
 
 /* Add inner table styles */
 .ant-table-expanded-row .ant-table {
-    margin: 8px 0;
-    border-left: 2px solid #1890ff;
+  margin: 8px 0;
+  border-left: 2px solid #1890ff;
 }
 
 
 /* Add this to your CSS file */
 .child-row td:first-child {
-  border-left: 4px solid #1890ff !important;
-  padding-left: 20px !important;
+border-left: 4px solid #1890ff !important;
+padding-left: 20px !important;
 }
 
 /* Optional: Add hover effect for child rows */
@@ -156,116 +153,116 @@
 /* Optional: Add a subtle separator between groups */
 
 .parent-row td:first-child {
-  border-left: 4px solid #1890ff !important;
+border-left: 4px solid #1890ff !important;
 }
 
 /* Ensure completed status is still visible */
 .child-row.completed-row td:first-child {
-  border-left: 4px solid #52c41a !important;
+border-left: 4px solid #52c41a !important;
 }
 
 /* Ensure highlighted status is still visible */
 .child-row.highlighted-row td:first-child {
-  border-left: 4px solid #1890ff !important;
+border-left: 4px solid #1890ff !important;
 }
 
 
 /* For missing items */
 .child-row.missing-row td:first-child {
-  border-left: 4px solid #ffe600 !important;
+border-left: 4px solid #ffe600 !important;
 }
 
 
 /* Ensure that the last child's bottom padding is visible */
 .ant-table-expanded-row > .ant-table-cell {
-  padding-bottom: 16px !important;
+padding-bottom: 16px !important;
 }
 
 /* Animation styles for expandable rows */
 .expanded-row .ant-table-expanded-row-fixed {
-  animation: fadeInDown 0.3s ease-in-out;
+animation: fadeInDown 0.3s ease-in-out;
 }
 
 .expanded-children-container {
-  animation: slideDown 0.4s ease-in-out;
-  transform-origin: top;
-  overflow: hidden;
+animation: slideDown 0.4s ease-in-out;
+transform-origin: top;
+overflow: hidden;
 }
 
 .expanded-child-row {
-  animation: fadeIn 0.5s ease-in-out;
-  animation-fill-mode: both;
+animation: fadeIn 0.5s ease-in-out;
+animation-fill-mode: both;
 }
 
 /* Animation for expanding the container */
 @keyframes slideDown {
-  0% {
-    max-height: 0;
-    opacity: 0;
-  }
-  100% {
-    max-height: 1000px;
-    opacity: 1;
-  }
+0% {
+  max-height: 0;
+  opacity: 0;
+}
+100% {
+  max-height: 1000px;
+  opacity: 1;
+}
 }
 
 /* Animation for fading in children */
 @keyframes fadeIn {
-  0% {
-    opacity: 0;
-    transform: translateY(-10px);
-  }
-  100% {
-    opacity: 1;
-    transform: translateY(0);
-  }
+0% {
+  opacity: 0;
+  transform: translateY(-10px);
+}
+100% {
+  opacity: 1;
+  transform: translateY(0);
+}
 }
 
 /* Animation for the row expansion */
 @keyframes fadeInDown {
-  0% {
-    opacity: 0;
-    transform: translateY(-15px);
-  }
-  100% {
-    opacity: 1;
-    transform: translateY(0);
-  }
+0% {
+  opacity: 0;
+  transform: translateY(-15px);
+}
+100% {
+  opacity: 1;
+  transform: translateY(0);
+}
 }
 
 /* Add a rotation animation for the expand icon */
 .row-expand-icon {
-  transition: transform 0.3s ease;
+transition: transform 0.3s ease;
 }
 
 .row-expand-icon:hover {
-  transform: scale(1.2);
+transform: scale(1.2);
 }
 
 /* Add rotation for the expanded icon */
 .row-expand-icon-expanded {
-  transform: rotate(180deg);
+transform: rotate(180deg);
 }
 
 .row-expand-icon-expanded:hover {
-  transform: rotate(180deg) scale(1.2);
+transform: rotate(180deg) scale(1.2);
 }
 
 /* Animations for Ant Design's expandable rows */
 .ant-table-expanded-row {
-  animation: rowExpand 0.3s ease-in-out;
-  overflow: hidden;
+animation: rowExpand 0.3s ease-in-out;
+overflow: hidden;
 }
 
 /* Apply animations to the child rows using Ant Design's classes */
 .expanded-row .ant-table-expanded-row-fixed {
-  animation: fadeInContent 0.4s ease-in-out;
+animation: fadeInContent 0.4s ease-in-out;
 }
 
 /* For child rows in the expanded section */
 .ant-table-expanded-row .child-row {
-  animation: fadeInChild 0.5s ease-in-out forwards;
-  opacity: 0;
+animation: fadeInChild 0.5s ease-in-out forwards;
+opacity: 0;
 }
 
 .ant-table-expanded-row .child-row:nth-child(1) { animation-delay: 0.05s; }
@@ -281,38 +278,38 @@
 
 /* Keyframes for row expansion */
 @keyframes rowExpand {
-  0% {
-    max-height: 0;
-  }
-  100% {
-    max-height: 1000px;
-  }
+0% {
+  max-height: 0;
+}
+100% {
+  max-height: 1000px;
+}
 }
 
 /* Keyframes for content fading in */
 @keyframes fadeInContent {
-  0% {
-    opacity: 0;
-    transform: translateY(-10px);
-  }
-  100% {
-    opacity: 1;
-    transform: translateY(0);
-  }
+0% {
+  opacity: 0;
+  transform: translateY(-10px);
+}
+100% {
+  opacity: 1;
+  transform: translateY(0);
+}
 }
 
 /* Keyframes for child rows fading in */
 @keyframes fadeInChild {
-  0% {
-    opacity: 0;
-    transform: translateX(-10px);
-  }
-  100% {
-    opacity: 1;
-    transform: translateX(0);
-  }
+0% {
+  opacity: 0;
+  transform: translateX(-10px);
+}
+100% {
+  opacity: 1;
+  transform: translateX(0);
+}
 }
 
 :where(.css-dev-only-do-not-override-1xbpjwy).ant-layout [class^="ant-layout"], :where(.css-dev-only-do-not-override-1xbpjwy).ant-layout [class*=" ant-layout"] {
-  padding: 0 !important;
+padding: 0 !important;
 }
