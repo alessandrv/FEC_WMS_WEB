@@ -3,7 +3,7 @@
         {
             "name": "wms-frontend",
             "script": "serve",
-            "args": ["build/", "3001"],
+            "args": ["build/", "3001", "--spa"],
             "exec_mode": "fork",
             "watch": false
         }
