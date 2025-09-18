@@ -1,7 +1,7 @@
 {
     "apps": [
         {
-            "name": "report-disponibilita-backend",
+            "name": "wms-backend",
             "script": "backend.py",
             "interpreter": "c:\\Users\\Fecadm\\AppData\\Local\\Programs\\Python\\Python312-32\\python.exe",
             "exec_mode": "fork",
