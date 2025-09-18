@@ -15,6 +15,13 @@ app = Flask(__name__)
 
 CORS(app)  # Enable CORS for all routes
 
+@app.after_request
+def add_cors_headers(resp):
+    # Harden to always attach even on errors
+    resp.headers['Access-Control-Allow-Origin'] = '*'
+    resp.headers['Access-Control-Allow-Methods'] = 'GET,POST,PUT,DELETE,OPTIONS'
+    resp.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+    return resp
 def format_delivery_date(date_str):
     try:
         # Parse the input string to a datetime object
