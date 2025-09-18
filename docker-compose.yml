@@ -1,0 +1,37 @@
+version: '3.9'
+services:
+  backend:
+    build:
+      context: ./backend
+    container_name: wms-backend
+    env_file:
+      - .env
+    ports:
+      - "5000:5000"
+    networks:
+      - wmsnet
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    # If Informix SDK is mounted externally
+    volumes:
+      - informix-sdk:/opt/informix:ro
+  frontend:
+    build:
+      context: ./frontend
+    container_name: wms-frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - wmsnet
+networks:
+  wmsnet:
+    driver: bridge
+volumes:
+  informix-sdk:
+    driver: local

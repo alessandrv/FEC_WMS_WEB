@@ -5399,6 +5399,10 @@ def update_location_quantity():
     finally:
         if 'conn' in locals():
             conn.close()
+@app.route('/api/health', methods=['GET'])
+def health_check():
+    """Simple health check endpoint for container orchestration."""
+    return jsonify({"status": "ok"})
 
 # Start the server with waitress if this file is run directly
 if __name__ == '__main__':
@@ -5417,3 +5421,4 @@ if __name__ == '__main__':
     
     # Start waitress server
     serve(app, host='0.0.0.0', port=port, threads=6)
+
