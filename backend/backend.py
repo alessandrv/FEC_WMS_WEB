@@ -6,6 +6,7 @@ import uuid
 from datetime import datetime
 import json
 import os
+import traceback
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
@@ -21,6 +22,12 @@ CORS(app)  # Enable CORS for all routes
 def handle_uncaught_exception(e):
     # Log the exception server-side
     app.logger.exception("Unhandled exception: %s", e)
+    # Also print traceback to stdout/stderr so waitress console shows it
+    try:
+        print("Unhandled exception (global):", str(e))
+        print(traceback.format_exc())
+    except Exception:
+        pass
     # Return a JSON response with status 500
     return jsonify({
         'error': 'Internal server error',
@@ -1333,9 +1340,9 @@ def update_pacchi():
         if not updated:
             return jsonify({'error': 'No updates were made.'}), 400
 
-        # Step 3: Update the volume in wms_scaffali
-        # (left intentionally minimal here — ensure DB update code exists in production)
-        conn.commit()
+    # Step 3: Update the volume in wms_scaffali
+    # (left intentionally minimal here — ensure DB update code exists in production)
+    conn.commit()
 
         source_location = f"{area}-{scaffale}-{colonna}-{piano}"
         operation_details = f"{f'ODL: {odl} - ' if odl else ''}Prelievo articolo {articolo} da {source_location} - QTA: {int(quantity)}"
@@ -1390,6 +1397,7 @@ def update_pacchi():
         conn.rollback()
         operation_details = f"Prelievo articolo {articolo} da {area}-{scaffale}-{colonna}-{piano} - QTA: {int(quantity)} - MERCE NON SCARICATA"
         print(operation_details)
+        print(traceback.format_exc())
         log_operation(
             operation_type="ERRORE",
             operation_details=operation_details,
@@ -1397,6 +1405,12 @@ def update_pacchi():
             ip_address=request.remote_addr
         )
         return jsonify({'error': str(e)}), 500
+
+    except Exception as ex:
+        # Unexpected error: ensure traceback printed to waitress logs
+        print("Unexpected error in update_pacchi:")
+        print(traceback.format_exc())
+        return jsonify({'error': 'Internal server error', 'message': str(ex)}), 500
 
     finally:
         if 'cursor' in locals():
