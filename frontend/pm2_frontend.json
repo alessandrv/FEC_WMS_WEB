@@ -2,10 +2,11 @@
     "apps": [
         {
             "name": "wms-frontend",
-            "script": "serve",
-            "args": ["-s", "build/", "-l 3001"],
+            "script": "server.js",
+            "cwd": "./",
             "exec_mode": "fork",
             "watch": false
         }
     ]
 }
+
