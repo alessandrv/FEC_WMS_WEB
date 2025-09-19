@@ -44,6 +44,27 @@ handler.setFormatter(logging.Formatter(
 if not logger.handlers:
     logger.addHandler(handler)
 
+# Mirror handlers to waitress logger and optionally log to file
+try:
+    LOG_TO_FILE = os.getenv('LOG_TO_FILE', '0') == '1'
+    if LOG_TO_FILE:
+        from logging.handlers import RotatingFileHandler
+        log_file = os.path.join(os.path.dirname(__file__), 'backend.log')
+        file_handler = RotatingFileHandler(log_file, maxBytes=5 * 1024 * 1024, backupCount=3)
+        file_handler.setFormatter(handler.formatter)
+        file_handler.addFilter(RequestIdFilter())
+        logger.addHandler(file_handler)
+
+    # Ensure waitress logging (and other libs) use our handler so logs appear
+    lib_logger = logging.getLogger('waitress')
+    lib_logger.setLevel(logger.level)
+    # copy handlers
+    for h in logger.handlers:
+        lib_logger.addHandler(h)
+except Exception:
+    # don't fail app startup for logging issues
+    pass
+
 
 # Database connection settings (from env)
 DB_DSN = os.getenv('DB_DSN', 'fec')
