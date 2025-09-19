@@ -1,129 +1,19 @@
-from flask import Flask, jsonify, request, g
+from flask import Flask, jsonify, request
+import pyodbc
 from flask_cors import CORS
 from decimal import Decimal, InvalidOperation
-from datetime import datetime
-from dotenv import load_dotenv
-
-# extra imports for logging/debugging and DB
-import logging
-import sys
-import time
 import uuid
-import os
-import pyodbc
+from datetime import datetime
 import json
-import socket
-import traceback
+import os
+from dotenv import load_dotenv
 
 # Load environment variables from .env file
 load_dotenv()
 
 app = Flask(__name__)
 
-# CORS for API endpoints
-CORS(app, resources={r"/api/*": {"origins": "*"}}, supports_credentials=False)
-
-# Low-level WSGI middleware to force-request logging before Flask/Waitress
-class RequestLoggerMiddleware:
-    def __init__(self, app, logfile=None):
-        self.app = app
-        self.logfile = logfile or os.path.join(os.path.dirname(__file__), 'request_debug.log')
-
-    def __call__(self, environ, start_response):
-        try:
-            method = environ.get('REQUEST_METHOD')
-            path = environ.get('PATH_INFO')
-            qs = environ.get('QUERY_STRING', '')
-            # Read limited body safely and rewind wsgi.input for Flask
-            try:
-                length = int(environ.get('CONTENT_LENGTH') or 0)
-            except Exception:
-                length = 0
-            body_preview = ''
-            if length > 0 and 'wsgi.input' in environ:
-                try:
-                    data = environ['wsgi.input'].read(length)
-                    body_preview = data.decode('utf-8', 'ignore')[:1000]
-                    # rewind input
-                    from io import BytesIO
-                    environ['wsgi.input'] = BytesIO(data)
-                except Exception:
-                    body_preview = '<unreadable>'
-
-            try:
-                with open(self.logfile, 'a', encoding='utf-8') as f:
-                    f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} REQ_MIDDLEWARE {method} {path}?{qs} body={body_preview}\n")
-            except Exception:
-                pass
-        except Exception:
-            try:
-                with open(self.logfile, 'a', encoding='utf-8') as f:
-                    f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} REQ_MIDDLEWARE error writing log\n")
-            except Exception:
-                pass
-
-        return self.app(environ, start_response)
-
-# Activate middleware so it runs before waitress/flask handlers
-app.wsgi_app = RequestLoggerMiddleware(app.wsgi_app)
-
-# Structured logger
-logger = logging.getLogger("wms")
-log_level = os.getenv('LOG_LEVEL', 'INFO').upper()
-logger.setLevel(getattr(logging, log_level, logging.INFO))
-handler = logging.StreamHandler(sys.stdout)
-
-class RequestIdFilter(logging.Filter):
-    def filter(self, record):
-        try:
-            record.req_id = getattr(g, "req_id", "-")
-        except Exception:
-            record.req_id = "-"
-        return True
-
-handler.addFilter(RequestIdFilter())
-handler.setFormatter(logging.Formatter(
-    "%(asctime)s %(levelname)s [req_id=%(req_id)s] %(message)s"
-))
-if not logger.handlers:
-    logger.addHandler(handler)
-
-# Mirror handlers to waitress logger and optionally log to file
-try:
-    LOG_TO_FILE = os.getenv('LOG_TO_FILE', '0') == '1'
-    if LOG_TO_FILE:
-        from logging.handlers import RotatingFileHandler
-        log_file = os.path.join(os.path.dirname(__file__), 'backend.log')
-        file_handler = RotatingFileHandler(log_file, maxBytes=5 * 1024 * 1024, backupCount=3)
-        file_handler.setFormatter(handler.formatter)
-        file_handler.addFilter(RequestIdFilter())
-        logger.addHandler(file_handler)
-
-    # Ensure waitress logging (and other libs) use our handler so logs appear
-    lib_logger = logging.getLogger('waitress')
-    lib_logger.setLevel(logger.level)
-    # copy handlers
-    for h in logger.handlers:
-        lib_logger.addHandler(h)
-except Exception:
-    # don't fail app startup for logging issues
-    pass
-
-
-# Database connection settings (from env)
-DB_DSN = os.getenv('DB_DSN', 'fec')
-DB_USER = os.getenv('DB_USER', 'informix')
-DB_PASSWORD = os.getenv('DB_PASSWORD', 'informix')
-connection_string = f'DSN={DB_DSN};UID={DB_USER};PWD={DB_PASSWORD};'
-
-
-def connect_to_db():
-    try:
-        return pyodbc.connect(connection_string)
-    except Exception as e:
-        logger.exception('Unable to connect to the database')
-        raise
-
+CORS(app)  # Enable CORS for all routes
 
 def format_delivery_date(date_str):
     try:
@@ -131,80 +21,22 @@ def format_delivery_date(date_str):
         delivery_date = datetime.strptime(date_str, "%a, %d %b %Y %H:%M:%S GMT")
         # Return the formatted string (e.g., "25 Jan 2025")
         return delivery_date.strftime("%d %b %Y")
-    except Exception:
-        return date_str
+    except ValueError:
+        return date_str  # Return the original string if the date format is invalid
 
+# Define your connection string using environment variables
+DB_DSN = os.getenv('DB_DSN', 'fec')
+DB_USER = os.getenv('DB_USER', 'informix')
+DB_PASSWORD = os.getenv('DB_PASSWORD', 'informix')
+connection_string = f'DSN={DB_DSN};UID={DB_USER};PWD={DB_PASSWORD};'
 
-@app.before_request
-def _before_request():
-    # assign a request id and start time
-    g.req_id = uuid.uuid4().hex
-    g.t0 = time.time()
-
-    # Quick preflight response for CORS
-    if request.method == 'OPTIONS':
-        resp = app.make_response(("", 204))
-        resp.headers['Access-Control-Allow-Origin'] = request.headers.get('Origin', '*')
-        resp.headers['Access-Control-Allow-Methods'] = 'GET,POST,PUT,DELETE,OPTIONS'
-        resp.headers['Access-Control-Allow-Headers'] = request.headers.get(
-            'Access-Control-Request-Headers', 'Content-Type, Authorization'
-        )
-        resp.headers['Vary'] = 'Origin'
-        logger.debug(f"Preflight OPTIONS {request.path} Origin={request.headers.get('Origin')}")
-        return resp
-
-    # Log incoming request summary
+def connect_to_db():
     try:
-        body_preview = None
-        if request.is_json:
-            payload = request.get_json(silent=True)
-            if isinstance(payload, dict):
-                body_preview = {k: ("<large>" if len(str(v)) > 200 else v) for k, v in list(payload.items())[:30]}
-            else:
-                body_preview = '<json>'
-        else:
-            body_preview = request.get_data(cache=False, as_text=True)[:500]
-    except Exception:
-        body_preview = '<unreadable>'
-
-    logger.info(f"{request.method} {request.path} origin={request.headers.get('Origin')} ct={request.headers.get('Content-Type')} ip={request.remote_addr} body={body_preview}")
-    # Also print a short line to stdout so container logs / pm2 captures at least this
-    try:
-        print(f"REQ {g.req_id} {request.method} {request.path} body_preview={str(body_preview)[:200]}")
-    except Exception:
-        pass
-
-
-@app.after_request
-def add_cors_headers(resp):
-    # Always attach CORS headers (also on errors)
-    resp.headers['Access-Control-Allow-Origin'] = request.headers.get('Origin', '*')
-    resp.headers['Access-Control-Allow-Methods'] = 'GET,POST,PUT,DELETE,OPTIONS'
-    resp.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
-    resp.headers['Vary'] = 'Origin'
-    try:
-        dt = (time.time() - getattr(g, 't0', time.time())) * 1000.0
-        logger.info(f"Response {request.method} {request.path} -> {resp.status_code} in {dt:.1f}ms")
-    except Exception:
-        pass
-    return resp
-
-
-@app.errorhandler(Exception)
-def _unhandled_error(e):
-    # Log stacktrace and return JSON with req_id for correlation
-    logger.exception(f"Unhandled error on {request.method} {request.path}")
-    # Ensure traceback and req_id visible in stdout for containerized environments
-    try:
-        print(f"ERROR {getattr(g, 'req_id', '-')} {request.method} {request.path} {str(e)}")
-        traceback.print_exc()
-    except Exception:
-        pass
-    return jsonify({
-        'error': 'internal_server_error',
-        'message': str(e),
-        'req_id': getattr(g, 'req_id', '-')
-    }), 500
+        return pyodbc.connect(connection_string)
+    except pyodbc.Error as e:
+        raise Exception(f"Unable to connect to the database: {str(e)}")
+    
+# Endpoint to fetch logs
 @app.route('/api/operation-logs', methods=['GET'])
 def get_operation_logs():
     """
@@ -1345,17 +1177,9 @@ def conferma_inserimento():
         if 'conn' in locals():
             conn.close()
 
-@app.route('/api/update-pacchi', methods=['POST', 'OPTIONS'])
+@app.route('/api/update-pacchi', methods=['POST'])
 def update_pacchi():
-    # Handle preflight quickly
-    if request.method == 'OPTIONS':
-        return ('', 204)
-
-    try:
-        data = request.get_json(force=True, silent=False)
-    except Exception as e:
-        logger.exception('Failed to parse JSON payload in update-pacchi')
-        return jsonify({'error': 'invalid_json', 'message': str(e)}), 400
+    data = request.get_json()
 
     # Extract parameters from the request
     articolo = data.get('articolo')
@@ -1366,96 +1190,119 @@ def update_pacchi():
     quantity = data.get('quantity')
     odl = data.get('odl')  # New parameter for ODL
 
-    logger.debug(f"update-pacchi called articolo={articolo} area={area} scaffale={scaffale} colonna={colonna} piano={piano} quantity={quantity} odl={odl}")
-
     # Validate input parameters
     if not all([articolo, area, scaffale, colonna, piano, quantity]):
-        logger.warning('update-pacchi missing required params')
-        return jsonify({'error': 'missing_parameters'}), 400
+        return jsonify({'error': 'Missing parameters'}), 400
 
     # Convert quantity to Decimal
     try:
-        quantity = Decimal(str(quantity))
-    except (ValueError, TypeError, InvalidOperation) as ex:
-        logger.exception('Invalid quantity in update-pacchi')
-        return jsonify({'error': 'invalid_quantity', 'message': str(ex)}), 400
+        quantity = Decimal(quantity)
+    except (ValueError, TypeError, InvalidOperation):
+        return jsonify({'error': 'Invalid quantity value'}), 400
 
     try:
+        # Connect to the database
         conn = connect_to_db()
         cursor = conn.cursor()
 
-        # Step 1: Check total available quantity
-        total_quantity_query = '''
+        # Step 1: Check if total available quantity at the location is sufficient
+        total_quantity_query = """
         SELECT SUM(qta) AS total_qta
         FROM wms_items
-        WHERE id_art = ? AND area = ? AND scaffale = ? AND colonna = ? AND piano = ?
-        '''
+        WHERE id_art = ?
+          AND area = ?
+          AND scaffale = ?
+          AND colonna = ?
+          AND piano = ?
+        """
         cursor.execute(total_quantity_query, (articolo, area, scaffale, colonna, piano))
         result = cursor.fetchone()
-        logger.debug(f'total quantity query result: {result}')
 
-        if not result or result[0] is None:
-            logger.warning('No quantity found at location')
-            return jsonify({'error': 'no_quantity', 'available': 0}), 400
+        if not result or result.total_qta is None:
+            return jsonify({'error': 'No pacchi found for the specified articolo and location'}), 404
 
-        total_available_quantity = Decimal(result[0])
+        total_available_quantity = Decimal(result.total_qta)
+
         if total_available_quantity < quantity:
-            logger.warning('Insufficient quantity')
-            return jsonify({'error': 'insufficient_quantity', 'available': float(total_available_quantity)}), 400
+            return jsonify({'error': 'Insufficient quantity at the specified location'}), 400
 
-        # Step 2: Get pacchi
-        pacchi_query = '''
+        # Step 2: Retrieve all pacchi matching the articolo and location, ordered by quantity ascending
+        pacchi_query = """
         SELECT id_pacco, qta, dimensione
         FROM wms_items
-        WHERE id_art = ? AND area = ? AND scaffale = ? AND colonna = ? AND piano = ?
+        WHERE id_art = ?
+          AND area = ?
+          AND scaffale = ?
+          AND colonna = ?
+          AND piano = ?
         ORDER BY qta ASC
-        '''
+        """
         cursor.execute(pacchi_query, (articolo, area, scaffale, colonna, piano))
         pacchi = cursor.fetchall()
-        logger.debug(f'fetched {len(pacchi)} pacchi')
 
         if not pacchi:
-            logger.warning('No pacchi at location')
-            return jsonify({'error': 'no_pacchi'}), 400
+            return jsonify({'error': 'No pacchi found for the specified articolo and location'}), 404
 
         remaining_quantity = quantity
         updated = False
-        volume_mapping = {'Piccolo': 40000, 'Medio': 100000, 'Grande': 300000, 'Zero': 0}
+
+        volume_mapping = {
+            'Piccolo': 40000,
+            'Medio': 100000,
+            'Grande': 300000,
+            'Zero': 0
+        }
+
         total_volume_to_add = 0
 
         for pacco in pacchi:
+            id_pacco = pacco.id_pacco
+            qta = int(pacco.qta)
+            dimensione = pacco.dimensione
+
             if remaining_quantity <= 0:
                 break
-            pacco_id = pacco[0]
-            pacco_qta = Decimal(pacco[1])
-            pacco_dim = pacco[2]
-            take = min(pacco_qta, remaining_quantity)
-            logger.debug(f'Using pacco {pacco_id} qta={pacco_qta} take={take}')
-            if pacco_qta == take:
-                cursor.execute('DELETE FROM wms_items WHERE id_pacco = ?', (pacco_id,))
+
+            qta_to_remove = min(qta, remaining_quantity)
+            new_qta = qta - qta_to_remove
+
+            if new_qta == 0:
+                # Remove the pacco
+                delete_query = "DELETE FROM wms_items WHERE id_pacco = ?"
+                cursor.execute(delete_query, (id_pacco,))
             else:
-                new_qta = pacco_qta - take
-                cursor.execute('UPDATE wms_items SET qta = ? WHERE id_pacco = ?', (float(new_qta), pacco_id))
-            total_volume_to_add += volume_mapping.get(pacco_dim, 0) * float(take)
-            remaining_quantity -= take
+                # Update the pacco's quantity
+                update_query = "UPDATE wms_items SET qta = ? WHERE id_pacco = ?"
+                cursor.execute(update_query, (new_qta, id_pacco))
+
+            # Calculate volume to add back to shelf
+            total_volume_to_add += volume_mapping[dimensione] * (int(qta_to_remove) / int(qta))
+            remaining_quantity -= qta_to_remove
             updated = True
 
+            if remaining_quantity == 0:
+                break
+
         if remaining_quantity > 0:
-            logger.error(f'Remaining after processing pacchi: {remaining_quantity}')
             conn.rollback()
-            return jsonify({'error': 'insufficient_after_processing', 'missing': float(remaining_quantity)}), 500
+            return jsonify({'error': 'Insufficient quantity to fulfill the request'}), 400
 
-        # Update shelf volume and commit
-        cursor.execute('UPDATE wms_scaffali SET volume_libero = volume_libero + ? WHERE area = ? AND scaffale = ? AND colonna = ? AND piano = ?', (total_volume_to_add, area, scaffale, colonna, piano))
+        if not updated:
+            return jsonify({'error': 'No updates were made.'}), 400
+
+        # Step 3: Update the volume in wms_scaffali
+        
         conn.commit()
-
         source_location = f"{area}-{scaffale}-{colonna}-{piano}"
         operation_details = f"{f'ODL: {odl} - ' if odl else ''}Prelievo articolo {articolo} da {source_location} - QTA: {int(quantity)}"
-        additional_data = {'odl': odl}
+        
+        additional_data = {
+            "odl": odl
+        }
         log_operation(
-            operation_type='PRELIEVO',
+            operation_type="PRELIEVO",
             operation_details=operation_details,
-            user='current_user',
+            user="current_user",  # Replace with actual user info if available
             ip_address=request.remote_addr,
             article_code=articolo,
             source_location=source_location,
@@ -1463,43 +1310,54 @@ def update_pacchi():
             can_undo=True,
             additional_data=additional_data
         )
-        logger.info(operation_details)
-
+        print(operation_details)
+        
+         # Only insert into wms_prelievi if odl is provided
         if odl:
             try:
-                cursor.execute('INSERT INTO wms_prelievi (odl, id_art, qta) VALUES (?, ?, ?)', (odl, articolo, float(quantity)))
-                conn.commit()
-            except Exception:
-                logger.exception('Failed inserting into wms_prelievi')
+                insert_prelievo_query = """
+                INSERT INTO wms_prelievi (odl, id_art, area, scaffale, colonna, piano, qta)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """
+                cursor.execute(insert_prelievo_query, (
+                    odl,
+                    articolo,
+                    area,
+                    scaffale,
+                    colonna,
+                    piano,
+                    int(quantity)
+                ))
+                conn.commit()  # Second commit for the prelievi insert
+            except pyodbc.Error as e:
+                # If the prelievi insert fails, log it but don't roll back the pacchi updates
+                log_operation(
+                    operation_type="ERRORE",
+                    operation_details=f"Errore nell'inserimento del prelievo in wms_prelievi: {str(e)}",
+                    user="current_user",
+                    ip_address=request.remote_addr
+                )
+                # Don't return error as the main operation succeeded
 
-        return jsonify({'status': 'ok'})
+        return jsonify({'success': True}), 200
 
     except pyodbc.Error as e:
-        try:
-            conn.rollback()
-        except Exception:
-            pass
+        conn.rollback()
         operation_details = f"Prelievo articolo {articolo} da {area}-{scaffale}-{colonna}-{piano} - QTA: {int(quantity)} - MERCE NON SCARICATA"
-        logger.exception(operation_details)
+        print(operation_details)
         log_operation(
-            operation_type='ERRORE',
+            operation_type="ERRORE",
             operation_details=operation_details,
-            user='current_user',
+            user="current_user",  # Replace with actual user info if available
             ip_address=request.remote_addr
         )
-        return jsonify({'error': 'db_error', 'message': str(e)}), 500
+        return jsonify({'error': str(e)}), 500
 
     finally:
         if 'cursor' in locals():
-            try:
-                cursor.close()
-            except Exception:
-                pass
+            cursor.close()
         if 'conn' in locals():
-            try:
-                conn.close()
-            except Exception:
-                pass
+            conn.close()
 
 @app.route('/api/prelievi-summary', methods=['GET'])
 def get_prelievi_summary():
@@ -5541,10 +5399,6 @@ def update_location_quantity():
     finally:
         if 'conn' in locals():
             conn.close()
-@app.route('/api/health', methods=['GET'])
-def health_check():
-    """Simple health check endpoint for container orchestration."""
-    return jsonify({"status": "ok"})
 
 # Start the server with waitress if this file is run directly
 if __name__ == '__main__':
@@ -5563,4 +5417,3 @@ if __name__ == '__main__':
     
     # Start waitress server
     serve(app, host='0.0.0.0', port=port, threads=6)
-
