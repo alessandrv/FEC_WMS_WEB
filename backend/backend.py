@@ -6,7 +6,6 @@ import uuid
 from datetime import datetime
 import json
 import os
-import traceback
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
@@ -14,36 +13,8 @@ load_dotenv()
 
 app = Flask(__name__)
 
-CORS(app)  # Enable CORS for all routes
-
-
-# Global error handler to ensure JSON responses and CORS headers on unhandled exceptions
-@app.errorhandler(Exception)
-def handle_uncaught_exception(e):
-    # Log the exception server-side
-    app.logger.exception("Unhandled exception: %s", e)
-    # Also print traceback to stdout/stderr so waitress console shows it
-    try:
-        print("Unhandled exception (global):", str(e))
-        print(traceback.format_exc())
-    except Exception:
-        pass
-    # Return a JSON response with status 500
-    return jsonify({
-        'error': 'Internal server error',
-        'message': str(e)
-    }), 500
-
-
-# Ensure CORS header present on all responses as a safety net
-@app.after_request
-def add_cors_headers(response):
-    # Flask-CORS should handle this, but add a fallback to be safe
-    if 'Access-Control-Allow-Origin' not in response.headers:
-        response.headers['Access-Control-Allow-Origin'] = '*'
-        response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization'
-        response.headers['Access-Control-Allow-Methods'] = 'GET,PUT,POST,DELETE,OPTIONS'
-    return response
+# Enable CORS for all /api/* routes (allow all origins)
+CORS(app, resources={r"/api/*": {"origins": "*"}})
 
 def format_delivery_date(date_str):
     try:
@@ -1210,8 +1181,6 @@ def conferma_inserimento():
 @app.route('/api/update-pacchi', methods=['POST'])
 def update_pacchi():
     data = request.get_json()
-    if not data or not isinstance(data, dict):
-        return jsonify({'error': 'Invalid or missing JSON payload'}), 400
 
     # Extract parameters from the request
     articolo = data.get('articolo')
@@ -1226,12 +1195,11 @@ def update_pacchi():
     if not all([articolo, area, scaffale, colonna, piano, quantity]):
         return jsonify({'error': 'Missing parameters'}), 400
 
-    # Convert quantity to Decimal (more permissive)
+    # Convert quantity to Decimal
     try:
-        # Accept numeric or string values
-        quantity = Decimal(str(quantity))
-    except (ValueError, TypeError, InvalidOperation) as conv_err:
-        return jsonify({'error': 'Invalid quantity value', 'details': str(conv_err)}), 400
+        quantity = Decimal(quantity)
+    except (ValueError, TypeError, InvalidOperation):
+        return jsonify({'error': 'Invalid quantity value'}), 400
 
     try:
         # Connect to the database
@@ -1251,14 +1219,14 @@ def update_pacchi():
         cursor.execute(total_quantity_query, (articolo, area, scaffale, colonna, piano))
         result = cursor.fetchone()
 
-        # result may be a tuple-like row; use index 0 for the aggregated sum
+        # result may be a tuple/Row; use index 0 for SUM
         if not result or result[0] is None:
             return jsonify({'error': 'No pacchi found for the specified articolo and location'}), 404
 
         try:
-            total_available_quantity = Decimal(str(result[0]))
+            total_available_quantity = Decimal(result[0])
         except (ValueError, TypeError, InvalidOperation):
-            return jsonify({'error': 'Invalid total quantity in DB'}), 500
+            return jsonify({'error': 'Invalid total quantity value from DB'}), 500
 
         if total_available_quantity < quantity:
             return jsonify({'error': 'Insufficient quantity at the specified location'}), 400
@@ -1293,21 +1261,22 @@ def update_pacchi():
         total_volume_to_add = 0
 
         for pacco in pacchi:
-            # pacco may be row-like; access by attribute if available, otherwise by index
+            # pacco may be a Row or tuple; access by index for safety
+            id_pacco = pacco[0]
+            qta = pacco[1]
+            dimensione = pacco[2] if len(pacco) > 2 else None
+
+            # Ensure qta is integer
             try:
-                id_pacco = pacco.id_pacco
-                qta = int(pacco.qta)
-                dimensione = pacco.dimensione
-            except Exception:
-                # Fallback to index-based access
-                id_pacco = pacco[0]
-                qta = int(pacco[1])
-                dimensione = pacco[2] if len(pacco) > 2 else None
+                qta = int(qta)
+            except (TypeError, ValueError):
+                # skip malformed records
+                continue
 
             if remaining_quantity <= 0:
                 break
 
-            qta_to_remove = min(qta, remaining_quantity)
+            qta_to_remove = min(qta, int(remaining_quantity))
             new_qta = qta - qta_to_remove
 
             if new_qta == 0:
@@ -1319,13 +1288,14 @@ def update_pacchi():
                 update_query = "UPDATE wms_items SET qta = ? WHERE id_pacco = ?"
                 cursor.execute(update_query, (new_qta, id_pacco))
 
-            # Calculate volume to add back to shelf; protect against missing dimension
-            vol_per_pacco = volume_mapping.get(dimensione, 0)
-            try:
-                total_volume_to_add += vol_per_pacco * (Decimal(int(qta_to_remove)) / Decimal(int(qta)))
-            except Exception:
-                # If division or conversion fails, fallback to integer math
-                total_volume_to_add += vol_per_pacco * (int(qta_to_remove) / max(1, int(qta)))
+            # Calculate volume to add back to shelf (safe lookup and avoid division by zero)
+            vol = volume_mapping.get(dimensione, 0)
+            if qta > 0:
+                try:
+                    total_volume_to_add += Decimal(vol) * (Decimal(qta_to_remove) / Decimal(qta))
+                except (InvalidOperation, ZeroDivisionError):
+                    # fallback: treat as full package volume
+                    total_volume_to_add += Decimal(vol) * Decimal(qta_to_remove)
             remaining_quantity -= qta_to_remove
             updated = True
 
@@ -1333,20 +1303,31 @@ def update_pacchi():
                 break
 
         if remaining_quantity > 0:
-            if 'conn' in locals() and conn:
-                conn.rollback()
+            conn.rollback()
             return jsonify({'error': 'Insufficient quantity to fulfill the request'}), 400
 
         if not updated:
             return jsonify({'error': 'No updates were made.'}), 400
 
-    # Step 3: Update the volume in wms_scaffali
-    # (left intentionally minimal here — ensure DB update code exists in production)
-    conn.commit()
+        # Step 3: Update the volume in wms_scaffali (add back freed volume)
+        try:
+            if total_volume_to_add and total_volume_to_add != 0:
+                # Update volume_libero by adding the freed volume (rounded to integer)
+                update_shelf_volume_query = """
+                UPDATE wms_scaffali
+                SET volume_libero = COALESCE(volume_libero, 0) + ?
+                WHERE area = ? AND scaffale = ? AND colonna = ? AND piano = ?
+                """
+                cursor.execute(update_shelf_volume_query, (int(total_volume_to_add), area, scaffale, colonna, piano))
 
+        except Exception as ex_update_vol:
+            # Log but don't fail the whole operation
+            app.logger.error(f"Failed to update shelf volume: {ex_update_vol}")
+
+        conn.commit()
         source_location = f"{area}-{scaffale}-{colonna}-{piano}"
         operation_details = f"{f'ODL: {odl} - ' if odl else ''}Prelievo articolo {articolo} da {source_location} - QTA: {int(quantity)}"
-
+        
         additional_data = {
             "odl": odl
         }
@@ -1382,7 +1363,6 @@ def update_pacchi():
                 conn.commit()  # Second commit for the prelievi insert
             except pyodbc.Error as e:
                 # If the prelievi insert fails, log it but don't roll back the pacchi updates
-                app.logger.exception("Errore nell'inserimento del prelievo in wms_prelievi: %s", e)
                 log_operation(
                     operation_type="ERRORE",
                     operation_details=f"Errore nell'inserimento del prelievo in wms_prelievi: {str(e)}",
@@ -1392,25 +1372,6 @@ def update_pacchi():
                 # Don't return error as the main operation succeeded
 
         return jsonify({'success': True}), 200
-
-    except pyodbc.Error as e:
-        conn.rollback()
-        operation_details = f"Prelievo articolo {articolo} da {area}-{scaffale}-{colonna}-{piano} - QTA: {int(quantity)} - MERCE NON SCARICATA"
-        print(operation_details)
-        print(traceback.format_exc())
-        log_operation(
-            operation_type="ERRORE",
-            operation_details=operation_details,
-            user="current_user",  # Replace with actual user info if available
-            ip_address=request.remote_addr
-        )
-        return jsonify({'error': str(e)}), 500
-
-    except Exception as ex:
-        # Unexpected error: ensure traceback printed to waitress logs
-        print("Unexpected error in update_pacchi:")
-        print(traceback.format_exc())
-        return jsonify({'error': 'Internal server error', 'message': str(ex)}), 500
 
     finally:
         if 'cursor' in locals():
