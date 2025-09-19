@@ -103,6 +103,11 @@ def _before_request():
         body_preview = '<unreadable>'
 
     logger.info(f"{request.method} {request.path} origin={request.headers.get('Origin')} ct={request.headers.get('Content-Type')} ip={request.remote_addr} body={body_preview}")
+    # Also print a short line to stdout so container logs / pm2 captures at least this
+    try:
+        print(f"REQ {g.req_id} {request.method} {request.path} body_preview={str(body_preview)[:200]}")
+    except Exception:
+        pass
 
 
 @app.after_request
@@ -124,6 +129,12 @@ def add_cors_headers(resp):
 def _unhandled_error(e):
     # Log stacktrace and return JSON with req_id for correlation
     logger.exception(f"Unhandled error on {request.method} {request.path}")
+    # Ensure traceback and req_id visible in stdout for containerized environments
+    try:
+        print(f"ERROR {getattr(g, 'req_id', '-')} {request.method} {request.path} {str(e)}")
+        traceback.print_exc()
+    except Exception:
+        pass
     return jsonify({
         'error': 'internal_server_error',
         'message': str(e),
