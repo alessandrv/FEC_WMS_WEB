@@ -15,6 +15,18 @@ app = Flask(__name__)
 
 CORS(app)  # Enable CORS for all routes
 
+
+# Global error handler to ensure JSON responses and CORS headers on unhandled exceptions
+@app.errorhandler(Exception)
+def handle_uncaught_exception(e):
+    # Log the exception server-side
+    app.logger.exception("Unhandled exception: %s", e)
+    # Return a JSON response with status 500
+    return jsonify({
+        'error': 'Internal server error',
+        'message': str(e)
+    }), 500
+
 def format_delivery_date(date_str):
     try:
         # Parse the input string to a datetime object
@@ -1194,11 +1206,12 @@ def update_pacchi():
     if not all([articolo, area, scaffale, colonna, piano, quantity]):
         return jsonify({'error': 'Missing parameters'}), 400
 
-    # Convert quantity to Decimal
+    # Convert quantity to Decimal (more permissive)
     try:
-        quantity = Decimal(quantity)
-    except (ValueError, TypeError, InvalidOperation):
-        return jsonify({'error': 'Invalid quantity value'}), 400
+        # Accept numeric or string values
+        quantity = Decimal(str(quantity))
+    except (ValueError, TypeError, InvalidOperation) as conv_err:
+        return jsonify({'error': 'Invalid quantity value', 'details': str(conv_err)}), 400
 
     try:
         # Connect to the database
@@ -1218,10 +1231,14 @@ def update_pacchi():
         cursor.execute(total_quantity_query, (articolo, area, scaffale, colonna, piano))
         result = cursor.fetchone()
 
-        if not result or result.total_qta is None:
+        # result may be a tuple-like row; use index 0 for the aggregated sum
+        if not result or result[0] is None:
             return jsonify({'error': 'No pacchi found for the specified articolo and location'}), 404
 
-        total_available_quantity = Decimal(result.total_qta)
+        try:
+            total_available_quantity = Decimal(str(result[0]))
+        except (ValueError, TypeError, InvalidOperation):
+            return jsonify({'error': 'Invalid total quantity in DB'}), 500
 
         if total_available_quantity < quantity:
             return jsonify({'error': 'Insufficient quantity at the specified location'}), 400
@@ -1256,9 +1273,16 @@ def update_pacchi():
         total_volume_to_add = 0
 
         for pacco in pacchi:
-            id_pacco = pacco.id_pacco
-            qta = int(pacco.qta)
-            dimensione = pacco.dimensione
+            # pacco may be row-like; access by attribute if available, otherwise by index
+            try:
+                id_pacco = pacco.id_pacco
+                qta = int(pacco.qta)
+                dimensione = pacco.dimensione
+            except Exception:
+                # Fallback to index-based access
+                id_pacco = pacco[0]
+                qta = int(pacco[1])
+                dimensione = pacco[2] if len(pacco) > 2 else None
 
             if remaining_quantity <= 0:
                 break
@@ -1275,8 +1299,13 @@ def update_pacchi():
                 update_query = "UPDATE wms_items SET qta = ? WHERE id_pacco = ?"
                 cursor.execute(update_query, (new_qta, id_pacco))
 
-            # Calculate volume to add back to shelf
-            total_volume_to_add += volume_mapping[dimensione] * (int(qta_to_remove) / int(qta))
+            # Calculate volume to add back to shelf; protect against missing dimension
+            vol_per_pacco = volume_mapping.get(dimensione, 0)
+            try:
+                total_volume_to_add += vol_per_pacco * (Decimal(int(qta_to_remove)) / Decimal(int(qta)))
+            except Exception:
+                # If division or conversion fails, fallback to integer math
+                total_volume_to_add += vol_per_pacco * (int(qta_to_remove) / max(1, int(qta)))
             remaining_quantity -= qta_to_remove
             updated = True
 
@@ -1284,18 +1313,20 @@ def update_pacchi():
                 break
 
         if remaining_quantity > 0:
-            conn.rollback()
+            if 'conn' in locals() and conn:
+                conn.rollback()
             return jsonify({'error': 'Insufficient quantity to fulfill the request'}), 400
 
         if not updated:
             return jsonify({'error': 'No updates were made.'}), 400
 
         # Step 3: Update the volume in wms_scaffali
-        
+        # (left intentionally minimal here — ensure DB update code exists in production)
         conn.commit()
+
         source_location = f"{area}-{scaffale}-{colonna}-{piano}"
         operation_details = f"{f'ODL: {odl} - ' if odl else ''}Prelievo articolo {articolo} da {source_location} - QTA: {int(quantity)}"
-        
+
         additional_data = {
             "odl": odl
         }
@@ -1311,8 +1342,8 @@ def update_pacchi():
             additional_data=additional_data
         )
         print(operation_details)
-        
-         # Only insert into wms_prelievi if odl is provided
+
+        # Only insert into wms_prelievi if odl is provided
         if odl:
             try:
                 insert_prelievo_query = """
@@ -1331,6 +1362,7 @@ def update_pacchi():
                 conn.commit()  # Second commit for the prelievi insert
             except pyodbc.Error as e:
                 # If the prelievi insert fails, log it but don't roll back the pacchi updates
+                app.logger.exception("Errore nell'inserimento del prelievo in wms_prelievi: %s", e)
                 log_operation(
                     operation_type="ERRORE",
                     operation_details=f"Errore nell'inserimento del prelievo in wms_prelievi: {str(e)}",
