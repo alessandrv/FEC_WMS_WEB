@@ -23,6 +23,50 @@ app = Flask(__name__)
 # CORS for API endpoints
 CORS(app, resources={r"/api/*": {"origins": "*"}}, supports_credentials=False)
 
+# Low-level WSGI middleware to force-request logging before Flask/Waitress
+class RequestLoggerMiddleware:
+    def __init__(self, app, logfile=None):
+        self.app = app
+        self.logfile = logfile or os.path.join(os.path.dirname(__file__), 'request_debug.log')
+
+    def __call__(self, environ, start_response):
+        try:
+            method = environ.get('REQUEST_METHOD')
+            path = environ.get('PATH_INFO')
+            qs = environ.get('QUERY_STRING', '')
+            # Read limited body safely and rewind wsgi.input for Flask
+            try:
+                length = int(environ.get('CONTENT_LENGTH') or 0)
+            except Exception:
+                length = 0
+            body_preview = ''
+            if length > 0 and 'wsgi.input' in environ:
+                try:
+                    data = environ['wsgi.input'].read(length)
+                    body_preview = data.decode('utf-8', 'ignore')[:1000]
+                    # rewind input
+                    from io import BytesIO
+                    environ['wsgi.input'] = BytesIO(data)
+                except Exception:
+                    body_preview = '<unreadable>'
+
+            try:
+                with open(self.logfile, 'a', encoding='utf-8') as f:
+                    f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} REQ_MIDDLEWARE {method} {path}?{qs} body={body_preview}\n")
+            except Exception:
+                pass
+        except Exception:
+            try:
+                with open(self.logfile, 'a', encoding='utf-8') as f:
+                    f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} REQ_MIDDLEWARE error writing log\n")
+            except Exception:
+                pass
+
+        return self.app(environ, start_response)
+
+# Activate middleware so it runs before waitress/flask handlers
+app.wsgi_app = RequestLoggerMiddleware(app.wsgi_app)
+
 # Structured logger
 logger = logging.getLogger("wms")
 log_level = os.getenv('LOG_LEVEL', 'INFO').upper()
