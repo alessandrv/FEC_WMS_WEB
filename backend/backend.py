@@ -1,51 +1,193 @@
-from flask import Flask, jsonify, request
-import pyodbc
+from flask import Flask, jsonify, request, g
 from flask_cors import CORS
-from decimal import Decimal, InvalidOperation
-import uuid
-from datetime import datetime
-import json
-import os
-from dotenv import load_dotenv
-
-# Load environment variables from .env file
-load_dotenv()
-
-app = Flask(__name__)
-
-CORS(app)  # Enable CORS for all routes
-
-@app.after_request
-def add_cors_headers(resp):
-    # Harden to always attach even on errors
-    resp.headers['Access-Control-Allow-Origin'] = '*'
-    resp.headers['Access-Control-Allow-Methods'] = 'GET,POST,PUT,DELETE,OPTIONS'
-    resp.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
-    return resp
-def format_delivery_date(date_str):
     try:
-        # Parse the input string to a datetime object
-        delivery_date = datetime.strptime(date_str, "%a, %d %b %Y %H:%M:%S GMT")
-        # Return the formatted string (e.g., "25 Jan 2025")
-        return delivery_date.strftime("%d %b %Y")
-    except ValueError:
-        return date_str  # Return the original string if the date format is invalid
+        data = request.get_json(force=True, silent=False)
+    except Exception as e:
+        logger.exception("Failed to parse JSON payload in update-pacchi")
+        return jsonify({'error': 'invalid_json', 'message': str(e)}), 400
 
-# Define your connection string using environment variables
-DB_DSN = os.getenv('DB_DSN', 'fec')
-DB_USER = os.getenv('DB_USER', 'informix')
-DB_PASSWORD = os.getenv('DB_PASSWORD', 'informix')
-connection_string = f'DSN={DB_DSN};UID={DB_USER};PWD={DB_PASSWORD};'
+    # Extract parameters from the request
+    articolo = data.get('articolo')
+    area = data.get('area')
+    scaffale = data.get('scaffale')
+    colonna = data.get('colonna')
+    piano = data.get('piano')
+    quantity = data.get('quantity')
+    odl = data.get('odl')  # New parameter for ODL
 
-def connect_to_db():
+    logger.debug(f"update-pacchi called articolo={articolo} area={area} scaffale={scaffale} colonna={colonna} piano={piano} quantity={quantity} odl={odl}")
+
+    # Validate input parameters
+    if not all([articolo, area, scaffale, colonna, piano, quantity]):
+        logger.warning("update-pacchi missing required params")
+        return jsonify({'error': 'missing_parameters'}), 400
+
+    # Convert quantity to Decimal
     try:
-        return pyodbc.connect(connection_string)
+        quantity = Decimal(str(quantity))
+    except (ValueError, TypeError, InvalidOperation) as ex:
+        logger.exception("Invalid quantity in update-pacchi")
+        return jsonify({'error': 'invalid_quantity', 'message': str(ex)}), 400
+
+    try:
+        # Connect to the database
+        conn = connect_to_db()
+        cursor = conn.cursor()
+
+        # Step 1: Check if total available quantity at the location is sufficient
+        total_quantity_query = """
+        SELECT SUM(qta) AS total_qta
+        FROM wms_items
+        WHERE id_art = ?
+          AND area = ?
+          AND scaffale = ?
+          AND colonna = ?
+          AND piano = ?
+        """
+        cursor.execute(total_quantity_query, (articolo, area, scaffale, colonna, piano))
+        result = cursor.fetchone()
+
+        logger.debug(f"total quantity query result: {result}")
+
+        if not result or result[0] is None:
+            logger.warning("No quantity found at location")
+            return jsonify({'error': 'no_quantity', 'available': 0}), 400
+
+        total_available_quantity = Decimal(result[0])
+
+        logger.debug(f"total_available_quantity={total_available_quantity} requested={quantity}")
+
+        if total_available_quantity < quantity:
+            logger.warning("Insufficient quantity")
+            return jsonify({'error': 'insufficient_quantity', 'available': float(total_available_quantity)}), 400
+
+        # Step 2: Retrieve all pacchi matching the articolo and location, ordered by quantity ascending
+        pacchi_query = """
+        SELECT id_pacco, qta, dimensione
+        FROM wms_items
+        WHERE id_art = ?
+          AND area = ?
+          AND scaffale = ?
+          AND colonna = ?
+          AND piano = ?
+        ORDER BY qta ASC
+        """
+        cursor.execute(pacchi_query, (articolo, area, scaffale, colonna, piano))
+        pacchi = cursor.fetchall()
+
+        logger.debug(f"fetched {len(pacchi)} pacchi")
+
+        if not pacchi:
+            logger.warning("No pacchi at location")
+            return jsonify({'error': 'no_pacchi'}), 400
+
+        remaining_quantity = quantity
+        updated = False
+
+        volume_mapping = {
+            'Piccolo': 40000,
+            'Medio': 100000,
+            'Grande': 300000,
+            'Zero': 0
+        }
+
+        total_volume_to_add = 0
+
+        # Iterate pacchi and update quantities
+        for pacco in pacchi:
+            try:
+                pacco_id = pacco[0]
+                pacco_qta = Decimal(pacco[1])
+                pacco_dim = pacco[2]
+            except Exception:
+                logger.exception("Malformed pacco row")
+                continue
+
+            if remaining_quantity <= 0:
+                break
+
+            take = min(pacco_qta, remaining_quantity)
+            logger.debug(f"Using pacco {pacco_id} qta={pacco_qta} take={take}")
+
+            if pacco_qta == take:
+                # delete pacco
+                cursor.execute("DELETE FROM wms_items WHERE id_pacco = ?", (pacco_id,))
+            else:
+                # update pacco qta
+                new_qta = pacco_qta - take
+                cursor.execute("UPDATE wms_items SET qta = ? WHERE id_pacco = ?", (float(new_qta), pacco_id))
+
+            # track volume to add back
+            total_volume_to_add += volume_mapping.get(pacco_dim, 0) * float(take)
+            remaining_quantity -= take
+            updated = True
+
+        if remaining_quantity > 0:
+            logger.error(f"Remaining after processing pacchi: {remaining_quantity}")
+            conn.rollback()
+            return jsonify({'error': 'insufficient_after_processing', 'missing': float(remaining_quantity)}), 500
+
+        # Step 3: Update the volume in wms_scaffali
+        cursor.execute(
+            "UPDATE wms_scaffali SET volume_libero = volume_libero + ? WHERE area = ? AND scaffale = ? AND colonna = ? AND piano = ?",
+            (total_volume_to_add, area, scaffale, colonna, piano)
+        )
+
+        conn.commit()
+        source_location = f"{area}-{scaffale}-{colonna}-{piano}"
+        operation_details = f"{f'ODL: {odl} - ' if odl else ''}Prelievo articolo {articolo} da {source_location} - QTA: {int(quantity)}"
+
+        additional_data = {"odl": odl}
+        log_operation(
+            operation_type="PRELIEVO",
+            operation_details=operation_details,
+            user="current_user",
+            ip_address=request.remote_addr,
+            article_code=articolo,
+            source_location=source_location,
+            quantity=quantity,
+            can_undo=True,
+            additional_data=additional_data
+        )
+
+        logger.info(operation_details)
+
+        # Only insert into wms_prelievi if odl is provided
+        if odl:
+            try:
+                cursor.execute("INSERT INTO wms_prelievi (odl, id_art, qta) VALUES (?, ?, ?)", (odl, articolo, float(quantity)))
+                conn.commit()
+            except Exception:
+                logger.exception("Failed inserting into wms_prelievi")
+
+        return jsonify({'status': 'ok'})
+
     except pyodbc.Error as e:
-        raise Exception(f"Unable to connect to the database: {str(e)}")
-    
-# Endpoint to fetch logs
-@app.route('/api/operation-logs', methods=['GET'])
-def get_operation_logs():
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        operation_details = f"Prelievo articolo {articolo} da {area}-{scaffale}-{colonna}-{piano} - QTA: {int(quantity)} - MERCE NON SCARICATA"
+        logger.exception(operation_details)
+        log_operation(
+            operation_type="ERRORE",
+            operation_details=operation_details,
+            user="current_user",
+            ip_address=request.remote_addr
+        )
+        return jsonify({'error': 'db_error', 'message': str(e)}), 500
+
+    finally:
+        if 'cursor' in locals():
+            try:
+                cursor.close()
+            except Exception:
+                pass
+        if 'conn' in locals():
+            try:
+                conn.close()
+            except Exception:
+                pass
     """
     Get operation logs with filtering and pagination.
     Can filter by operation_type, article_code, and undoable status.
