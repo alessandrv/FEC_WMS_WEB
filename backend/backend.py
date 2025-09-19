@@ -27,6 +27,17 @@ def handle_uncaught_exception(e):
         'message': str(e)
     }), 500
 
+
+# Ensure CORS header present on all responses as a safety net
+@app.after_request
+def add_cors_headers(response):
+    # Flask-CORS should handle this, but add a fallback to be safe
+    if 'Access-Control-Allow-Origin' not in response.headers:
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization'
+        response.headers['Access-Control-Allow-Methods'] = 'GET,PUT,POST,DELETE,OPTIONS'
+    return response
+
 def format_delivery_date(date_str):
     try:
         # Parse the input string to a datetime object
@@ -1192,6 +1203,8 @@ def conferma_inserimento():
 @app.route('/api/update-pacchi', methods=['POST'])
 def update_pacchi():
     data = request.get_json()
+    if not data or not isinstance(data, dict):
+        return jsonify({'error': 'Invalid or missing JSON payload'}), 400
 
     # Extract parameters from the request
     articolo = data.get('articolo')
