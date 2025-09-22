@@ -1,1 +1,8 @@
 2025-09-19 09:12:44 LOG_TEST request_debug OK
+2025-09-19 10:40:34 REQ_MIDDLEWARE GET /api/get-items?page=1&limit=20&articleFilter=&supplierFilter=&descriptionFilter=&filterString=A--- body=
+2025-09-19 10:40:57 REQ_MIDDLEWARE GET /api/get-items?page=1&limit=20&articleFilter=&supplierFilter=&descriptionFilter=&filterString=A--- body=
+2025-09-19 10:41:56 REQ_MIDDLEWARE GET /api/get-items?page=1&limit=20&articleFilter=&supplierFilter=&descriptionFilter=&filterString=A--- body=
+2025-09-19 10:45:46 REQ_MIDDLEWARE GET /api/get-items?page=1&limit=20&articleFilter=&supplierFilter=&descriptionFilter=&filterString=A--- body=
+2025-09-19 10:52:26 REQ_MIDDLEWARE GET /api/get-items?page=1&limit=20&articleFilter=&supplierFilter=&descriptionFilter=&filterString=A--- body=
+2025-09-19 10:56:23 REQ_MIDDLEWARE GET /api/get-items?page=1&limit=20&articleFilter=&supplierFilter=&descriptionFilter=&filterString=A--- body=
+2025-09-19 10:56:55 REQ_MIDDLEWARE GET /api/get-items?page=1&limit=20&articleFilter=&supplierFilter=&descriptionFilter=&filterString=A--- body=

@@ -95,21 +95,12 @@ const IspezioneScaffali = () => {
   const [pendingSave, setPendingSave] = useState(false);
   const [multiSelectMode, setMultiSelectMode] = useState(false);
   const [selectedColumns, setSelectedColumns] = useState([]);
+  const [inspectionQuestions, setInspectionQuestions] = useState([]);
 
-  // Inspection questions
-  const inspectionQuestions = [
-    { id: 'q1', text: 'La scaffalatura è stata installata secondo le indicazioni del costruttore?' },
-    { id: 'q2', text: 'Esiste il lay-out delle scaffalature completo dei prospetti di ciascuna sezione? Il lay-out corrisponde alla situazione attuale?' },
-    { id: 'q3', text: 'I cartelli indicanti il carico ammesso per ogni sezione sono presenti, corretti e ben visibili?' },
-    { id: 'q4', text: 'Il personale addetto alle operazioni di movimentazione delle merci è informato e formato circa il corretto uso delle scaffalature ed il significato dei dati espressi nelle tabelle di portata?' },
-    { id: 'q5', text: 'Vengono utilizzati i corretti accessori per lo stoccaggio, come previsto dal costruttore?' },
-    { id: 'q6', text: 'Le macchine utilizzate per la movimentazione dei carichi sono quelle previste dal costruttore?' },
-    { id: 'q7', text: 'La pavimentazione è orizzontale e priva di danni o deformazioni in prossimità dei punti di ancoraggio?' },
-    { id: 'q8', text: 'L\'area di lavoro è idonea e mantenuta pulita ed ordinata?' },
-    { id: 'q9', text: 'Vengono rispettati i limiti degli ingombri a terra e in quota?' },
-    { id: 'q10', text: 'L\'area è sufficientemente illuminata? (assenza di zone d\'ombra)' },
-    { id: 'q11', text: 'Altro (specificare)' }
-  ];
+  // Load inspection questions from backend on component mount
+  useEffect(() => {
+    loadDefaultQuestions();
+  }, []);
 
   // Create modified layouts for column-based view
   const columnBasedLayouts = useMemo(() => {
@@ -139,16 +130,40 @@ const IspezioneScaffali = () => {
   const fetchInspectionCycles = async () => {
     setLoadingCycles(true);
     try {
-      const response = await axios.get(`${process.env.REACT_APP_API_URL}/api/inspection-cycles`);
+      const response = await axios.get(`${process.env.REACT_APP_API_URL}/api/v2/inspection-cycles`);
       
-      // Add a "current" option at the beginning
-      const cycles = [{
-        id: 'current',
-        label: 'Ispezione Corrente (Ciclo Attivo)',
-        date: new Date().toISOString().split('T')[0]
-      }, ...response.data];
-      
-      setInspectionCycles(cycles);
+      if (response.data.success) {
+        // Separate active and inactive cycles
+        const activeCycle = response.data.cycles.find(cycle => cycle.is_active);
+        const inactiveCycles = response.data.cycles.filter(cycle => !cycle.is_active);
+        
+        // Build cycles array - only add "current" if there's an active cycle
+        const cycles = [];
+        
+        if (activeCycle) {
+          cycles.push({
+            id: 'current',
+            label: `${activeCycle.cycle_name} (Ciclo Attivo)`,
+            date: activeCycle.start_date,
+            is_active: true,
+            actual_id: activeCycle.id
+          });
+        }
+        
+        // Add historical cycles
+        inactiveCycles.forEach(cycle => {
+          cycles.push({
+            id: cycle.id,
+            label: `${cycle.cycle_name} (${new Date(cycle.start_date).toLocaleDateString('it-IT')})`,
+            date: cycle.start_date,
+            is_active: cycle.is_active
+          });
+        });
+        
+        setInspectionCycles(cycles);
+      } else {
+        throw new Error(response.data.error || 'Errore nel caricamento dei cicli');
+      }
     } catch (error) {
       console.error('Error fetching inspection cycles:', error);
       message.error('Errore durante il caricamento dei cicli di ispezione');
@@ -161,19 +176,22 @@ const IspezioneScaffali = () => {
   const fetchInspectionData = async (cycleId = 'current') => {
     setLoading(true);
     try {
-      const response = await axios.get(`${process.env.REACT_APP_API_URL}/api/shelf-inspection`, {
-        params: {
-          cycle: cycleId
-        }
+      const params = cycleId !== 'current' ? { cycle_id: cycleId } : {};
+      const response = await axios.get(`${process.env.REACT_APP_API_URL}/api/v2/shelf-inspections`, {
+        params
       });
       
-      // Convert array to object with scaffale as key for easier lookup
-      const inspectionMap = {};
-      response.data.forEach(item => {
-        inspectionMap[item.scaffale] = item;
-      });
-      
-      setInspectionData(inspectionMap);
+      if (response.data.success) {
+        // Convert array to object with scaffale as key for easier lookup
+        const inspectionMap = {};
+        response.data.inspections.forEach(inspection => {
+          inspectionMap[inspection.scaffale] = inspection;
+        });
+        
+        setInspectionData(inspectionMap);
+      } else {
+        throw new Error(response.data.error || 'Errore nel caricamento delle ispezioni');
+      }
     } catch (error) {
       console.error('Error fetching inspection data:', error);
       message.error('Errore durante il caricamento dei dati di ispezione');
@@ -212,8 +230,13 @@ const IspezioneScaffali = () => {
     
     setLoadingHistory(true);
     try {
-      const response = await axios.get(`${process.env.REACT_APP_API_URL}/api/shelf-inspection-history/${columnId}`);
-      setInspectionHistory(response.data || []);
+      // Use v2 API to get inspection history
+      const response = await axios.get(`${process.env.REACT_APP_API_URL}/api/v2/shelf-inspections/${columnId}/history`);
+      if (response.data.success) {
+        setInspectionHistory(response.data.inspections || []);
+      } else {
+        setInspectionHistory([]);
+      }
     } catch (error) {
       console.error('Error fetching inspection history:', error);
       setInspectionHistory([]);
@@ -228,49 +251,41 @@ const IspezioneScaffali = () => {
     
     try {
       // Fetch the inspection status based on selected cycle
+      const params = selectedCycle !== 'current' ? { cycle_id: selectedCycle } : {};
       const statusResponse = await axios.get(
-        `${process.env.REACT_APP_API_URL}/api/shelf-inspection/${shelfIdentifier}`,
-        { params: { cycle: selectedCycle } }
+        `${process.env.REACT_APP_API_URL}/api/v2/shelf-inspections/${shelfIdentifier}`,
+        { params }
       );
       
-      // Set the status from the response
-      setSelectedInspectionStatus(statusResponse.data.status);
-      
-      // Update inspection data with this shelf's status
-      setInspectionData(prev => ({
-        ...prev,
-        [shelfIdentifier]: statusResponse.data
-      }));
-      
-      // Only fetch question responses if we have an inspection record
-      if (statusResponse.data.id) {
-        try {
-          const questionsResponse = await axios.get(
-            `${process.env.REACT_APP_API_URL}/api/shelf-inspection-questions/${shelfIdentifier}`,
-            { params: { cycle: selectedCycle } }
-          );
-          
-          // Populate the form with the answers
+      if (statusResponse.data.success) {
+        const inspection = statusResponse.data.inspection;
+        
+        // Set the status from the response
+        setSelectedInspectionStatus(inspection.status);
+        
+        // Update inspection data with this shelf's status
+        setInspectionData(prev => ({
+          ...prev,
+          [shelfIdentifier]: inspection
+        }));
+        
+        // Populate the form with the questions and answers
+        if (inspection.questions && inspection.questions.length > 0) {
           const formData = {};
-          questionsResponse.data.forEach(item => {
-            // Extract the question ID from the text
-            const questionObj = inspectionQuestions.find(q => q.text === item.domanda);
-            if (questionObj) {
-              formData[questionObj.id] = item.risposta;
-              formData[`${questionObj.id}_note`] = item.note || '';
-            }
+          inspection.questions.forEach(item => {
+            formData[item.question_id] = item.answer;
+            formData[`${item.question_id}_note`] = item.notes || '';
           });
           
-          // Set form values
           form.setFieldsValue(formData);
-          
-        } catch (questionsError) {
-          console.error('Error fetching question responses:', questionsError);
-          resetForm();
+        } else {
+          // Load default questions if no responses exist
+          await loadDefaultQuestions();
         }
       } else {
-        // No inspection record found, reset the form
-        resetForm();
+        // No existing inspection, load default questions
+        setSelectedInspectionStatus('to_check');
+        await loadDefaultQuestions();
       }
       
       // Always fetch the inspection history
@@ -280,6 +295,41 @@ const IspezioneScaffali = () => {
       console.error('Error fetching shelf inspection status:', error);
       setSelectedInspectionStatus('to_check');
       resetForm();
+    }
+  };
+
+  const loadDefaultQuestions = async () => {
+    try {
+      const response = await axios.get(`${process.env.REACT_APP_API_URL}/api/v2/inspection-questions`);
+      if (response.data.success) {
+        const questions = response.data.questions;
+        
+        // Convert questions to the format expected by the frontend
+        const formattedQuestions = questions.map(question => ({
+          id: `q${question.id}`,
+          question_id: question.id,
+          text: question.question_text,
+          question: question.question_text,
+          domanda: question.question_text
+        }));
+        
+        // Set the questions state
+        setInspectionQuestions(formattedQuestions);
+        
+        // Create empty form data for all questions
+        const emptyForm = {};
+        formattedQuestions.forEach(question => {
+          emptyForm[question.id] = '';
+          emptyForm[`${question.id}_note`] = '';
+        });
+        
+        form.setFieldsValue(emptyForm);
+        setQuestionResponses(questions);
+      }
+    } catch (error) {
+      console.error('Error loading default questions:', error);
+      // Fallback to empty array if backend fails
+      setInspectionQuestions([]);
     }
   };
 
@@ -334,17 +384,49 @@ const IspezioneScaffali = () => {
     try {
       const formValues = form.getFieldsValue();
       const questionResponsesToSave = inspectionQuestions.map(question => ({
-        domanda: question.text,
-        risposta: formValues[question.id],
-        note: formValues[`${question.id}_note`] || ''
+        question_id: question.question_id, // Use the numeric ID, not the string ID
+        question: question.text,
+        domanda: question.text, // Backward compatibility
+        answer: formValues[question.id], // Use string ID for form field lookup
+        risposta: formValues[question.id], // Backward compatibility
+        notes: formValues[`${question.id}_note`] || '',
+        note: formValues[`${question.id}_note`] || '' // Backward compatibility
       }));
+
+      // Get the current cycle ID if needed
+      let cycleId = selectedCycle !== 'current' ? selectedCycle : null;
+      if (!cycleId) {
+        // Find the current active cycle from the inspectionCycles
+        const currentCycle = inspectionCycles.find(cycle => cycle.id === 'current');
+        if (currentCycle && currentCycle.actual_id) {
+          cycleId = currentCycle.actual_id;
+        } else {
+          // If no active cycle found, we need to get it from the backend
+          const cyclesResponse = await axios.get(`${process.env.REACT_APP_API_URL}/api/v2/inspection-cycles`);
+          if (cyclesResponse.data.success) {
+            const activeCycle = cyclesResponse.data.cycles.find(cycle => cycle.is_active);
+            if (activeCycle) {
+              cycleId = activeCycle.id;
+            }
+          }
+        }
+      }
+
+      if (!cycleId) {
+        message.error('Impossibile determinare il ciclo di ispezione corrente');
+        return;
+      }
+
       await Promise.all(selectedColumns.map(async (columnId) => {
-        await axios.post(`${process.env.REACT_APP_API_URL}/api/shelf-inspection-complete/${columnId}`, {
+        await axios.post(`${process.env.REACT_APP_API_URL}/api/v2/shelf-inspections/${columnId}`, {
           status,
           questions: questionResponsesToSave,
-          cycle: selectedCycle
+          cycle_id: cycleId,
+          inspector_name: 'Sistema', // You can add user context here
+          notes: ''
         });
       }));
+      
       message.success(`Dati ispezione salvati per ${selectedColumns.length} colonne`);
       await fetchInspectionData(selectedCycle);
       setShowStatoModal(false);
@@ -429,17 +511,45 @@ const IspezioneScaffali = () => {
     const parts = shelfId.split('-');
     if (parts.length >= 2) {
       const columnId = `${parts[0]}-${parts[1]}`;
+      
       if (multiSelectMode) {
+        // In multi-select mode, allow selecting uninspected shelves only
+        if (selectedCycle === 'current' && isShelfInspectedInCurrentCycle(columnId)) {
+          message.warning('Non è possibile selezionare scaffali già ispezionati per una nuova ispezione');
+          return;
+        }
+        
         setSelectedColumns(prev =>
           prev.includes(columnId)
             ? prev.filter(id => id !== columnId)
             : [...prev, columnId]
         );
       } else {
+        // Single select mode - smart logic
         setSelectedColumn(columnId);
         setSelectedColumns([columnId]);
+        
+        // Check if viewing historical cycle - always show history
+        if (selectedCycle !== 'current') {
+          setViewingHistory(true);
+          setModalVisible(true);
+          fetchColumnDetails(parts[0], parseInt(parts[1], 10));
+          fetchInspectionHistory(columnId);
+          return;
+        }
+        
+        // Current cycle logic
+        if (isShelfInspectedInCurrentCycle(columnId)) {
+          // Already inspected - show history
+          setViewingHistory(true);
+          fetchInspectionHistory(columnId);
+        } else {
+          // Not inspected - show inspection form
+          setViewingHistory(false);
+          fetchColumnDetails(parts[0], parseInt(parts[1], 10));
+        }
+        
         setModalVisible(true);
-        fetchColumnDetails(parts[0], parseInt(parts[1], 10));
       }
     }
   };
@@ -472,6 +582,15 @@ const IspezioneScaffali = () => {
     return occupiedColumns.has(columnId) ? 'full' : 'available';
   };
 
+  // Check if a shelf has been inspected in the current active cycle
+  const isShelfInspectedInCurrentCycle = (columnId) => {
+    // Only check if we're viewing the current cycle
+    if (selectedCycle !== 'current') return false;
+    
+    const inspection = inspectionData[columnId];
+    return inspection && inspection.status && inspection.status !== 'to_check';
+  };
+
   // Function to get status for a shelf ID in column-based view
   const getShelfStatus = (shelfId) => {
     // Extract column part from shelf ID
@@ -496,6 +615,22 @@ const IspezioneScaffali = () => {
       
       if (inspection) {
         inspectionInfo = `\nStato ispezione: ${inspection.status}\nUltima ispezione: ${inspection.last_check || 'Mai'}`;
+        
+        // Add feedback for current cycle behavior
+        if (selectedCycle === 'current' && isShelfInspectedInCurrentCycle(columnId)) {
+          inspectionInfo += '\n📋 Clicca per vedere/modificare ispezione';
+          if (multiSelectMode) {
+            inspectionInfo += '\n⚠️ Non selezionabile (già ispezionato)';
+          }
+        } else if (selectedCycle === 'current') {
+          inspectionInfo += '\n📝 Clicca per ispezionare';
+        } else {
+          inspectionInfo += '\n📚 Ciclo storico - Solo cronologia';
+        }
+      } else if (selectedCycle === 'current') {
+        inspectionInfo = '\n📝 Clicca per ispezionare';
+      } else {
+        inspectionInfo = '\n📚 Ciclo storico - Nessuna ispezione trovata';
       }
       
       // Get space usage info
@@ -523,7 +658,7 @@ const IspezioneScaffali = () => {
             getShelfStatus={getShelfStatus}
             tooltipContent={getColumnTooltip}
             showFloorNumber={false}
-            highlightedShelves={new Set(selectedColumns)}
+            highlightedShelves={multiSelectMode ? new Set(selectedColumns) : new Set()}
           />
         </div>
       );
@@ -538,7 +673,7 @@ const IspezioneScaffali = () => {
             getShelfStatus={getShelfStatus}
             tooltipContent={getColumnTooltip}
             showFloorNumber={false}
-            highlightedShelves={new Set(selectedColumns)}
+            highlightedShelves={multiSelectMode ? new Set(selectedColumns) : new Set()}
           />
         </div>
       );
@@ -553,7 +688,7 @@ const IspezioneScaffali = () => {
                   getShelfStatus={getShelfStatus}
                   tooltipContent={getColumnTooltip}
                   showFloorNumber={false}
-                  highlightedShelves={new Set(selectedColumns)}
+                  highlightedShelves={multiSelectMode ? new Set(selectedColumns) : new Set()}
               />
           </div>
       );
@@ -591,10 +726,107 @@ const IspezioneScaffali = () => {
     }
   ];
 
-  const toggleHistoryView = () => {
-    setViewingHistory(!viewingHistory);
-    if (!viewingHistory && inspectionHistory.length === 0) {
+  // Function to load existing inspection data into the form for editing
+  const loadExistingInspectionForEditing = async () => {
+    if (!selectedColumn) return;
+    
+    try {
+      // Get the current cycle ID
+      let cycleId = selectedCycle !== 'current' ? selectedCycle : null;
+      if (!cycleId) {
+        const currentCycle = inspectionCycles.find(cycle => cycle.id === 'current');
+        if (currentCycle && currentCycle.actual_id) {
+          cycleId = currentCycle.actual_id;
+        }
+      }
+      
+      if (!cycleId) {
+        message.error('Impossibile determinare il ciclo di ispezione corrente');
+        return;
+      }
+      
+      // Fetch existing inspection data
+      const params = { cycle_id: cycleId };
+      const response = await axios.get(
+        `${process.env.REACT_APP_API_URL}/api/v2/shelf-inspections/${selectedColumn}`,
+        { params }
+      );
+      
+      if (response.data.success && response.data.inspection) {
+        const inspection = response.data.inspection;
+        
+        // Set the current status
+        setSelectedInspectionStatus(inspection.status);
+        
+        // Load the form with existing answers
+        if (inspection.questions && inspection.questions.length > 0) {
+          const formData = {};
+          
+          console.log('Loading inspection questions:', inspection.questions);
+          console.log('Available form questions:', inspectionQuestions);
+          
+          inspection.questions.forEach(item => {
+            console.log('Processing question item:', item);
+            
+            // Try to find matching question in inspectionQuestions by text
+            const matchingQuestion = inspectionQuestions.find(q => 
+              q.text === item.question || q.text === item.question_text
+            );
+            
+            if (matchingQuestion) {
+              console.log(`Mapping question "${item.question}" to form field "${matchingQuestion.id}"`);
+              formData[matchingQuestion.id] = item.answer;
+              formData[`${matchingQuestion.id}_note`] = item.notes || '';
+            } else {
+              console.log(`No matching question found for: ${item.question}`);
+              // Fallback: try using question_id directly
+              if (item.question_id) {
+                formData[item.question_id] = item.answer;
+                formData[`${item.question_id}_note`] = item.notes || '';
+              }
+            }
+          });
+          
+          console.log('Final form data to set:', formData);
+          form.setFieldsValue(formData);
+          
+          // Also update question responses state for consistency
+          setQuestionResponses(inspection.questions);
+          
+          message.success('Dati esistenti caricati per la modifica');
+        } else {
+          // If no existing questions, load defaults
+          await loadDefaultQuestions();
+        }
+      } else {
+        // No existing inspection found, load defaults
+        await loadDefaultQuestions();
+        setSelectedInspectionStatus('to_check');
+      }
+    } catch (error) {
+      console.error('Error loading existing inspection for editing:', error);
+      message.error('Errore nel caricamento dei dati esistenti');
+      await loadDefaultQuestions();
+      setSelectedInspectionStatus('to_check');
+    }
+  };
+
+  const toggleHistoryView = async () => {
+    const newViewingHistory = !viewingHistory;
+    setViewingHistory(newViewingHistory);
+    
+    if (newViewingHistory && inspectionHistory.length === 0) {
+      // Switching TO history view - fetch history if not already loaded
       fetchInspectionHistory(selectedColumn);
+    } else if (!newViewingHistory) {
+      // Switching FROM history view TO form view
+      if (selectedCycle === 'current' && isShelfInspectedInCurrentCycle(selectedColumn)) {
+        // If this shelf is already inspected in current cycle, load existing data for editing
+        await loadExistingInspectionForEditing();
+      } else {
+        // For new inspections or historical cycles, load default questions
+        await loadDefaultQuestions();
+      }
     }
   };
 
@@ -928,26 +1160,34 @@ const IspezioneScaffali = () => {
   const createNewInspectionCycle = async () => {
     setCreatingCycle(true);
     try {
-      const response = await axios.post(`${process.env.REACT_APP_API_URL}/api/inspection-cycles`);
-      message.success('Nuovo ciclo di ispezione creato con successo');
+      const response = await axios.post(`${process.env.REACT_APP_API_URL}/api/v2/inspection-cycles`, {
+        cycle_name: `Ciclo ${new Date().toLocaleDateString('it-IT', { month: 'long', year: 'numeric' })}`,
+        notes: 'Ciclo creato automaticamente dal sistema'
+      });
       
-      // Refresh cycles data
-      await fetchInspectionCycles();
-      
-      // Make sure we're on the current cycle
-      setSelectedCycle('current');
-      
-      // Refresh inspection data to show the new cycle
-      await fetchInspectionData('current');
-      
-      // Close inspection modal if open
-      if (modalVisible) {
-        setModalVisible(false);
-      }
-      
-      // Reset form and selected column
-      if (selectedColumn) {
-        setSelectedColumn(null);
+      if (response.data.success) {
+        message.success('Nuovo ciclo di ispezione creato con successo');
+        
+        // Refresh cycles data
+        await fetchInspectionCycles();
+        
+        // Make sure we're on the current cycle
+        setSelectedCycle('current');
+        
+        // Refresh inspection data to show the new cycle
+        await fetchInspectionData('current');
+        
+        // Close inspection modal if open
+        if (modalVisible) {
+          setModalVisible(false);
+        }
+        
+        // Reset form and selected column
+        if (selectedColumn) {
+          setSelectedColumn(null);
+        }
+      } else {
+        throw new Error(response.data.error || 'Errore nella creazione del ciclo');
       }
       
     } catch (error) {
