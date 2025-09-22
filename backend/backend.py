@@ -5541,51 +5541,32 @@ def get_cycle_creation_status_v2():
 
 @app.route('/api/v2/inspection-cycles', methods=['POST'])
 def create_inspection_cycle_v2():
-    """Create a new inspection cycle (enforces 4-month rule)"""
+    """Create a new inspection cycle"""
     try:
         data = request.get_json()
         cycle_name = data.get('cycle_name', f'Ciclo {datetime.now().strftime("%B %Y")}')
         notes = data.get('notes', '')
+        is_active = data.get('is_active', True)  # Allow controlling active status
         
         conn = connect_to_db()
         cursor = conn.cursor()
         conn.autocommit = False
         
-        # Check if we can create a new cycle
-        status_query = """
-        SELECT FIRST 1 start_date
-        FROM wms_inspection_cycles
-        ORDER BY start_date DESC
-        """
-        cursor.execute(status_query)
-        result = cursor.fetchone()
-        
         today = date.today()
         
-        if result:
-            last_cycle_date = result[0]
-            months_since = months_between_full(last_cycle_date, today)
-            
-            if months_since < 4:
-                next_allowed = add_months(last_cycle_date, 4)
-                return jsonify({
-                    'success': False,
-                    'error': f'Nuovo ciclo possibile solo dopo 4 mesi dall\'ultimo. Prossima data disponibile: {next_allowed.strftime("%d/%m/%Y")}',
-                    'next_allowed_date': next_allowed.strftime('%Y-%m-%d')
-                }), 400
-        
-        # Deactivate current active cycle
-        cursor.execute("UPDATE wms_inspection_cycles SET is_active = 0, end_date = ? WHERE is_active = 1", (today,))
+        # If creating an active cycle, deactivate current active cycle
+        if is_active:
+            cursor.execute("UPDATE wms_inspection_cycles SET is_active = 0, end_date = ? WHERE is_active = 1", (today,))
         
         # Create new cycle
         insert_query = """
         INSERT INTO wms_inspection_cycles (cycle_name, start_date, is_active, notes)
-        VALUES (?, ?, 1, ?)
+        VALUES (?, ?, ?, ?)
         """
-        cursor.execute(insert_query, (cycle_name, today, notes))
+        cursor.execute(insert_query, (cycle_name, today, 1 if is_active else 0, notes))
         
         # Get the new cycle ID
-        cursor.execute("SELECT id FROM wms_inspection_cycles WHERE start_date = ? AND is_active = 1", (today,))
+        cursor.execute("SELECT id FROM wms_inspection_cycles WHERE start_date = ? AND cycle_name = ?", (today, cycle_name))
         new_cycle = cursor.fetchone()
         new_cycle_id = new_cycle[0] if new_cycle else None
         
@@ -5596,6 +5577,7 @@ def create_inspection_cycle_v2():
             'cycle_id': new_cycle_id,
             'cycle_name': cycle_name,
             'start_date': today.strftime('%Y-%m-%d'),
+            'is_active': is_active,
             'message': f'Nuovo ciclo "{cycle_name}" creato con successo'
         })
         
@@ -5603,6 +5585,108 @@ def create_inspection_cycle_v2():
         if 'conn' in locals():
             conn.rollback()
         print(f"Error creating cycle: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        if 'conn' in locals():
+            conn.close()
+
+
+@app.route('/api/v2/inspection-cycles/close-current', methods=['POST'])
+def close_current_inspection_cycle():
+    """Close the current active inspection cycle without creating a new one"""
+    try:
+        data = request.get_json()
+        notes = data.get('notes', 'Ciclo chiuso dall\'operatore')
+        
+        conn = connect_to_db()
+        cursor = conn.cursor()
+        conn.autocommit = False
+        
+        today = date.today()
+        
+        # Get the current active cycle
+        cursor.execute("SELECT FIRST 1 id, cycle_name FROM wms_inspection_cycles WHERE is_active = 1")
+        current_cycle = cursor.fetchone()
+        
+        if not current_cycle:
+            return jsonify({
+                'success': False,
+                'error': 'Nessun ciclo attivo trovato da chiudere'
+            }), 400
+        
+        current_cycle_id = current_cycle[0]
+        current_cycle_name = current_cycle[1]
+        
+        # Close the current cycle
+        cursor.execute("""
+            UPDATE wms_inspection_cycles 
+            SET is_active = 0, end_date = ?, notes = ? 
+            WHERE id = ?
+        """, (today, notes, current_cycle_id))
+        
+        conn.commit()
+        
+        return jsonify({
+            'success': True,
+            'completed_cycle_id': current_cycle_id,
+            'completed_cycle_name': current_cycle_name,
+            'end_date': today.strftime('%Y-%m-%d'),
+            'message': f'Ciclo "{current_cycle_name}" chiuso con successo'
+        })
+        
+    except Exception as e:
+        if 'conn' in locals():
+            conn.rollback()
+        print(f"Error closing cycle: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        if 'conn' in locals():
+            conn.close()
+
+
+@app.route('/api/v2/inspection-cycles/<cycle_id>/activate', methods=['PUT'])
+def activate_inspection_cycle(cycle_id):
+    """Activate a specific inspection cycle (deactivates all others)"""
+    try:
+        conn = connect_to_db()
+        cursor = conn.cursor()
+        conn.autocommit = False
+        
+        # First, check if the cycle exists
+        cursor.execute("SELECT id, cycle_name FROM wms_inspection_cycles WHERE id = ?", (cycle_id,))
+        cycle = cursor.fetchone()
+        
+        if not cycle:
+            return jsonify({
+                'success': False,
+                'error': f'Ciclo con ID {cycle_id} non trovato'
+            }), 404
+        
+        cycle_name = cycle[1]
+        
+        # Deactivate all current active cycles
+        cursor.execute("UPDATE wms_inspection_cycles SET is_active = 0 WHERE is_active = 1")
+        
+        # Activate the specified cycle
+        cursor.execute("UPDATE wms_inspection_cycles SET is_active = 1 WHERE id = ?", (cycle_id,))
+        
+        conn.commit()
+        
+        return jsonify({
+            'success': True,
+            'cycle_id': cycle_id,
+            'cycle_name': cycle_name,
+            'message': f'Ciclo "{cycle_name}" attivato con successo'
+        })
+        
+    except Exception as e:
+        if 'conn' in locals():
+            conn.rollback()
+        print(f"Error activating cycle: {str(e)}")
         return jsonify({'success': False, 'error': str(e)}), 500
     finally:
         if 'cursor' in locals():

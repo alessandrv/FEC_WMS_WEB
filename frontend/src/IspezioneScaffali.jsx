@@ -137,6 +137,32 @@ const IspezioneScaffali = () => {
         const activeCycle = response.data.cycles.find(cycle => cycle.is_active);
         const inactiveCycles = response.data.cycles.filter(cycle => !cycle.is_active);
         
+        // If no active cycle exists, activate the most recent cycle
+        if (!activeCycle && inactiveCycles.length > 0) {
+          console.log('No active cycle found, activating the most recent cycle...');
+          
+          // Sort by start_date descending to get the most recent
+          const sortedCycles = inactiveCycles.sort((a, b) => new Date(b.start_date) - new Date(a.start_date));
+          const mostRecentCycle = sortedCycles[0];
+          
+          try {
+            // Activate the most recent cycle
+            await axios.put(`${process.env.REACT_APP_API_URL}/api/v2/inspection-cycles/${mostRecentCycle.id}/activate`);
+            
+            message.info(`Ciclo "${mostRecentCycle.cycle_name}" attivato automaticamente`);
+            
+            // Refetch cycles to get updated data
+            setTimeout(() => {
+              fetchInspectionCycles();
+            }, 500);
+            return;
+            
+          } catch (activationError) {
+            console.error('Error activating cycle:', activationError);
+            message.warning('Impossibile attivare automaticamente l\'ultimo ciclo');
+          }
+        }
+        
         // Build cycles array - only add "current" if there's an active cycle
         const cycles = [];
         
@@ -589,6 +615,135 @@ const IspezioneScaffali = () => {
     
     const inspection = inspectionData[columnId];
     return inspection && inspection.status && inspection.status !== 'to_check';
+  };
+
+  // Function to get all possible column IDs across all pages (only actual shelves, not labels or spanned positions)
+  const getAllPossibleColumns = () => {
+    const allColumns = new Set();
+    
+    // Get all actual shelf sections from layouts (exclude customText labels)
+    const allLayouts = [
+      WarehouseLayouts[1] || [],
+      WarehouseLayouts[2] || [],
+      WarehouseLayouts[3] || []
+    ];
+    
+    allLayouts.forEach(layout => {
+      layout.forEach(section => {
+        // Only count sections that have shelfPattern (actual shelves, not labels)
+        if (section.shelfPattern === 'regular') {
+          const startingValue = section.startingValue || 1;
+          
+          // Check if this section spans multiple columns
+          const hasColumnSpan = section.spanCol && section.spanCol > 1;
+          const hasRowSpan = section.spanRow && section.spanRow > 1;
+          
+          if (hasColumnSpan || hasRowSpan) {
+            // For spanned sections, only count the first position
+            // The shelf physically spans multiple grid positions but is inspected as one unit
+            const columnNumber = startingValue;
+            const columnId = `${section.id}-${columnNumber.toString().padStart(2, '0')}`;
+            allColumns.add(columnId);
+            console.log(`Spanned shelf: ${columnId} (spans ${section.spanCol || 1} cols x ${section.spanRow || 1} rows)`);
+          } else {
+            // For regular sections, generate column IDs for each position
+            for (let i = 0; i < section.width; i++) {
+              const columnNumber = startingValue + i;
+              const columnId = `${section.id}-${columnNumber.toString().padStart(2, '0')}`;
+              allColumns.add(columnId);
+            }
+          }
+        }
+      });
+    });
+    
+    console.log(`Total actual shelf columns found: ${allColumns.size}`);
+    console.log('Actual shelf columns:', Array.from(allColumns).sort());
+    
+    return Array.from(allColumns);
+  };
+
+  // Check if all shelves across all pages are inspected in current cycle
+  const areAllShelvesInspected = () => {
+    if (selectedCycle !== 'current') return false;
+    
+    const allColumns = getAllPossibleColumns();
+    const inspectedCount = allColumns.filter(columnId => 
+      isShelfInspectedInCurrentCycle(columnId)
+    ).length;
+    
+    console.log(`Inspection progress: ${inspectedCount}/${allColumns.length} shelves inspected`);
+    return inspectedCount === allColumns.length && allColumns.length > 0;
+  };
+
+  // DEBUG: Function to show detailed inspection status
+  const debugInspectionStatus = () => {
+    console.log('=== DEBUG INSPECTION STATUS ===');
+    
+    const allColumns = getAllPossibleColumns();
+    const inspectedColumns = [];
+    const uninspectedColumns = [];
+    
+    allColumns.forEach(columnId => {
+      const inspection = inspectionData[columnId];
+      const isInspected = inspection && inspection.status && inspection.status !== 'to_check';
+      
+      if (isInspected) {
+        inspectedColumns.push({
+          columnId,
+          status: inspection.status,
+          lastCheck: inspection.last_check
+        });
+      } else {
+        uninspectedColumns.push({
+          columnId,
+          status: inspection ? inspection.status : 'no data',
+          hasData: !!inspection
+        });
+      }
+    });
+    
+    console.log(`Total columns: ${allColumns.length}`);
+    console.log(`Inspected columns: ${inspectedColumns.length}`);
+    console.log(`Uninspected columns: ${uninspectedColumns.length}`);
+    console.log('Inspected:', inspectedColumns);
+    console.log('Uninspected:', uninspectedColumns);
+    
+    // Show modal with the information
+    Modal.info({
+      title: 'Debug: Inspection Status (Excluding Spanned Shelves)',
+      width: 800,
+      content: (
+        <div>
+          <p><strong>Total Inspectable Shelves:</strong> {allColumns.length}</p>
+          <p><strong>Inspected:</strong> {inspectedColumns.length}</p>
+          <p><strong>Uninspected:</strong> {uninspectedColumns.length}</p>
+          
+          <div style={{ marginBottom: '16px', padding: '8px', backgroundColor: '#f0f8ff', border: '1px solid #d9d9d9', borderRadius: '4px' }}>
+            <strong>Note:</strong> Spanned shelves (like X-02 to X-05, M-41, etc.) are now excluded from the count 
+            as they are part of larger shelf units that span multiple grid positions.
+          </div>
+          
+          {uninspectedColumns.length > 0 && (
+            <div>
+              <h4>Missing Inspections:</h4>
+              <div style={{ maxHeight: '300px', overflow: 'auto' }}>
+                {uninspectedColumns.map(col => (
+                  <div key={col.columnId} style={{ marginBottom: '4px' }}>
+                    <strong>{col.columnId}</strong> - Status: {col.status} 
+                    {!col.hasData && ' (No data found)'}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          
+          <div style={{ marginTop: '16px' }}>
+            <p><strong>Save Cycle Button Enabled:</strong> {areAllShelvesInspected() ? 'Yes' : 'No'}</p>
+          </div>
+        </div>
+      )
+    });
   };
 
   // Function to get status for a shelf ID in column-based view
@@ -1157,42 +1312,57 @@ const IspezioneScaffali = () => {
     }
   };
 
-  const createNewInspectionCycle = async () => {
+  const saveAndCloseCycle = async () => {
     setCreatingCycle(true);
     try {
-      const response = await axios.post(`${process.env.REACT_APP_API_URL}/api/v2/inspection-cycles`, {
-        cycle_name: `Ciclo ${new Date().toLocaleDateString('it-IT', { month: 'long', year: 'numeric' })}`,
-        notes: 'Ciclo creato automaticamente dal sistema'
+      // First check if all shelves are inspected
+      if (!areAllShelvesInspected()) {
+        message.error('Non è possibile salvare il ciclo: alcune scaffalature non sono ancora state ispezionate');
+        return;
+      }
+
+      // Step 1: Close the current cycle
+      const closeResponse = await axios.post(`${process.env.REACT_APP_API_URL}/api/v2/inspection-cycles/close-current`, {
+        notes: 'Ciclo completato e salvato dall\'operatore'
       });
       
-      if (response.data.success) {
-        message.success('Nuovo ciclo di ispezione creato con successo');
-        
-        // Refresh cycles data
-        await fetchInspectionCycles();
-        
-        // Make sure we're on the current cycle
-        setSelectedCycle('current');
-        
-        // Refresh inspection data to show the new cycle
-        await fetchInspectionData('current');
-        
-        // Close inspection modal if open
-        if (modalVisible) {
-          setModalVisible(false);
-        }
-        
-        // Reset form and selected column
-        if (selectedColumn) {
-          setSelectedColumn(null);
-        }
-      } else {
-        throw new Error(response.data.error || 'Errore nella creazione del ciclo');
+      if (!closeResponse.data.success) {
+        throw new Error(closeResponse.data.error || 'Errore durante la chiusura del ciclo');
+      }
+
+      // Step 2: Create a new active cycle for the next inspection period
+      const createResponse = await axios.post(`${process.env.REACT_APP_API_URL}/api/v2/inspection-cycles`, {
+        cycle_name: `Ciclo ${new Date().toLocaleDateString('it-IT', { month: 'long', year: 'numeric' })}`,
+        is_active: true
+      });
+      
+      if (!createResponse.data.success) {
+        console.warn('Ciclo chiuso ma impossibile creare nuovo ciclo:', createResponse.data.error);
+        message.warning('Ciclo salvato, ma errore nella creazione del nuovo ciclo. Contatta l\'amministratore.');
+      }
+      
+      message.success('Ciclo di ispezione salvato e chiuso. Nuovo ciclo creato e attivato.');
+      
+      // Refresh cycles data to get the new active cycle
+      await fetchInspectionCycles();
+      
+      // Switch back to current cycle view (should be the new active cycle)
+      setSelectedCycle('current');
+      await fetchInspectionData('current');
+      
+      // Close inspection modal if open
+      if (modalVisible) {
+        setModalVisible(false);
+      }
+      
+      // Reset form and selected column
+      if (selectedColumn) {
+        setSelectedColumn(null);
       }
       
     } catch (error) {
-      console.error('Error creating new inspection cycle:', error);
-      message.error('Errore durante la creazione del nuovo ciclo di ispezione');
+      console.error('Error saving inspection cycle:', error);
+      message.error('Errore durante il salvataggio del ciclo di ispezione: ' + error.message);
     } finally {
       setCreatingCycle(false);
     }
@@ -1235,12 +1405,17 @@ const IspezioneScaffali = () => {
                 </Select>
                 <Button 
                   type="primary"
-                  onClick={() => createNewInspectionCycle()}
+                  onClick={() => saveAndCloseCycle()}
                   icon={<PlusCircleOutlined />}
                   loading={creatingCycle}
+                  disabled={selectedCycle !== 'current' || !areAllShelvesInspected()}
+                  title={selectedCycle !== 'current' ? 'Disponibile solo per il ciclo corrente' : 
+                         !areAllShelvesInspected() ? 'Completa tutte le ispezioni prima di salvare il ciclo' : 
+                         'Salva e chiudi il ciclo corrente'}
                 >
-                  Nuovo Ciclo
+                  Salva Ciclo
                 </Button>
+               
               </Space>
             </div>
             
