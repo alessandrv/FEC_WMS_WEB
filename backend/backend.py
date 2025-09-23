@@ -480,7 +480,7 @@ def get_items():
         # Validate page and limit
         if page < 1:
             return jsonify({'error': 'Page number must be greater than 0.'}), 400
-        if limit < 1 or limit > 1000:
+        if limit < 1 or limit > 99999:
             return jsonify({'error': 'Limit must be between 1 and 1000.'}), 400
 
         # Calculate offset

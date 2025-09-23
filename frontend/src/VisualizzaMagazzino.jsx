@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
-import { Table, Spin, Input, Button, Pagination, Row, Col, message, Modal, notification, Tooltip, Typography } from 'antd';
+import { Table, Spin, Input, Button, Pagination, Row, Col, message, Modal, notification, Tooltip, Typography, Dropdown, Menu } from 'antd';
 import axios from 'axios';
-import { LoadingOutlined, ReloadOutlined, FullscreenOutlined, InfoCircleOutlined, CloseCircleOutlined, EditOutlined, CheckOutlined, CloseOutlined } from '@ant-design/icons';
+import { LoadingOutlined, ReloadOutlined, FullscreenOutlined, InfoCircleOutlined, CloseCircleOutlined, EditOutlined, CheckOutlined, CloseOutlined, PrinterOutlined, DownOutlined } from '@ant-design/icons';
 import WarehouseGrid from './GridComponent';
 import './GridComponent.css';
 import WarehouseGridSystem from './WarehouseGridSystem';
@@ -40,6 +40,10 @@ const locationInputRefs = [useRef(), useRef(), useRef(), useRef()];
   const [editingKey, setEditingKey] = useState('');
   const [editingQuantity, setEditingQuantity] = useState('');
   const [editingLoading, setEditingLoading] = useState(false);
+
+  // State for printing
+  const [printLoading, setPrintLoading] = useState(false);
+  const [allPrintData, setAllPrintData] = useState([]);
 
   const groupSubitemsByLocationAndMovement = (subitems) => {
     const groupedItems = {};
@@ -296,6 +300,220 @@ const locationInputRefs = [useRef(), useRef(), useRef(), useRef()];
       cancelEditing();
     }
   };
+
+  // Print functions
+  const fetchAllDataForPrint = async () => {
+    try {
+      setPrintLoading(true);
+      
+      // Create filterParts with proper hyphen placement
+      let filterStringParam = locationFilter.join('-');
+      const parts = filterStringParam.split('-').slice(0, 4);
+      while (parts.length < 4) parts.push('');
+      filterStringParam = parts.join('-');
+      
+      // Clear filter if all empty
+      if (parts.every(part => !part)) filterStringParam = '';
+
+      // Fetch all pages of data
+      const response = await axios.get(`${process.env.REACT_APP_API_URL}/api/get-items`, {
+        params: {
+          page: 1,
+          limit: 99999, // Get all items
+          articleFilter,
+          supplierFilter,
+          descriptionFilter,
+          filterString: filterStringParam
+        },
+      });
+
+      if (response.data?.items) {
+        setAllPrintData(response.data.items);
+        return response.data.items;
+      }
+      return [];
+    } catch (error) {
+      console.error('Error fetching all data for print:', error);
+      message.error('Errore nel caricamento dei dati per la stampa');
+      return [];
+    } finally {
+      setPrintLoading(false);
+    }
+  };
+
+  const generatePrintContent = (data, title) => {
+    const currentDate = new Date().toLocaleDateString('it-IT');
+    const currentTime = new Date().toLocaleTimeString('it-IT');
+    
+    let html = `
+      <html>
+        <head>
+          <title>${title}</title>
+          <style>
+            body { 
+              font-family: Arial, sans-serif; 
+              margin: 20px;
+              font-size: 12px;
+            }
+            .header {
+              text-align: center;
+              margin-bottom: 30px;
+              border-bottom: 2px solid #333;
+              padding-bottom: 10px;
+            }
+            .filters {
+              margin-bottom: 20px;
+              padding: 10px;
+              background-color: #f5f5f5;
+              border-radius: 5px;
+            }
+            .filters strong {
+              color: #333;
+            }
+            table { 
+              width: 100%; 
+              border-collapse: collapse; 
+              margin-bottom: 20px;
+            }
+            th, td { 
+              border: 1px solid #ddd; 
+              padding: 8px; 
+              text-align: left;
+            }
+            th { 
+              background-color: #f2f2f2; 
+              font-weight: bold;
+            }
+            .main-row {
+              background-color: #fafafa;
+              font-weight: bold;
+            }
+            .sub-row {
+              background-color: white;
+              font-size: 11px;
+            }
+            .sub-table {
+              margin: 5px 0;
+              border: 1px solid #eee;
+            }
+            .sub-table th {
+              background-color: #f8f8f8;
+              font-size: 10px;
+            }
+            .sub-table td {
+              font-size: 10px;
+              padding: 4px;
+            }
+            @media print {
+              body { margin: 0; }
+              .no-print { display: none; }
+            }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <h1>${title}</h1>
+            <p>Generato il: ${currentDate} alle ${currentTime}</p>
+          </div>
+          
+          <div class="filters">
+            <strong>Filtri applicati:</strong><br/>
+            ${articleFilter ? `Codice Articolo: ${articleFilter}<br/>` : ''}
+            ${descriptionFilter ? `Descrizione: ${descriptionFilter}<br/>` : ''}
+            ${locationFilter.some(f => f) ? `Locazione: ${locationFilter.join('-')}<br/>` : ''}
+            ${!articleFilter && !descriptionFilter && !locationFilter.some(f => f) ? 'Nessun filtro applicato<br/>' : ''}
+            <strong>Totale articoli trovati:</strong> ${data.length}
+          </div>
+          
+          <table>
+            <thead>
+              <tr>
+                <th>Codice Articolo</th>
+                <th>Descrizione</th>
+                <th>Q.ta Totale</th>
+                <th>Dettagli Locazioni</th>
+              </tr>
+            </thead>
+            <tbody>
+    `;
+
+    data.forEach(item => {
+      const subItemsGrouped = item.subItems ? groupSubitemsByLocationAndMovement(item.subItems) : [];
+      
+      html += `
+        <tr class="main-row">
+          <td>${item.id_art}</td>
+          <td>${item.description}</td>
+          <td>${item.totalQta}</td>
+          <td>
+            ${subItemsGrouped.length > 0 ? `
+              <table class="sub-table">
+                <thead>
+                  <tr>
+                    <th>Locazione</th>
+                    <th>Q.ta</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${subItemsGrouped.map(subItem => `
+                    <tr>
+                      <td>${subItem.locazione}</td>
+                      <td>${subItem.totalQta}</td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            ` : 'Nessuna locazione'}
+          </td>
+        </tr>
+      `;
+    });
+
+    html += `
+            </tbody>
+          </table>
+          
+          <div style="margin-top: 30px; text-align: center; font-size: 10px; color: #666;">
+            Rapporto generato dal sistema WMS - ${currentDate} ${currentTime}
+          </div>
+        </body>
+      </html>
+    `;
+
+    return html;
+  };
+
+  const printCurrentPage = () => {
+    const printContent = generatePrintContent(items, 'Articoli in Magazzino - Pagina Corrente');
+    const printWindow = window.open('', '_blank');
+    printWindow.document.write(printContent);
+    printWindow.document.close();
+    printWindow.focus();
+    printWindow.print();
+  };
+
+  const printAllPages = async () => {
+    const allData = await fetchAllDataForPrint();
+    if (allData.length > 0) {
+      const printContent = generatePrintContent(allData, 'Articoli in Magazzino - Risultati Completi');
+      const printWindow = window.open('', '_blank');
+      printWindow.document.write(printContent);
+      printWindow.document.close();
+      printWindow.focus();
+      printWindow.print();
+    }
+  };
+
+  const printMenu = (
+    <Menu>
+      <Menu.Item key="current" onClick={printCurrentPage}>
+        <PrinterOutlined /> Stampa Pagina Corrente ({items.length} articoli)
+      </Menu.Item>
+      <Menu.Item key="all" onClick={printAllPages}>
+        <PrinterOutlined /> Stampa Tutti i Risultati ({totalItems} articoli)
+      </Menu.Item>
+    </Menu>
+  );
   const renderWarehouseSection = () => {
     if (currentPage2 === 1) {
         return (
@@ -628,6 +846,17 @@ const expandableConfig = {
     <Button onClick={clearFilters}>
       Pulisci filtri
     </Button>
+  </Col>
+  <Col>
+    <Dropdown overlay={printMenu} placement="bottomLeft" disabled={printLoading}>
+      <Button 
+        type="default" 
+        icon={<PrinterOutlined />}
+        loading={printLoading}
+      >
+        Stampa <DownOutlined />
+      </Button>
+    </Dropdown>
   </Col>
 </Row>
       {/* Main Table */}
