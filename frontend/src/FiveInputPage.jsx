@@ -25,6 +25,7 @@ const FiveInputPage = () => {
   const input3Ref = useRef(null);
   const input4Ref = useRef(null);
   const input5Ref = useRef(null);
+  const legacyFileInputRef = useRef(null);
 // New state variables
 const [isPackMultiple, setIsPackMultiple] = useState(false);
 const [isFullViewVisible, setIsFullViewVisible] = useState(false);
@@ -32,6 +33,10 @@ const [isFullViewVisible, setIsFullViewVisible] = useState(false);
 
   // File handle for the Excel file
   const [fileHandle, setFileHandle] = useState(null);
+  const [legacyWorkbook, setLegacyWorkbook] = useState(null);
+  const [legacySheetName, setLegacySheetName] = useState(null);
+  const [legacyFileName, setLegacyFileName] = useState(null);
+  const [legacyDirty, setLegacyDirty] = useState(false);
 
   // Focus on the first input when the component mounts
   useEffect(() => {
@@ -58,28 +63,29 @@ const [isFullViewVisible, setIsFullViewVisible] = useState(false);
   // State to store all submitted data
   const [dataRows, setDataRows] = useState([]);
 
+  const loadExistingDataFromArrayBuffer = async (arrayBuffer) => {
+    const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+    const sheetName = workbook.SheetNames[0];
+    const worksheet = workbook.Sheets[sheetName];
+    const existingData = XLSX.utils.sheet_to_json(worksheet);
+
+    const dataWithKeys = existingData.map((row, index) => ({
+      ...row,
+      key: `existing-${index}`,
+    }));
+
+    setDataRows(dataWithKeys);
+    return { workbook, sheetName };
+  };
+
   // Function to request file access
   const loadExistingData = async (handle) => {
     try {
       setIsLoading(true);
       const file = await handle.getFile();
       const arrayBuffer = await file.arrayBuffer();
-      const workbook = XLSX.read(arrayBuffer, { type: 'array' });
 
-      // Assuming data is in the first sheet
-      const sheetName = workbook.SheetNames[0];
-      const worksheet = workbook.Sheets[sheetName];
-
-      // Convert sheet to JSON
-      const existingData = XLSX.utils.sheet_to_json(worksheet);
-      
-      // Add keys to the existing data
-      const dataWithKeys = existingData.map((row, index) => ({
-        ...row,
-        key: `existing-${index}`,
-      }));
-
-      setDataRows(dataWithKeys);
+      await loadExistingDataFromArrayBuffer(arrayBuffer);
       message.success('Dati esistenti caricati con successo!');
     } catch (error) {
       console.error('Error loading existing data:', error);
@@ -91,6 +97,22 @@ const [isFullViewVisible, setIsFullViewVisible] = useState(false);
 
   // Updated requestFileAccess function
   const requestFileAccess = async () => {
+    const canUseFileSystemAccessApi =
+      typeof window !== 'undefined' &&
+      typeof window.showOpenFilePicker === 'function' &&
+      window.isSecureContext;
+
+    if (!canUseFileSystemAccessApi) {
+      message.info(
+        'Il browser non permette accesso diretto ai file su HTTP. Seleziona un file: gli aggiornamenti verranno scaricati come nuovo Excel.'
+      );
+      if (legacyFileInputRef.current) {
+        legacyFileInputRef.current.value = '';
+        legacyFileInputRef.current.click();
+      }
+      return;
+    }
+
     try {
       const [handle] = await window.showOpenFilePicker({
         types: [
@@ -105,20 +127,91 @@ const [isFullViewVisible, setIsFullViewVisible] = useState(false);
       });
 
       setFileHandle(handle);
+      setLegacyWorkbook(null);
+      setLegacySheetName(null);
+      setLegacyFileName(null);
+      setLegacyDirty(false);
       await loadExistingData(handle);
     } catch (error) {
       console.error(error);
       message.error('Selezione file cancellata o fallita.');
     }
   };
+
+  const handleLegacyFileSelected = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+
+    try {
+      setIsLoading(true);
+      const arrayBuffer = await file.arrayBuffer();
+      const { workbook, sheetName } = await loadExistingDataFromArrayBuffer(arrayBuffer);
+
+      setFileHandle(null);
+      setLegacyWorkbook(workbook);
+      setLegacySheetName(sheetName);
+      setLegacyFileName(file.name);
+      setLegacyDirty(false);
+      message.success('Dati esistenti caricati con successo!');
+    } catch (error) {
+      console.error('Error loading legacy file:', error);
+      message.error('Errore nel caricamento del file Excel.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const downloadLegacyExcel = () => {
+    if (!legacyWorkbook || !legacySheetName) {
+      message.error('Nessun file Excel selezionato.');
+      return;
+    }
+
+    try {
+      const wbout = XLSX.write(legacyWorkbook, { bookType: 'xlsx', type: 'array' });
+      const blob = new Blob([wbout], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
+      saveAs(blob, legacyFileName || 'output.xlsx');
+      setLegacyDirty(false);
+      message.success('File Excel scaricato!');
+    } catch (error) {
+      console.error(error);
+      message.error('Errore durante la creazione del file Excel.');
+    }
+  };
   // Function to write data to the Excel file
   const writeToExcel = async (rows) => {
-    if (!fileHandle) {
+    const hasWritableHandle = !!fileHandle;
+    const hasLegacyWorkbook = !!legacyWorkbook && !!legacySheetName;
+
+    if (!hasWritableHandle && !hasLegacyWorkbook) {
       message.error('Seleziona prima un file');
       return false;
     }
   
     try {
+      if (!hasWritableHandle && hasLegacyWorkbook) {
+        const worksheet = legacyWorkbook.Sheets[legacySheetName];
+        const existingData = XLSX.utils.sheet_to_json(worksheet);
+        const updatedData = [...existingData, ...rows];
+        const newWorksheet = XLSX.utils.json_to_sheet(updatedData);
+
+        setLegacyWorkbook((prev) => {
+          const wb = prev || legacyWorkbook;
+          return {
+            ...wb,
+            Sheets: {
+              ...wb.Sheets,
+              [legacySheetName]: newWorksheet,
+            },
+          };
+        });
+        setLegacyDirty(true);
+
+        return true;
+      }
+
       // Create a writable stream
       const writable = await fileHandle.createWritable();
   
@@ -196,8 +289,8 @@ const [isFullViewVisible, setIsFullViewVisible] = useState(false);
       message.error('Per favore, compila tutti i campi.');
       return;
     }
-  
-    const newRow = {
+
+    const rowForExcel = {
       CODICE_ARTICOLO: input1,
       FORNITORE: input2,
       MOVIMENTO: input3,
@@ -207,11 +300,12 @@ const [isFullViewVisible, setIsFullViewVisible] = useState(false);
     };
   
     // Attempt to write to Excel
-    const writeSuccess = await writeToExcel([newRow]);
+    const writeSuccess = await writeToExcel([rowForExcel]);
   
     if (writeSuccess) {
       // Only update the table if writing to Excel was successful
-      const updatedDataRows = [...dataRows, newRow];
+      const rowForUi = { ...rowForExcel, key: `new-${Date.now()}` };
+      const updatedDataRows = [...dataRows, rowForUi];
       setDataRows(updatedDataRows);
   
       // Reset the form
@@ -228,6 +322,7 @@ const [isFullViewVisible, setIsFullViewVisible] = useState(false);
       }
   
       message.success('Dati aggiunti con successo!');
+     
     }
   };
   
@@ -235,6 +330,8 @@ const [isFullViewVisible, setIsFullViewVisible] = useState(false);
  const getLastFiveRows = () => {
   return dataRows.slice(-5).reverse(); // Reverse to show newest first
 };
+
+  const hasSelectedFile = !!fileHandle || !!legacyWorkbook;
   return (
     <div className="five-input-page">
       <Title level={2} className="title">Inserimento Dati</Title>
@@ -340,19 +437,36 @@ const [isFullViewVisible, setIsFullViewVisible] = useState(false);
       </Row>
 
       <div className="actions" style={{ marginTop: '16px', marginBottom: '20px' }}>
-        {!fileHandle && (
+        <input
+          ref={legacyFileInputRef}
+          type="file"
+          accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+          style={{ display: 'none' }}
+          onChange={handleLegacyFileSelected}
+        />
+        {!hasSelectedFile && (
           <Button type="default" onClick={requestFileAccess} style={{ marginRight: '10px' }}>
             Seleziona File Excel
           </Button>
         )}
-        <Button type="primary" onClick={handleSubmit} disabled={!fileHandle} style={{ marginRight: '10px' }}>
+        <Button type="primary" onClick={handleSubmit} disabled={!hasSelectedFile} style={{ marginRight: '10px' }}>
           Aggiungi Riga
         </Button>
+        {!!legacyWorkbook && (
+          <Button
+            type="default"
+            onClick={downloadLegacyExcel}
+            disabled={!legacyDirty}
+            style={{ marginRight: '10px' }}
+          >
+            Scarica Excel aggiornato
+          </Button>
+        )}
         <Button 
           type="default" 
           icon={<EyeOutlined />}
           onClick={() => setIsFullViewVisible(true)}
-          disabled={!fileHandle}
+          disabled={!hasSelectedFile}
         >
           Visualizza Tutto
         </Button>
