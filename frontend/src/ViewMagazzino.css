@@ -431,15 +431,3 @@
   0% { box-shadow: 0 0 5px rgba(255, 152, 0, 0.6) !important; }
   100% { box-shadow: 0 0 15px rgba(255, 152, 0, 1) !important; }
 }
-
-.shelf-cell.highlighted::after {
-  content: '✓';
-  color: #ff9800;
-  font-size: 1.5em;
-  position: absolute;
-  top: 2px;
-  right: 6px;
-  font-weight: bold;
-  pointer-events: none;
-  text-shadow: 1px 1px 1px rgba(0,0,0,0.2);
-}

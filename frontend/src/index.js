@@ -17,8 +17,6 @@ import TrasferimentiMagazzino from './TrasferimentiMagazzino'
 import Picking from './Picking'
 import Picking2 from './Picking2'
 import LogsTable from './LogsTable';
-import Accettazione from './Accettazione';
-import IncomingItemsTable from './IncomingItemsTable';
 import FiveInputPage from './FiveInputPage';
 import Incongurenze from './Incongruenze';
 import IspezioneScaffali from './IspezioneScaffali';
@@ -75,8 +73,6 @@ root.render(
               <Route path="/visualizza-magazzino" element={<VisualizzaMagazzino />} />
               <Route path="/trasferimenti-magazzino" element={<TrasferimentiMagazzino />} />
               <Route path="/prelievi" element={<Picking />} />
-              <Route path="/accettazione" element={<Accettazione />} />
-              <Route path="/in-arrivo" element={<IncomingItemsTable />} />
               <Route path="/inventario" element={<FiveInputPage />} />
               <Route path="/test" element={<Picking2 />} />
               <Route path="/logs" element={<LogsTable />} />

@@ -25,17 +25,108 @@ def format_delivery_date(date_str):
     except ValueError:
         return date_str  # Return the original string if the date format is invalid
 
-# Define your connection string using environment variables
-DB_DSN = os.getenv('DB_DSN', 'fec')
-DB_USER = os.getenv('DB_USER', 'informix')
-DB_PASSWORD = os.getenv('DB_PASSWORD', 'informix')
-connection_string = f'DSN={DB_DSN};UID={DB_USER};PWD={DB_PASSWORD};'
+# Oracle Skyline connection (schema FECITALIA). Requires the 32-bit Oracle 11g client
+# and therefore the 32-bit Python. ERP tables are read through the wms_v_* views
+# (sql/oracle/02_erp_views.sql) which expose the old Informix column names.
+DB_DRIVER = os.getenv('DB_DRIVER', 'Oracle in OraClient11g_home1_32bit')
+DB_DBQ = os.getenv('DB_DBQ', 'SRVSKY:1521/SKYLINE')
+DB_USER = os.getenv('DB_USER', 'FECITALIA')
+DB_PASSWORD = os.getenv('DB_PASSWORD', 'manager')
+connection_string = f'Driver={{{DB_DRIVER}}};DBQ={DB_DBQ};Uid={DB_USER};Pwd={DB_PASSWORD};'
+
+# Main warehouse in Skyline (was dep_code '1' in Informix)
+MAGAZZINO_PRINCIPALE = os.getenv('SKY_MAGAZZINO', 'BAS01')
+# Warehouses considered by /api/articolo-offerte (Informix: 1,20,32,48,60,81)
+MAGAZZINI_OFFERTE = [m.strip() for m in os.getenv('SKY_MAGAZZINI_OFFERTE', 'BAS01,20,32,48,60,81').split(',')]
+
+# Oracle returns UPPERCASE column names: lowercase them so cursor.description keys
+# and row.attribute access keep the Informix names used across this file and the frontend.
+pyodbc.lowercase = True
+
+def _normalize_value(value):
+    # Oracle NUMBER arrives as float/Decimal: integral values become int (like Informix INTEGER)
+    if isinstance(value, float):
+        return int(value) if value.is_integer() else value
+    if isinstance(value, Decimal):
+        return int(value) if value == value.to_integral_value() else float(value)
+    # Oracle DATE always carries a time: pure dates become date (like Informix DATE)
+    if isinstance(value, datetime) and value.time() == datetime.min.time():
+        return value.date()
+    return value
+
+def _normalize_row(row):
+    if row is not None:
+        for i, value in enumerate(row):
+            row[i] = _normalize_value(value)
+    return row
+
+class OracleCursor:
+    """pyodbc cursor proxy that normalizes fetched values; rows stay pyodbc.Row objects."""
+
+    def __init__(self, cursor):
+        self._cursor = cursor
+
+    def execute(self, sql, *params):
+        self._cursor.execute(sql, *params)
+        return self
+
+    def fetchone(self):
+        return _normalize_row(self._cursor.fetchone())
+
+    def fetchall(self):
+        return [_normalize_row(row) for row in self._cursor.fetchall()]
+
+    def fetchmany(self, size=1):
+        return [_normalize_row(row) for row in self._cursor.fetchmany(size)]
+
+    def __iter__(self):
+        for row in self._cursor:
+            yield _normalize_row(row)
+
+    def __getattr__(self, name):
+        return getattr(self._cursor, name)
+
+class OracleConnection:
+    """pyodbc connection proxy returning OracleCursor objects."""
+
+    def __init__(self, conn):
+        object.__setattr__(self, '_conn', conn)
+
+    def cursor(self):
+        return OracleCursor(self._conn.cursor())
+
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
+
+    def __setattr__(self, name, value):
+        setattr(self._conn, name, value)
 
 def connect_to_db():
     try:
-        return pyodbc.connect(connection_string)
+        conn = pyodbc.connect(connection_string)
     except pyodbc.Error as e:
         raise Exception(f"Unable to connect to the database: {str(e)}")
+    cursor = conn.cursor()
+    cursor.execute("ALTER SESSION SET NLS_NUMERIC_CHARACTERS = '.,'")
+    cursor.close()
+    return OracleConnection(conn)
+
+def normalizza_fornitore(codice):
+    """Supplier codes are 'F' + Skyline partitario; accept the bare partitario too."""
+    codice = (codice or '').strip().upper()
+    return codice if codice.startswith('F') else f"F{codice}"
+
+def parse_log_date(value, end_of_day=False):
+    """Log filters arrive as 'YYYY-MM-DD[ HH:MM:SS]' strings; Oracle needs a real datetime."""
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"):
+        try:
+            parsed = datetime.strptime(value[:19], fmt)
+            if fmt == "%Y-%m-%d" and end_of_day:
+                parsed = parsed.replace(hour=23, minute=59, second=59)
+            return parsed
+        except ValueError:
+            continue
+    raise ValueError(f"Formato data non valido: {value}")
     
 # Endpoint to fetch logs
 @app.route('/api/operation-logs', methods=['GET'])
@@ -75,15 +166,15 @@ def get_operation_logs():
             params.append(article_code)
             
         if start_date:
-            conditions.append("timestamp >= ?")
-            params.append(start_date)
-            
+            conditions.append("log_ts >= ?")
+            params.append(parse_log_date(start_date))
+
         if end_date:
-            conditions.append("timestamp <= ?")
-            params.append(end_date)
-        
+            conditions.append("log_ts <= ?")
+            params.append(parse_log_date(end_date, end_of_day=True))
+
         if undoable_only:
-            conditions.append("can_undo = 't' AND is_undone = 'f'")
+            conditions.append("can_undo = 1 AND is_undone = 0")
 
         # Add search text condition
         if search_text:
@@ -104,17 +195,18 @@ def get_operation_logs():
         
         # Get paginated results
         query = f"""
-        SELECT {f"SKIP {offset}" if offset > 0 else ""} {"FIRST " + str(per_page)}
-            id, timestamp, operation_type, operation_details, user, 
-            CASE 
+        SELECT
+            id, log_ts AS "timestamp", operation_type, operation_details, log_user AS "user",
+            CASE
                 WHEN ip_address = ? THEN ip_address || ' (TU)'
-                ELSE ip_address 
+                ELSE ip_address
             END as ip_address,
-            article_code, source_location, destination_location, quantity, 
+            article_code, source_location, destination_location, quantity,
             is_undone, can_undo, additional_data
         FROM wms_log
         {f"WHERE {where_clause}" if where_clause else ""}
-        ORDER BY timestamp DESC
+        ORDER BY log_ts DESC, id DESC
+        OFFSET {int(offset)} ROWS FETCH NEXT {int(per_page)} ROWS ONLY
         """
         # Add the current IP address to params for the CASE expression
         current_ip = request.remote_addr
@@ -137,10 +229,14 @@ def get_operation_logs():
                 except:
                     pass  # Keep as string if not valid JSON
             
-            # Convert timestamp to string if needed
-            if isinstance(log.get('timestamp'), datetime):
+            # Convert timestamp to string if needed (a midnight DATE is normalized to date)
+            if isinstance(log.get('timestamp'), date):
                 log['timestamp'] = log['timestamp'].strftime("%Y-%m-%d %H:%M:%S")
-                
+
+            # NUMBER(1) flags -> booleans, as Informix BOOLEAN returned
+            log['is_undone'] = bool(log.get('is_undone'))
+            log['can_undo'] = bool(log.get('can_undo'))
+
             # Include a flag indicating if this operation can be undone now
             log['can_revert'] = log.get('can_undo') and not log.get('is_undone')
             
@@ -190,26 +286,26 @@ def log_operation(operation_type, operation_details, user=None, ip_address=None,
         additional_data_str = json.dumps(additional_data) if additional_data else None
         
         query = """
-        INSERT INTO wms_log 
-        (timestamp, operation_type, operation_details, user, ip_address, 
-         article_code, source_location, destination_location, quantity, can_undo, additional_data) 
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO wms_log
+        (log_ts, operation_type, operation_details, log_user, ip_address,
+         article_code, source_location, destination_location, quantity, is_undone, can_undo, additional_data)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
         """
-        
+
         cursor.execute(
-            query, 
+            query,
             (
-                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                datetime.now().replace(microsecond=0),
 
                 operation_type,
-                operation_details,
+                (operation_details or '')[:255],
                 user,
                 ip_address,
                 article_code,
                 source_location,
                 destination_location,
-                quantity,
-                can_undo,
+                int(quantity) if quantity is not None else None,
+                1 if can_undo else 0,
                 additional_data_str
             )
         )
@@ -229,8 +325,8 @@ def get_descrizione_articolo():
     try:
         conn = connect_to_db()
         cursor = conn.cursor()
-        query = "SELECT amg_desc FROM mganag WHERE amg_code = ?"
-        cursor.execute(query, (codice_articolo,))
+        query = "SELECT amg_desc FROM wms_v_mganag WHERE amg_code = ?"
+        cursor.execute(query, (codice_articolo.strip(),))
         result = cursor.fetchone()
         descrizione = result[0] if result else None
         return jsonify({'descrizione': descrizione})
@@ -251,8 +347,8 @@ def get_quantita_registrata():
     try:
         conn = connect_to_db()
         cursor = conn.cursor()
-        query = "select m.dep_qcar - m.dep_qsca, m.dep_arti, g.amg_dest  from mgdepo m inner join mganag g on (m.dep_arti = g.amg_code) where (m.dep_arti like ?) and m.dep_code = '1'"
-        cursor.execute(query, (codice_articolo,))
+        query = "select m.dep_qgia, m.dep_arti, g.amg_dest from wms_v_mgdepo m inner join wms_v_mganag g on (m.dep_arti = g.amg_code) where (m.dep_arti like ?) and m.dep_code = ?"
+        cursor.execute(query, (codice_articolo.strip(), MAGAZZINO_PRINCIPALE))
         result = cursor.fetchone()
         print(result)
         ragione_sociale = result[0] if result else None
@@ -275,8 +371,8 @@ def get_movimento_articoli():
     try:
         conn = connect_to_db()
         cursor = conn.cursor()
-        query = "select gim_arti, gim_desc, gim_des2, gim_qmov from mggior where gim_code = ? and gim_arti is not null"
-        cursor.execute(query, (movimento,))
+        query = "select gim_arti, gim_desc, gim_des2, gim_qmov from wms_v_mggior where gim_code = ? and gim_arti is not null order by gim_riga"
+        cursor.execute(query, (int(movimento),))
         
         # Fetch all rows
         rows = cursor.fetchall()
@@ -287,6 +383,8 @@ def get_movimento_articoli():
         
         return jsonify(result)
 
+    except ValueError:
+        return jsonify({'error': 'Invalid movimento parameter'}), 400
     except pyodbc.Error as e:
         return jsonify({'error': str(e)}), 500
     finally:
@@ -303,8 +401,8 @@ def get_ragione_sociale_fornitore():
     try:
         conn = connect_to_db()
         cursor = conn.cursor()
-        query = "SELECT des_clifor FROM agclifor WHERE cod_clifor = ?"
-        cursor.execute(query, (codice_fornitore,))
+        query = "SELECT des_clifor FROM wms_v_agclifor WHERE cod_clifor = ?"
+        cursor.execute(query, (normalizza_fornitore(codice_fornitore),))
         result = cursor.fetchone()
         ragione_sociale = result[0] if result else None
         return jsonify({'ragione_sociale': ragione_sociale})
@@ -316,30 +414,6 @@ def get_ragione_sociale_fornitore():
             cursor.close()
         if 'conn' in locals():
             conn.close()
-
-@app.route('/api/fornitore-ragione-sociale', methods=['GET'])
-def get_ragione_sociale():
-    codice_fornitore = request.args.get('scaffale')
-    if not codice_fornitore:
-        return jsonify({'error': 'Missing scaffale parameter'}), 400
-
-    try:
-        conn = connect_to_db()
-        cursor = conn.cursor()
-        query = "SELECT des_clifor FROM agclifor WHERE cod_clifor = ?"
-        cursor.execute(query, (codice_fornitore,))
-        result = cursor.fetchone()
-        ragione_sociale = result[0] if result else None
-        return jsonify({'ragione_sociale': ragione_sociale})
-
-    except pyodbc.Error as e:
-        return jsonify({'error': str(e)}), 500
-    finally:
-        if 'cursor' in locals():
-            cursor.close()
-        if 'conn' in locals():
-            conn.close()
-
 
 @app.route('/api/articolo-coerenza', methods=['GET'])
 def check_fornitore_coerenza():
@@ -352,8 +426,8 @@ def check_fornitore_coerenza():
     try:
         conn = connect_to_db()
         cursor = conn.cursor()
-        query = "SELECT DISTINCT oft_cofo, ofc_arti FROM ofordit, ofordic, outer agclifor WHERE oft_cofo = ? AND ofc_arti = ? AND oft_cofo = cod_clifor;"
-        cursor.execute(query, (codice_fornitore, codice_articolo))
+        query = "SELECT DISTINCT ofc_cofo, ofc_arti FROM wms_v_ofordic WHERE ofc_cofo = ? AND ofc_arti = ?"
+        cursor.execute(query, (normalizza_fornitore(codice_fornitore), codice_articolo.strip()))
         result = cursor.fetchall()
         coerenza = len(result) > 0
         return jsonify({'coerenza': coerenza})
@@ -376,7 +450,7 @@ def get_system_quantities():
         # Get WMS quantities with total per article
         cursor.execute("""
     SELECT
-CAST(w.id_art AS VARCHAR(20)) as id_art,
+w.id_art,
 w.area,
 w.scaffale,
 w.colonna,
@@ -412,18 +486,21 @@ GROUP BY id_art
         # Get system quantities for all articles
         system_quantities = {}
         if id_arts:
-            format_strings = ','.join(['?'] * len(id_arts))
-            cursor.execute(f"""
-                SELECT 
-                    CAST(m.dep_arti AS VARCHAR(20)) as dep_arti,
-                    m.dep_qcar - m.dep_qsca as system_qty,
-                    g.amg_dest
-                FROM mgdepo m 
-                INNER JOIN mganag g ON m.dep_arti = g.amg_code
-                WHERE m.dep_code = '1' 
-                AND CAST(m.dep_arti AS VARCHAR(20)) IN ({format_strings})
-            """, id_arts)
-            system_data = cursor.fetchall()
+            # Oracle allows max 1000 items in an IN list: query in chunks
+            system_data = []
+            for start in range(0, len(id_arts), 900):
+                chunk = id_arts[start:start + 900]
+                cursor.execute(f"""
+                    SELECT
+                        m.dep_arti,
+                        m.dep_qgia as system_qty,
+                        g.amg_dest
+                    FROM wms_v_mgdepo m
+                    INNER JOIN wms_v_mganag g ON m.dep_arti = g.amg_code
+                    WHERE m.dep_code = ?
+                    AND m.dep_arti IN ({','.join(['?'] * len(chunk))})
+                """, [MAGAZZINO_PRINCIPALE] + chunk)
+                system_data.extend(cursor.fetchall())
             system_quantities = {
                 row[0]: {
                     'system_quantity': row[1],
@@ -509,15 +586,15 @@ def get_items():
 
         # Step 1: Count total distinct id_art with applied filters
         count_query = """
-            SELECT COUNT(DISTINCT wi.id_art) 
+            SELECT COUNT(DISTINCT wi.id_art)
             FROM wms_items wi
-            LEFT JOIN mganag mg ON wi.id_art = mg.amg_code
+            LEFT JOIN wms_v_mganag mg ON wi.id_art = mg.amg_code
             WHERE 1=1
         """
         count_params = []
 
         if article_filter:
-            count_query += " AND CAST(wi.id_art AS VARCHAR(20)) LIKE ?"
+            count_query += " AND wi.id_art LIKE ?"
             count_params.append(f"%{article_filter}%")
         if supplier_filter:
             count_query += " AND wi.fornitore LIKE ?"
@@ -537,15 +614,15 @@ def get_items():
 
         # Step 2: Fetch distinct id_art for the current page
         id_art_query = """
-            SELECT SKIP ? FIRST ? DISTINCT wi.id_art
+            SELECT DISTINCT wi.id_art
             FROM wms_items wi
-            LEFT JOIN mganag mg ON wi.id_art = mg.amg_code
+            LEFT JOIN wms_v_mganag mg ON wi.id_art = mg.amg_code
             WHERE 1=1
         """
-        id_art_params = [offset, limit]
+        id_art_params = []
 
         if article_filter:
-            id_art_query += " AND CAST(wi.id_art AS VARCHAR(20)) LIKE ?"
+            id_art_query += " AND wi.id_art LIKE ?"
             id_art_params.append(f"%{article_filter}%")
         if supplier_filter:
             id_art_query += " AND wi.fornitore LIKE ?"
@@ -559,6 +636,8 @@ def get_items():
         if location_condition:
             id_art_query += location_condition
             id_art_params.extend(location_params)
+
+        id_art_query += f" ORDER BY wi.id_art OFFSET {int(offset)} ROWS FETCH NEXT {int(limit)} ROWS ONLY"
 
         cursor.execute(id_art_query, tuple(id_art_params))
         id_art_rows = cursor.fetchall()
@@ -574,27 +653,29 @@ def get_items():
             }), 200
 
         # Step 3: Fetch all wms_items for the selected id_art and join with mganag for descriptions
-        placeholders = ','.join(['?'] * len(id_art_list))
-        items_query = f"""
-            SELECT 
-                wi.*,               -- All fields from wms_items
-                mg.amg_desc,        -- Description from mganag
-                mg.amg_des2         -- Secondary Description from mganag
-            FROM 
-                wms_items wi
-            LEFT JOIN 
-                mganag mg ON wi.id_art = mg.amg_code
-            WHERE 
-                wi.id_art IN ({placeholders})
-                {location_condition}
-            ORDER BY 
-                wi.id_art, wi.scaffale, wi.colonna, wi.piano
-        """
-        
-        # Combine id_art_list with location parameters
-        query_params = id_art_list + location_params
-        cursor.execute(items_query, tuple(query_params))
-        items_rows = cursor.fetchall()
+        # (Oracle allows max 1000 items in an IN list: query in chunks, id_art order is preserved)
+        items_rows = []
+        for start in range(0, len(id_art_list), 900):
+            chunk = id_art_list[start:start + 900]
+            placeholders = ','.join(['?'] * len(chunk))
+            items_query = f"""
+                SELECT
+                    wi.*,               -- All fields from wms_items
+                    mg.amg_desc,        -- Description from mganag
+                    mg.amg_des2         -- Secondary Description from mganag
+                FROM
+                    wms_items wi
+                LEFT JOIN
+                    wms_v_mganag mg ON wi.id_art = mg.amg_code
+                WHERE
+                    wi.id_art IN ({placeholders})
+                    {location_condition}
+                ORDER BY
+                    wi.id_art, wi.scaffale, wi.colonna, wi.piano
+            """
+            # Combine id_art chunk with location parameters
+            cursor.execute(items_query, tuple(chunk + location_params))
+            items_rows.extend(cursor.fetchall())
 
         # Get column names from cursor description
         columns = [column[0] for column in cursor.description]
@@ -666,65 +747,26 @@ def check_movimento_coerenza():
         conn = connect_to_db()
         cursor = conn.cursor()
 
-        # Build the query dynamically based on the value of codice_fornitore
-        if codice_fornitore == 'F000000':
-            query = '''SELECT DISTINCT
-                oft.oft_cofo, 
-                ofc.ofc_arti,
-                bf.blt_code
-            FROM 
-                ofordit oft
-            JOIN 
-                ofordic ofc 
-            ON 
-                oft.oft_tipo = ofc.ofc_tipo 
-                AND ofc.ofc_arti = ?
-            JOIN 
-                mggior mg 
-            ON 
-                ofc.ofc_arti = mg.gim_arti 
-                AND mg.gim_code = ?
-            JOIN 
-                bfbolt bf 
-            ON 
-                mg.gim_code = bf.blt_code 
-                AND bf.blt_cocl = oft.oft_cofo
-            WHERE 
-                bf.blt_code = mg.gim_code;
-            '''
-            cursor.execute(query, (codice_articolo, codice_movimento))
-        else:
-            query = '''SELECT DISTINCT
-                oft.oft_cofo, 
-                ofc.ofc_arti,
-                bf.blt_code
-            FROM 
-                ofordit oft
-            JOIN 
-                ofordic ofc 
-            ON 
-                oft.oft_tipo = ofc.ofc_tipo 
-                AND oft.oft_cofo = ? 
-                AND ofc.ofc_arti = ?
-            JOIN 
-                mggior mg 
-            ON 
-                ofc.ofc_arti = mg.gim_arti 
-                AND mg.gim_code = ?
-            JOIN 
-                bfbolt bf 
-            ON 
-                mg.gim_code = bf.blt_code 
-                AND bf.blt_cocl = oft.oft_cofo
-            WHERE 
-                bf.blt_code = mg.gim_code;
-            '''
-            cursor.execute(query, (codice_fornitore, codice_articolo, codice_movimento))
+        # The movement must contain the article and be a supplier receipt (causale with a
+        # 36xx supplier on the header). 'F000000' = any supplier, like on Informix.
+        # In Skyline the receipt supplier is on MAG_MOVIM_TESTATA (Informix: bfbolt.blt_cocl).
+        query = '''SELECT DISTINCT gim_cofo, gim_arti, gim_code
+            FROM wms_v_mggior
+            WHERE gim_code = ?
+              AND gim_arti = ?
+              AND gim_cofo IS NOT NULL'''
+        params = [int(codice_movimento), codice_articolo.strip()]
+        if codice_fornitore and normalizza_fornitore(codice_fornitore) != 'F000000':
+            query += " AND gim_cofo = ?"
+            params.append(normalizza_fornitore(codice_fornitore))
+        cursor.execute(query, params)
 
         result = cursor.fetchall()
         coerenza = len(result) > 0
         return jsonify({'coerenza': coerenza})
 
+    except ValueError:
+        return jsonify({'coerenza': False})
     except pyodbc.Error as e:
         return jsonify({'error': str(e)}), 500
     finally:
@@ -745,15 +787,16 @@ def check_coerenza_dati():
     try:
         conn = connect_to_db()
         cursor = conn.cursor()
-        query = "SELECT * FROM mggior WHERE gim_arti = ? AND gim_code = ?"
-        cursor.execute(query, (codice_articolo, codice_movimento))
-        if cursor.fetchall():
-            query = "SELECT * FROM bfbolt WHERE blt_cocl = ? AND blt_code = ?"
-            cursor.execute(query, (codice_fornitore, codice_movimento))
-            coerenza = len(cursor.fetchall()) > 0
+        query = "SELECT gim_cofo FROM wms_v_mggior WHERE gim_arti = ? AND gim_code = ?"
+        cursor.execute(query, (codice_articolo.strip(), int(codice_movimento)))
+        rows = cursor.fetchall()
+        if rows:
+            coerenza = any(row.gim_cofo == normalizza_fornitore(codice_fornitore) for row in rows)
             return jsonify({'coerenza': coerenza})
         return jsonify({'coerenza': False})
 
+    except ValueError:
+        return jsonify({'coerenza': False})
     except pyodbc.Error as e:
         return jsonify({'error': str(e)}), 500
     finally:
@@ -767,16 +810,16 @@ def check_coerenza_dati():
 def get_fornitori():
     try:
         # Connect to the database
-        conn = pyodbc.connect(connection_string)
+        conn = connect_to_db()
         cursor = conn.cursor()
 
         # Define a query
         query = '''
         SELECT o.oft_tipo, o.oft_code, o.oft_stat, o.oft_data, o.oft_cofo, a.des_clifor, o.oft_inarrivo
-        FROM ofordit o
-        LEFT JOIN agclifor a ON o.oft_cofo = a.cod_clifor
+        FROM wms_v_ofordit o
+        LEFT JOIN wms_v_agclifor a ON o.oft_cofo = a.cod_clifor
         WHERE o.oft_stat = 'A'
-        ORDER BY o.oft_inarrivo DESC, o.oft_data DESC
+        ORDER BY o.oft_inarrivo DESC, o.oft_data DESC, o.oft_anno DESC, o.oft_nume DESC
         '''
         # Execute the query
         cursor.execute(query)
@@ -808,15 +851,15 @@ def get_fornitore_details():
 
     try:
         # Connect to the database
-        conn = pyodbc.connect(connection_string)
+        conn = connect_to_db()
         cursor = conn.cursor()
 
-        # Define a query for detailed data
+        # Define a query for detailed data (in Oracle '' is NULL, so IS NOT NULL covers both checks)
         query = '''
         SELECT ofc_arti, ofc_riga, ofc_desc, ofc_des2, ofc_qord, ofc_dtco, ofc_stato, ofc_qtarrivata, ofc_inarrivo
-        FROM ofordic
-        WHERE ofc_tipo = ? AND ofc_code = ? AND ofc_arti IS NOT NULL AND ofc_arti != ''
-        ORDER BY ofc_inarrivo DESC
+        FROM wms_v_ofordic
+        WHERE ofc_tipo = ? AND ofc_code = ? AND ofc_arti IS NOT NULL
+        ORDER BY ofc_inarrivo DESC, ofc_riga
         '''
         # Execute the query
         cursor.execute(query, (tipo, code))
@@ -1052,7 +1095,8 @@ def conferma_inserimento_multiplo():
 
         # Process each item
         for item in items:
-            codice_articolo = item.get('articoloCode')
+            # Scanned codes can carry stray spaces: stored codes must match exact lookups (picking)
+            codice_articolo = (item.get('articoloCode') or '').strip()
             codice_movimento = item.get('movimentoCode')
             quantita = item.get('quantita')
             dimensioni = item.get('dimensioni', 'Zero')
@@ -1088,7 +1132,7 @@ def conferma_inserimento_multiplo():
         
         # Log a separate operation for each item to make them individually revertable
         for item in items:
-            codice_articolo = item.get('articoloCode')
+            codice_articolo = (item.get('articoloCode') or '').strip()
             quantita = item.get('quantita')
             item_detail = f"Articolo {codice_articolo}: {quantita} pezzi"
             
@@ -1121,7 +1165,8 @@ def conferma_inserimento():
     scaffale = data.get('scaffale')
     colonna = data.get('colonna')
     piano = data.get('piano')
-    codice_articolo = data.get('codice_articolo')
+    # Scanned codes can carry stray spaces: stored codes must match exact lookups (picking)
+    codice_articolo = (data.get('codice_articolo') or '').strip()
     codice_movimento = data.get('codice_movimento')
     quantita = data.get('quantita')
     dimensioni = data.get('dimensioni')
@@ -1546,15 +1591,16 @@ def trasferimento():
         
         # Get the ID of the newly inserted package using a query that's compatible with Informix
         cursor.execute("""
-        SELECT FIRST 1 id_pacco 
-        FROM wms_items 
-        WHERE id_art = ? 
-          AND area = ? 
-          AND scaffale = ? 
-          AND colonna = ? 
-          AND piano = ? 
+        SELECT id_pacco
+        FROM wms_items
+        WHERE id_art = ?
+          AND area = ?
+          AND scaffale = ?
+          AND colonna = ?
+          AND piano = ?
           AND qta = ?
         ORDER BY id_pacco DESC
+        FETCH FIRST 1 ROWS ONLY
         """, (articolo, areaDest, scaffaleDest, colonnaDest, pianoDest, quantity))
         
         destination_pacco_result = cursor.fetchone()
@@ -1617,48 +1663,13 @@ def process_ordine_lavoro():
         conn = connect_to_db()
         cursor = conn.cursor()
 
-        # First query: Get gol_octi, gol_occo, gol_ocri from mpordgol where gol_mpco = 'codice_ordine'
-        query1 = """
-        SELECT gol_octi, gol_occo, gol_ocri
-        FROM mpordgol
-        WHERE gol_mpco = ?
-        """
-        cursor.execute(query1, (codice_ordine,))
-        first_row = cursor.fetchone()
-
-        if not first_row:
+        # The ODL is a Skyline production launch: 'NRO_LANCIO' (all sottolanci) or 'NRO_LANCIO/SOTTOLANCIO'
+        odl_parts = str(codice_ordine).strip().split('/')
+        try:
+            nro_lancio = int(odl_parts[0])
+            nro_sottolancio = int(odl_parts[1]) if len(odl_parts) > 1 and odl_parts[1] else None
+        except ValueError:
             return jsonify({'error': 'Ordine non trovato'}), 404
-
-        gol_octi, gol_occo, gol_ocri = first_row
-
-        # Second query: Get all rows from mpordgol where gol_octi = 'gol_octi' and gol_occo = 'gol_occo'
-        query2 = """
-        SELECT gol_octi, gol_occo, gol_ocri, gol_nume, gol_mpco, gol_qord, gol_qpro, gol_qres
-        FROM mpordgol
-        WHERE gol_octi = ? AND gol_occo = ?
-        """
-        cursor.execute(query2, (gol_octi, gol_occo))
-        rows = cursor.fetchall()
-        esci = False
-        # Find the row after the known gol_ocri value
-        found_row = None
-        next_row = None
-        
-        for row in rows:
-            if row.gol_ocri > gol_ocri:
-                found_row = row
-                esci = True
-            if esci:
-                next_row = row
-                print(next_row)
-                break
-
-                # If no subsequent row is found, set gol_ocri_new to a large number (e.g., max int)
-        if not found_row:
-            gol_ocri_new = float('inf')  # No next row found, so consider all subsequent rows
-        else:
-            # Extract gol_octi, gol_occo, gol_ocri values from the found row
-            gol_octi_new, gol_occo_new, gol_ocri_new, prossimo_ordine = found_row.gol_octi, found_row.gol_occo, found_row.gol_ocri, next_row.gol_ocri
 
         query_prelievi = """
         SELECT id_art, SUM(qta) as picked_quantity
@@ -1673,96 +1684,39 @@ def process_ordine_lavoro():
         picked_items = {}
         for row in picked_items_rows:
             picked_items[row.id_art] = int(row.picked_quantity)  # Ensure integer conversion
+        # Components planned for the launch (PRW_LANCIO_ART_PREV, already exploded by Skyline).
+        # mpl_padre/mpl_qta = article produced by the launch and its quantity, so the frontend
+        # groups the components under it like the Informix distinta rows.
         query3 = """
-SELECT 
-    m.mpl_figlio AS occ_arti,
-    p.occ_qmov * m.mpl_coimp AS occ_qmov,
-    mg.amg_desc AS occ_desc,
-    mg.amg_des2 AS occ_des2,
-    p.occ_riga,
-    m.mpl_padre,
-        p.occ_qmov as mpl_qta
-FROM 
-    ocordic p
-JOIN 
-    mplegami m ON p.occ_arti = m.mpl_padre
+SELECT
+    c.occ_arti,
+    SUM(c.occ_qmov) AS occ_qmov,
+    MAX(mg.amg_desc) AS occ_desc,
+    MAX(mg.amg_des2) AS occ_des2,
+    MIN(c.occ_riga) AS occ_riga,
+    MAX(c.odl_padre) AS mpl_padre,
+    -- quantity to produce: sum over the selected sottolanci (a launch can be split one unit per sottolancio)
+    (SELECT SUM(l.qta_pianif) FROM prw_lancio l
+      WHERE l.nro_lancio = ? AND (? IS NULL OR l.nro_sottolancio = ?)) AS mpl_qta
+FROM
+    wms_v_odl_componenti c
 LEFT JOIN
-    mganag mg ON m.mpl_figlio = mg.amg_code
-WHERE 
-    p.occ_tipo = ?
-    AND p.occ_code = ?
-    AND p.occ_riga >= ?
-    AND (m.mpl_dafi >= TODAY or m.mpl_dafi is null)
-    AND p.occ_riga <= (
-        SELECT MIN(p1.occ_riga)
-        FROM ocordic p1
-        WHERE p1.occ_arti IS NOT NULL
-          AND p1.occ_tipo = ?
-          AND p1.occ_code = ?
-          AND p1.occ_riga >= ?
-    )
-
-UNION ALL
-SELECT 
-    p.occ_arti,
-    p.occ_qmov,
-    mg.amg_desc AS occ_desc,
-    mg.amg_des2 AS occ_des2,
-    p.occ_riga,
-    CAST(NULL AS VARCHAR) AS mpl_padre,
-    CAST(NULL AS INT) AS mpl_qta
-
-FROM 
-    ocordic p
-LEFT JOIN
-    mganag mg ON p.occ_arti = mg.amg_code
-WHERE 
-    p.occ_tipo = ?
-    AND p.occ_code = ?
-    AND p.occ_riga >= ?
-    AND NOT EXISTS (
-        SELECT 1 
-        FROM mplegami m 
-        WHERE m.mpl_padre = p.occ_arti
-    )
-    AND (
-         /* If there is a row with occ_arti NULL, return only rows before it */
-         p.occ_riga < (
-             SELECT MIN(p2.occ_riga)
-             FROM ocordic p2
-             WHERE p2.occ_tipo = ?
-               AND p2.occ_code = ?
-               AND p2.occ_riga >= ?
-               AND p2.occ_arti IS NULL
-         )
-         /* Or, if no such row exists, return all rows */
-         OR (
-             SELECT MIN(p2.occ_riga)
-             FROM ocordic p2
-             WHERE p2.occ_tipo = ?
-               AND p2.occ_code = ?
-               AND p2.occ_riga >= ?
-               AND p2.occ_arti IS NULL
-         ) IS NULL
-    )
-ORDER BY 
-    p.occ_riga;
+    wms_v_mganag mg ON c.occ_arti = mg.amg_code
+WHERE
+    c.odl_code = ?
+    AND (? IS NULL OR c.odl_sotto = ?)
+    AND c.occ_arti IS NOT NULL
+GROUP BY
+    c.occ_arti
+ORDER BY
+    MIN(c.occ_riga)
         """
-        # Find the minimum gol_ocri greater than current gol_ocri
-        next_ocri_values = [row.gol_ocri for row in rows if row.gol_ocri > gol_ocri]
-        prossimo_ordine = min(next_ocri_values) if next_ocri_values else 999999999  # Use a large number
-
-        # Modify the query parameters to handle the "no next row" case
-        params = (
-            gol_octi, gol_occo, gol_ocri,  # First block
-            gol_octi, gol_occo, gol_ocri,  # Subquery in first block
-            gol_octi, gol_occo, gol_ocri,  # Subquery in second block
-            gol_octi, gol_occo, gol_ocri,
-            gol_octi, gol_occo, gol_ocri,
-        )
-
-        cursor.execute(query3, params)
+        cursor.execute(query3, (nro_lancio, nro_sottolancio, nro_sottolancio,
+                                nro_lancio, nro_sottolancio, nro_sottolancio))
         final_rows = cursor.fetchall()
+
+        if not final_rows:
+            return jsonify({'error': 'Ordine non trovato'}), 404
 
         # Convert the result to a list of dictionaries
         columns = [column[0] for column in cursor.description]
@@ -1841,7 +1795,7 @@ ORDER BY
                 scaffale,
                 colonna,
                 piano,
-                id_pacco ASC;
+                id_pacco ASC
             """
             cursor.execute(query_wms, (occ_arti,))
             wms_rows = cursor.fetchall()
@@ -1948,10 +1902,10 @@ def articolo_search():
         # Step 1: Fetch articolo description
         query_desc = """
             SELECT amg_desc, amg_des2
-            FROM mganag
+            FROM wms_v_mganag
             WHERE amg_code = ?
         """
-        cursor.execute(query_desc, (articolo_id,))
+        cursor.execute(query_desc, (articolo_id.strip(),))
         desc_row = cursor.fetchone()
         if desc_row:
             occ_desc_combined = f"{desc_row.amg_desc} {desc_row.amg_des2}".strip()
@@ -2237,199 +2191,9 @@ def transfer_packages():
         if 'conn' in locals():
             conn.close()
 
-@app.route('/api/ordini-fornitore', methods=['GET'])
-def get_ordini_fornitore():
-    try:
-        conn = connect_to_db()
-        cursor = conn.cursor()
-        query = '''
-SELECT 
-    oft_tipo, 
-    oft_code, 
-    oft_stat, 
-    oft_data, 
-    oft_stat,
-    ag.des_clifor AS cliente_nome,
-  	oft_inarrivo,  
-	oft_actz
-FROM 
-    ofordit AS o
-JOIN 
-    agclifor AS ag 
-ON 
-    o.oft_cofo = ag.cod_clifor
-ORDER BY 
-    oft_data DESC;'''
-        cursor.execute(query)
-        # Get column names from cursor description
-        columns = [column[0] for column in cursor.description]
-        # Fetch all rows and convert them into a list of dictionaries
-        results = [dict(zip(columns, row)) for row in cursor.fetchall()]
-        
-        return jsonify({'results': results})
-
-    except pyodbc.Error as e:
-        return jsonify({'error': str(e)}), 500
-    finally:
-        if 'cursor' in locals():
-            cursor.close()
-        if 'conn' in locals():
-            conn.close()
-
-from flask import jsonify, request
-import pyodbc
-
-@app.get("/api/ordine-details")
-def get_article_details():
-    ofc_tipo = request.args.get('ofc_tipo')
-    ofc_code = request.args.get('ofc_code')
-    if not ofc_tipo or not ofc_code:
-        return jsonify({'error': 'Missing ofc_code or ofc_tipo parameter'}), 400
-
-    try:
-        # Connect to the database
-        conn = connect_to_db()
-        cursor = conn.cursor()
-
-        # SQL query with placeholders for parameters
-        query = """
-        SELECT 
-            ofc_arti, 
-            (ofc_desc || ' ' || ofc_des2) AS article_description, 
-            ofc_dtco, 
-            ofc_qtarrivata, 
-            ofc_inarrivo,
-            ofc_qord,
-            ofc_riga,
-            ofc_inarrivo
-        FROM 
-            ofordic 
-        WHERE 
-            ofc_tipo = ? AND ofc_code = ?
-        """
-
-        # Execute the query with parameters
-        cursor.execute(query, (ofc_tipo, ofc_code))
-
-        # Fetch results and convert to a list of dictionaries
-        columns = [column[0] for column in cursor.description]
-        results = [dict(zip(columns, row)) for row in cursor.fetchall()]
-        filtered_results = [result for result in results if result['ofc_arti'] is not None]
-
-        # Close the database connection
-        cursor.close()
-        conn.close()
-
-        # Check if results are empty and return an error if needed
-        if not filtered_results:
-            return jsonify({'error': 'No records found for the given tipo and code.'}), 404
-
-        # Return results as JSON
-        return jsonify({'results': filtered_results})
-
-    except pyodbc.Error as e:
-        print(f"Database error: {str(e)}")
-        return jsonify({'error': 'Internal Server Error', 'details': str(e)}), 500
-@app.put("/api/update-quantity")
-def update_quantity():
-    data = request.get_json()
-    ofc_tipo = data.get('ofc_tipo')
-    ofc_code = data.get('ofc_code')
-    new_quantity = data.get('ofc_qtarrivata')
-    ofc_riga = data.get('ofc_riga')
-    # Validate inputs
-    if not all([ofc_tipo, ofc_code, new_quantity, ofc_riga]):
-        return jsonify({'error': 'Missing required parameters'}), 400
-
-    try:
-        # Connect to the database
-        conn = connect_to_db()
-        cursor = conn.cursor()
-        
-        # SQL update query
-        update_query = """
-        UPDATE ofordic
-        SET ofc_qtarrivata = ? , ofc_inarrivo = 'N'
-        WHERE ofc_tipo = ? AND ofc_code = ? and ofc_riga = ?
-
-        
-        """
-        print(ofc_tipo, ofc_code, new_quantity, ofc_riga)
-        # Execute the update query with parameters
-        cursor.execute(update_query, (new_quantity, ofc_tipo, ofc_code, ofc_riga))
-        conn.commit()
-
-        # Check if any rows were updated
-        if cursor.rowcount == 0:
-            return jsonify({'error': f'{new_quantity, ofc_tipo, ofc_code, ofc_riga}'}), 404
-        operation_details = f"Quantità arrivata segnalata con successo ordine {ofc_tipo}-{ofc_code} - RIGA:{ofc_riga} - QTA: {new_quantity}"
-
-        log_operation(
-            operation_type="UPDATE",
-            operation_details=operation_details,
-            user="current_user",  # Replace with actual user info if available
-            ip_address=request.remote_addr
-        )
-        return jsonify({'message': 'Quantity updated successfully'}), 200
-
-    except pyodbc.Error as e:
-        print(f"Database error: {str(e)}")
-        return jsonify({'error': 'Internal Server Error', 'details': str(e)}), 500
-
-    finally:
-        if 'cursor' in locals():
-            cursor.close()
-        if 'conn' in locals():
-            conn.close()
-
-@app.route('/api/articoli-in-arrivo', methods=['GET'])
-def articoli_in_arrivo():
-    try:
-        conn = connect_to_db()
-        cursor = conn.cursor()
-        query = '''
-SELECT 
-    o.ofc_tipo, 
-    o.ofc_arti,
-    (o.ofc_desc || ' ' || o.ofc_des2) AS article_description, 
-    o.ofc_code, 
-    o.ofc_dtco, 
-    o.ofc_inarrivo,
-    NVL(SUM(w.qta), 0) AS total_quantity  -- Replace COALESCE or IFNULL with NVL
-FROM 
-    ofordic AS o
-LEFT JOIN 
-    wms_items AS w ON o.ofc_arti = w.id_art  -- Join with wms_items on ofc_arti and id_art
-WHERE 
-    o.ofc_dtco >= TODAY 
-    AND o.ofc_arti IS NOT NULL
-GROUP BY 
-    o.ofc_tipo, 
-    o.ofc_arti,
-    o.ofc_desc, 
-    o.ofc_des2, 
-    o.ofc_code, 
-    o.ofc_dtco, 
-    o.ofc_inarrivo
-ORDER BY 
-    o.ofc_dtco ASC;
-
-'''
-        cursor.execute(query)
-        # Get column names from cursor description
-        columns = [column[0] for column in cursor.description]
-        # Fetch all rows and convert them into a list of dictionaries
-        results = [dict(zip(columns, row)) for row in cursor.fetchall()]
-        
-        return jsonify({'results': results})
-
-    except pyodbc.Error as e:
-        return jsonify({'error': str(e)}), 500
-    finally:
-        if 'cursor' in locals():
-            cursor.close()
-        if 'conn' in locals():
-            conn.close()
+# Accettazione merce (/api/ordini-fornitore, /api/ordine-details, /api/update-quantity,
+# /api/articoli-in-arrivo) removed with the Skyline migration: the feature is dismissed and
+# relied on Informix-only columns (oft_inarrivo, ofc_inarrivo, ofc_qtarrivata).
 
 import smtplib
 from email.mime.multipart import MIMEMultipart
@@ -2738,15 +2502,16 @@ def process_single_transfer(cursor, item, item_idx):
         
         # Get the ID of the newly inserted package
         cursor.execute("""
-        SELECT FIRST 1 id_pacco 
-        FROM wms_items 
-        WHERE id_art = ? 
-          AND area = ? 
-          AND scaffale = ? 
-          AND colonna = ? 
-          AND piano = ? 
+        SELECT id_pacco
+        FROM wms_items
+        WHERE id_art = ?
+          AND area = ?
+          AND scaffale = ?
+          AND colonna = ?
+          AND piano = ?
           AND qta = ?
         ORDER BY id_pacco DESC
+        FETCH FIRST 1 ROWS ONLY
         """, (articolo, *dest_loc, transfer_qty))
         
         dest_pacco = cursor.fetchone()
@@ -2776,10 +2541,10 @@ def get_movimento_location_items():
         cursor = conn.cursor()
         
         # First get movimento items
-        movimento_query = """SELECT gim_arti FROM mggior 
+        movimento_query = """SELECT DISTINCT gim_arti FROM wms_v_mggior
                           WHERE gim_code = ? AND gim_arti IS NOT NULL"""
-        cursor.execute(movimento_query, (movimento,))
-        movimento_items = [row.gim_arti for row in cursor.fetchall()]
+        cursor.execute(movimento_query, (int(movimento),))
+        movimento_items = [row.gim_arti for row in cursor.fetchall()][:900]
         
         if not movimento_items:
             return jsonify([]), 200
@@ -2908,37 +2673,41 @@ def get_articolo_offerte():
         conn = connect_to_db()
         cursor = conn.cursor()
 
-        query = """
-        select amg_code c_articolo, amp_lead lt,
+        # Open purchase (wms_v_ofordic) + production (wms_v_mpordil) quantities by delivery month:
+        # off_mc = up to end of this month, off_ms = next month, off_msa = the month after, off_mss = later.
+        # Informix filtered on amg_stat/amg_fagi (no Skyline equivalent): cancelled articles are excluded instead.
+        magazzini = ','.join(['?'] * len(MAGAZZINI_OFFERTE))
+        query = f"""
+        select amg_code c_articolo, amg_lead lt,
 
-nvl((select sum(ofc_qord-ofc_qcon) from ofordic where ofc_arti = amg_code and ofc_feva = 'N'
-  and ofc_dtco <= last_day(today)),0) +
-nvl((select sum(mol_quaor-mol_quari) from mpordil where mol_parte = amg_code and mol_stato in ('A')
-  and mol_dats <= last_day(today)),0) off_mc,
-nvl((select sum(ofc_qord-ofc_qcon) from ofordic where ofc_arti = amg_code and ofc_feva = 'N'
-  and ofc_dtco between last_day(add_months(today,0))+1 and last_day(add_months(today,+1))),0) +
-nvl((select sum(mol_quaor-mol_quari) from mpordil where mol_parte = amg_code and mol_stato in ('A')
-  and mol_dats between last_day(add_months(today,0))+1 and last_day(add_months(today,+1))),0) off_ms,
- 
-nvl((select sum(ofc_qord-ofc_qcon) from ofordic where ofc_arti = amg_code and ofc_feva = 'N'
-  and ofc_dtco between last_day(add_months(today,+1))+1 and last_day(add_months(today,+2))),0) +
-nvl((select sum(mol_quaor-mol_quari) from mpordil where mol_parte = amg_code and mol_stato in ('A')
-  and mol_dats between last_day(add_months(today,+1))+1 and last_day(add_months(today,+2))),0) off_msa,
- 
-nvl((select sum(ofc_qord-ofc_qcon) from ofordic where ofc_arti = amg_code and ofc_feva = 'N'
-  and ofc_dtco >= last_day(add_months(today,2))+1),0) +
-nvl((select sum(mol_quaor-mol_quari) from mpordil where mol_parte = amg_code and mol_stato in ('A')
-  and mol_dats >= last_day(add_months(today,2))+1),0) off_mss
-from mganag, mppoli
-where amg_code = amp_code and amp_depo = 1
-and  amg_stat = 'D' 
-and nvl(amg_fagi,'S') = 'S'
+nvl((select sum(ofc_qord-ofc_qcon) from wms_v_ofordic where ofc_arti = amg_code and ofc_feva = 'N'
+  and ofc_dtco <= last_day(trunc(sysdate))),0) +
+nvl((select sum(mol_quaor-mol_quari) from wms_v_mpordil where mol_parte = amg_code and mol_stato in ('A')
+  and mol_dats <= last_day(trunc(sysdate))),0) off_mc,
+nvl((select sum(ofc_qord-ofc_qcon) from wms_v_ofordic where ofc_arti = amg_code and ofc_feva = 'N'
+  and ofc_dtco between last_day(add_months(trunc(sysdate),0))+1 and last_day(add_months(trunc(sysdate),+1))),0) +
+nvl((select sum(mol_quaor-mol_quari) from wms_v_mpordil where mol_parte = amg_code and mol_stato in ('A')
+  and mol_dats between last_day(add_months(trunc(sysdate),0))+1 and last_day(add_months(trunc(sysdate),+1))),0) off_ms,
+
+nvl((select sum(ofc_qord-ofc_qcon) from wms_v_ofordic where ofc_arti = amg_code and ofc_feva = 'N'
+  and ofc_dtco between last_day(add_months(trunc(sysdate),+1))+1 and last_day(add_months(trunc(sysdate),+2))),0) +
+nvl((select sum(mol_quaor-mol_quari) from wms_v_mpordil where mol_parte = amg_code and mol_stato in ('A')
+  and mol_dats between last_day(add_months(trunc(sysdate),+1))+1 and last_day(add_months(trunc(sysdate),+2))),0) off_msa,
+
+nvl((select sum(ofc_qord-ofc_qcon) from wms_v_ofordic where ofc_arti = amg_code and ofc_feva = 'N'
+  and ofc_dtco >= last_day(add_months(trunc(sysdate),2))+1),0) +
+nvl((select sum(mol_quaor-mol_quari) from wms_v_mpordil where mol_parte = amg_code and mol_stato in ('A')
+  and mol_dats >= last_day(add_months(trunc(sysdate),2))+1),0) off_mss
+from wms_v_mganag
+where amg_dann is null
 and amg_code = ?
-and amg_code in (select dep_arti from mgdepo where dep_code in (1,20,32,48,60,81)
-and dep_qgiai+dep_qcar-dep_qsca+dep_qord+dep_qorp+dep_qpre+dep_qprp <> 0)
+and (amg_code in (select dep_arti from wms_v_mgdepo where dep_code in ({magazzini})
+                  and (dep_qgia <> 0 or dep_qris <> 0))
+     or amg_code in (select ofc_arti from wms_v_ofordic where ofc_feva = 'N')
+     or amg_code in (select mol_parte from wms_v_mpordil where mol_stato = 'A'))
         """
 
-        cursor.execute(query, (codice_articolo,))
+        cursor.execute(query, [codice_articolo.strip()] + MAGAZZINI_OFFERTE)
         columns = [column[0] for column in cursor.description]
         results = []
         
@@ -2978,15 +2747,16 @@ def get_articoli_figli():
         cursor = conn.cursor()
 
         query = """
-        SELECT 
+        SELECT
             m.mpl_figlio AS occ_arti
         FROM
-            mplegami m
-        WHERE 
+            wms_v_mplegami m
+        WHERE
             m.mpl_padre = ?
+        ORDER BY m.mpl_seq
         """
 
-        cursor.execute(query, (padre,))
+        cursor.execute(query, (padre.strip(),))
         columns = [column[0] for column in cursor.description]
         results = [dict(zip(columns, row)) for row in cursor.fetchall()]
 
@@ -3840,7 +3610,7 @@ def revert_operation():
         
         # Mark the original operation as undone
         cursor.execute(
-            "UPDATE wms_log SET is_undone = 't' WHERE id = ?",
+            "UPDATE wms_log SET is_undone = 1 WHERE id = ?",
             (log_id,)
         )
         
@@ -4236,7 +4006,7 @@ def batch_revert_operations():
                 
                 # Mark the original operation as undone
                 cursor.execute(
-                    "UPDATE wms_log SET is_undone = 't' WHERE id = ?",
+                    "UPDATE wms_log SET is_undone = 1 WHERE id = ?",
                     (log_id,)
                 )
                 
@@ -4353,7 +4123,7 @@ def get_location_items():
             scaffale,
             colonna,
             piano,
-            id_pacco ASC;
+            id_pacco ASC
         """
         cursor.execute(query_wms, params)
         wms_rows = cursor.fetchall()
@@ -4368,7 +4138,7 @@ def get_location_items():
                 # Get article description from mganag table
                 query_desc = """
                     SELECT amg_desc, amg_des2
-                    FROM mganag
+                    FROM wms_v_mganag
                     WHERE amg_code = ?
                 """
                 cursor.execute(query_desc, (id_art,))
@@ -4850,10 +4620,11 @@ def save_complete_shelf_inspection(shelf_id):
             # Current cycle - find the current inspection date
             # Get the current inspection date from any shelf with is_current=1
             cycle_query = """
-                SELECT first 1 inspection_date 
-                FROM wms_inspections 
-                WHERE is_current = 1 
-                ORDER BY inspection_date DESC 
+                SELECT inspection_date
+                FROM wms_inspections
+                WHERE is_current = 1
+                ORDER BY inspection_date DESC
+                FETCH FIRST 1 ROWS ONLY
             """
             cursor.execute(cycle_query)
             cycle_date_result = cursor.fetchone()
@@ -4907,7 +4678,7 @@ def save_complete_shelf_inspection(shelf_id):
                     new_inspection_created = True
                 except Exception as e:
                     # Handle unique constraint violations
-                    if "unique constraint" in str(e).lower() or "u2852_9030159" in str(e):
+                    if "unique constraint" in str(e).lower() or "ORA-00001" in str(e) or "WMS_INSPECTIONS_UK" in str(e).upper():
                         print(f"Unique constraint violation: {str(e)} - Trying to find existing record")
                         
                         # Find the existing record that caused the constraint violation
@@ -4930,9 +4701,10 @@ def save_complete_shelf_inspection(shelf_id):
                         else:
                             # If we can't find it, let's look more broadly
                             cursor.execute("""
-                                SELECT FIRST 1 id FROM wms_inspections 
-                                WHERE shelf_id = ? 
+                                SELECT id FROM wms_inspections
+                                WHERE shelf_id = ?
                                 ORDER BY inspection_date DESC
+                                FETCH FIRST 1 ROWS ONLY
                             """, (shelf_id,))
                             any_record = cursor.fetchone()
                             
@@ -5491,9 +5263,10 @@ def get_cycle_creation_status_v2():
         
         # Get the most recent cycle
         query = """
-        SELECT FIRST 1 start_date, cycle_name
+        SELECT start_date, cycle_name
         FROM wms_inspection_cycles
         ORDER BY start_date DESC
+        FETCH FIRST 1 ROWS ONLY
         """
         cursor.execute(query)
         result = cursor.fetchone()
@@ -5607,7 +5380,7 @@ def close_current_inspection_cycle():
         today = date.today()
         
         # Get the current active cycle
-        cursor.execute("SELECT FIRST 1 id, cycle_name FROM wms_inspection_cycles WHERE is_active = 1")
+        cursor.execute("SELECT id, cycle_name FROM wms_inspection_cycles WHERE is_active = 1 FETCH FIRST 1 ROWS ONLY")
         current_cycle = cursor.fetchone()
         
         if not current_cycle:
@@ -5710,7 +5483,7 @@ def get_shelf_inspections_v2():
         
         # If no cycle_id specified, get the active cycle
         if not cycle_id:
-            cursor.execute("SELECT FIRST 1 id FROM wms_inspection_cycles WHERE is_active = 1")
+            cursor.execute("SELECT id FROM wms_inspection_cycles WHERE is_active = 1 FETCH FIRST 1 ROWS ONLY")
             active_cycle = cursor.fetchone()
             cycle_id = active_cycle[0] if active_cycle else None
             
@@ -5886,7 +5659,7 @@ def get_shelf_inspection_v2(shelf_id):
         
         # If no cycle_id specified, get the active cycle
         if not cycle_id:
-            cursor.execute("SELECT FIRST 1 id FROM wms_inspection_cycles WHERE is_active = 1")
+            cursor.execute("SELECT id FROM wms_inspection_cycles WHERE is_active = 1 FETCH FIRST 1 ROWS ONLY")
             active_cycle = cursor.fetchone()
             cycle_id = active_cycle[0] if active_cycle else None
         
@@ -6017,7 +5790,7 @@ def save_shelf_inspection_v2(shelf_id):
                 update_query = """
                 UPDATE wms_shelf_inspections
                 SET status = ?, inspector_name = ?, notes = ?, 
-                    inspection_date = ?, updated_at = CURRENT YEAR TO SECOND
+                    inspection_date = ?, updated_at = SYSDATE
                 WHERE id = ?
                 """
                 cursor.execute(update_query, (status, inspector_name, notes, today, inspection_id))

@@ -10,9 +10,7 @@ import {
   FileSearchOutlined,
   BoxPlotOutlined,
   MenuOutlined,
-  CheckOutlined,
   CommentOutlined,
-  DeliveredProcedureOutlined,
   InsertRowAboveOutlined,
   DatabaseFilled,
   AppstoreOutlined
@@ -127,27 +125,6 @@ const handleHelpRequest = async () => {
         width={drawerWidth}
         bodyStyle={{ padding: '12px' }}
       >
-        <SectionTitle>Accettazione</SectionTitle>
-        <Row gutter={[16, 16]}>
-          <Col span={8}>
-            <MenuCard 
-              to="/accettazione" 
-              icon={<CheckOutlined />} 
-              title="Accettazione" 
-              onClick={closeDrawer}
-            />
-          </Col>
-          <Col span={8}>
-            <MenuCard 
-            style={{display:'flex'}}
-              to="/in-arrivo" 
-              icon={<DeliveredProcedureOutlined />} 
-              title="In arrivo" 
-              onClick={closeDrawer}
-            />
-          </Col>
-        </Row>
-
         <SectionTitle>Magazzino</SectionTitle>
          {/* First Row: Magazzino Section */}
          <Row gutter={[16, 16]} style={{ marginBottom: '16px' }}>

@@ -1,6 +1,36 @@
 import React, { useState, useCallback } from 'react';
 import { Tooltip } from 'antd';
 
+// Shelf id ("C-01-1") of a cell inside a shelf section, same formula used to build the grid
+const getShelfId = (section, r, c) => {
+  const { id, shelfPattern, startingValue = 1, startingFloor = 1, spanRow = 1, spanCol = 1, height } = section;
+  let shelfNumber;
+  let floorNumber;
+  if (shelfPattern === 'horizontal') {
+    shelfNumber = startingValue + Math.floor(r / spanRow);
+    floorNumber = startingFloor + c;
+  } else {
+    shelfNumber = startingValue + Math.floor(c / spanCol);
+    floorNumber = height - Math.floor(r / spanRow) + (startingFloor - 1);
+  }
+  return `${id}-${String(shelfNumber).padStart(2, '0')}-${floorNumber}`;
+};
+
+// Returns the layout page (key of `layouts`) that contains the shelf, or null
+export const findShelfPage = (layouts, shelfId) => {
+  for (const page of Object.keys(layouts)) {
+    for (const section of layouts[page]) {
+      if (section.shelfPattern !== 'regular' && section.shelfPattern !== 'horizontal') continue;
+      for (let r = 0; r < section.height; r++) {
+        for (let c = 0; c < section.width; c++) {
+          if (getShelfId(section, r, c) === shelfId) return Number(page);
+        }
+      }
+    }
+  }
+  return null;
+};
+
 const WarehouseGridSystem = ({ 
   warehouseLayout, 
   onCellClick, 
@@ -32,9 +62,7 @@ const WarehouseGridSystem = ({
           startCol, 
           width, 
           height, 
-          shelfPattern, 
-          startingValue = 1, 
-          startingFloor = 1,
+          shelfPattern,
           spanRow = 1,
           spanCol = 1,
           customText,
@@ -91,31 +119,16 @@ const WarehouseGridSystem = ({
                   };
                 }
               } else if (shelfPattern === 'regular' || shelfPattern === 'horizontal') {
-                // Calculate shelf number based on direction
-                let shelfNumber;
-                let floorNumber = shelfPattern === 'horizontal' ? 
-                startingFloor + Math.floor(r / spanRow) : 
-                height - Math.floor(r / spanRow) + (startingFloor-1);
-              
-                if (shelfPattern === 'horizontal') {
-                  // For horizontal shelves, increment by column
-                  shelfNumber = startingValue + Math.floor(r / spanRow);
-                  floorNumber = startingFloor + c;
-                } else {
-                  // For vertical shelves (regular pattern)
-                  shelfNumber = startingValue + Math.floor(c / spanCol);
-                }
-                
-     
-                const shelfId = `${id}-${String(shelfNumber).padStart(2, '0')}-${floorNumber}`;
-                
+                const shelfId = getShelfId(section, r, c);
+                const shelfNumber = shelfId.split('-')[1];
+
                 const isSpanStart = r % spanRow === 0 && c % spanCol === 0;
                 
                 if (isSpanStart) {
                   newGrid[gridRow][gridCol] = {
                     type: 'shelf',
                     id: shelfId,
-                    columnId: `${id}-${String(shelfNumber).padStart(2, '0')}`,
+                    columnId: `${id}-${shelfNumber}`,
                     section: id,
                     isSpanStart: true,
                     spanRow,
@@ -135,7 +148,7 @@ const WarehouseGridSystem = ({
                   newGrid[gridRow][gridCol] = {
                     type: 'shelf',
                     id: shelfId,
-                    columnId: `${id}-${String(shelfNumber).padStart(2, '0')}`,
+                    columnId: `${id}-${shelfNumber}`,
                     section: id,
                     isSpanStart: false,
                     hidden: true
@@ -172,7 +185,8 @@ const WarehouseGridSystem = ({
         const status = getShelfStatus(cell.id);
         if (status) classNames.push(status);
         
-        if (highlightedShelves?.has(cell.columnId)) {
+        // Callers pass either column ids ("C-01", Ispezione) or full shelf ids ("C-01-1", Picking/Visualizza)
+        if (highlightedShelves?.has(cell.columnId) || highlightedShelves?.has(cell.id)) {
           classNames.push('highlighted');
         }
 
@@ -313,16 +327,6 @@ const WarehouseGridSystem = ({
             box-shadow: 0 0 0 2px #ff9800;
             position: relative;
             z-index: 2;
-          }
-          .shelf-cell.highlighted::after {
-            content: '✓';
-            color: #ff9800;
-            font-size: 1.5em;
-            position: absolute;
-            top: 2px;
-            right: 6px;
-            font-weight: bold;
-            pointer-events: none;
           }
           .shelf-cell.good {
             background: #4caf50;

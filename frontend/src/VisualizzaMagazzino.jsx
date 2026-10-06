@@ -4,7 +4,7 @@ import axios from 'axios';
 import { LoadingOutlined, ReloadOutlined, FullscreenOutlined, InfoCircleOutlined, CloseCircleOutlined, EditOutlined, CheckOutlined, CloseOutlined, PrinterOutlined, DownOutlined } from '@ant-design/icons';
 import WarehouseGrid from './GridComponent';
 import './GridComponent.css';
-import WarehouseGridSystem from './WarehouseGridSystem';
+import WarehouseGridSystem, { findShelfPage } from './WarehouseGridSystem';
 import { WarehouseLayouts } from './layouts';
 
 const { Text } = Typography;
@@ -213,17 +213,12 @@ const locationInputRefs = [useRef(), useRef(), useRef(), useRef()];
   
   // Function to visualize the location of the subitem
   const visualizeLocation = (subItem) => {
-    const { area, scaffale, colonna, piano } = subItem;
+    const { scaffale, colonna, piano } = subItem;
     const colFormatted = colonna.toString().padStart(2, '0');
     const shelfToHighlight = `${scaffale}-${colFormatted}-${piano}`;
-    console.log(shelfToHighlight)
-    highlightedShelves.add(shelfToHighlight)
-    const getShelfClass = (shelf) => {
-      if (shelf === shelfToHighlight) {
-        return 'shelf highlighted';
-      }
-      return 'shelf';
-    };
+    setHighlightedShelves(new Set([shelfToHighlight]));
+    // Open the map on the page that contains the shelf
+    setCurrentPage2(findShelfPage(layouts, shelfToHighlight) || 1);
 
   setSelectedRecord(subItem);
   setIsModalVisible(true);
@@ -231,9 +226,7 @@ const locationInputRefs = [useRef(), useRef(), useRef(), useRef()];
   };
 
   const [highlightedShelves, setHighlightedShelves] = useState(new Set());
-  const handleShelfClick = (shelf) => {
-    console.log(highlightedShelves)
-  };
+  const handleShelfClick = () => {};
 
   const getTooltipContent = (shelf) => {
     return shelf;
@@ -543,6 +536,19 @@ highlightedShelves={highlightedShelves}
 
 />
 </div>)}
+else if (currentPage2 === 3) {
+    return (
+<div>
+<WarehouseGridSystem
+GRID_ROWS = {9}
+GRID_COLS = {50}
+warehouseLayout={layouts[3]}
+onCellClick={handleShelfClick}
+getShelfStatus={getShelfStatus}
+tooltipContent={getTooltipContent}
+highlightedShelves={highlightedShelves}
+/>
+</div>)}
 };
   // Columns configuration for the main table
   const columns = [
@@ -686,7 +692,7 @@ highlightedShelves={highlightedShelves}
   }));
 
   const cancelModal = (subItem) => {
-  highlightedShelves.clear()
+  setHighlightedShelves(new Set());
 
   setIsModalVisible(false);
   
@@ -757,11 +763,11 @@ const expandableConfig = {
     <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', height: '95vh' }}>
     <Modal
   title="Visualizzazione della Posizione"
-  visible={isModalVisible}
+  open={isModalVisible}
   onCancel={() => cancelModal()}
   footer={null}
   width="80%"
-  style={{top: '50%', transform: 'translateY(-50%)' }}
+  centered
 
 >
   <div style={{ maxHeight: '100%' }}>
@@ -772,7 +778,7 @@ const expandableConfig = {
     <div className="pagination-container" style={{ marginTop: '20px', textAlign: 'center' }}>
       <Pagination
         current={currentPage2}
-        total={2}
+        total={3}
         pageSize={1}
         onChange={(page) => setCurrentPage2(page)}
         showSizeChanger={false}

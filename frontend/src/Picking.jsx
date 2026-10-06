@@ -10,7 +10,7 @@ import { notification } from 'antd';
 import { InfoCircleOutlined } from '@ant-design/icons';
 import { Tabs } from 'antd';
 import { CloseCircleOutlined } from '@ant-design/icons';
-import WarehouseGridSystem from './WarehouseGridSystem';
+import WarehouseGridSystem, { findShelfPage } from './WarehouseGridSystem';
 import { WMSLayout, WarehouseLayouts } from './layouts';
 const { Text } = Typography;
 
@@ -1333,6 +1333,18 @@ const handlePageChange = (page) => {
         setShelfItems(newShelfItems);
         setHighlightedShelves(newHighlightedShelves); // Update highlightedShelves
     }, [tableData, highlightedRows]);
+
+    // Show the map page that contains the highlighted shelves (e.g. E/R/M on page 2, F/G/H/I/Y on page 3).
+    // Only reacts to new highlights, so manual paging afterwards is not overridden.
+    useEffect(() => {
+        const pages = [...highlightedShelves]
+            .map(shelf => findShelfPage(layouts, shelf))
+            .filter(Boolean);
+        if (pages.length > 0 && !pages.includes(currentPage)) {
+            setCurrentPage(pages[0]);
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [highlightedShelves]);
 
 
 

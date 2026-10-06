@@ -1,0 +1,114 @@
+"""
+One-time copy of the WMS tables from Informix (DSN fec) to Oracle Skyline.
+
+Prerequisites:
+  1. sql/oracle/01_wms_tables.sql and 02_erp_views.sql executed on Skyline.
+  2. Run with the 32-bit Python (Oracle client 11g x86):
+       python migrate_wms_informix_to_oracle.py            # dry run: counts only
+       python migrate_wms_informix_to_oracle.py --execute  # truncates Oracle wms_* and copies
+
+The original ids (id_pacco, wms_log.id, ...) are preserved, then each identity
+column is re-synced so new rows continue after the highest copied id.
+Stop the backend (pm2) during the copy so no rows are written to Informix meanwhile.
+"""
+import os
+import sys
+from datetime import datetime, date
+
+import pyodbc
+from dotenv import load_dotenv
+
+load_dotenv()
+
+IFX_CONN = os.getenv('IFX_CONNECTION_STRING', 'DSN=fec;UID=informix;PWD=informix;')
+ORA_CONN = (
+    f"Driver={{{os.getenv('DB_DRIVER', 'Oracle in OraClient11g_home1_32bit')}}};"
+    f"DBQ={os.getenv('DB_DBQ', 'SRVSKY:1521/SKYLINE')};"
+    f"Uid={os.getenv('DB_USER', 'FECITALIA')};Pwd={os.getenv('DB_PASSWORD', 'manager')};"
+)
+
+# (table, informix columns, oracle columns, identity column or None)
+# Order matters only for readability: there are no foreign keys.
+TABLES = [
+    ('wms_volume', ['dimensione', 'volume'], None, None),
+    ('wms_scaffali', ['area', 'scaffale', 'colonna', 'piano', 'fornitore_preferito', 'volume_libero'], None, None),
+    ('wms_items', ['id_pacco', 'id_art', 'id_mov', 'fornitore', 'area', 'scaffale', 'colonna', 'piano',
+                   'qta', 'dimensione', 'id'], None, 'id_pacco'),
+    ('wms_prelievi', ['id', 'odl', 'id_art', 'area', 'scaffale', 'colonna', 'piano', 'qta'], None, 'id'),
+    ('wms_log', ['id', 'timestamp', 'operation_type', 'operation_details', 'user', 'ip_address',
+                 'article_code', 'source_location', 'destination_location', 'quantity',
+                 'is_undone', 'can_undo', 'additional_data'],
+                ['id', 'log_ts', 'operation_type', 'operation_details', 'log_user', 'ip_address',
+                 'article_code', 'source_location', 'destination_location', 'quantity',
+                 'is_undone', 'can_undo', 'additional_data'], 'id'),
+    ('wms_inspection_cycles', ['id', 'cycle_name', 'start_date', 'end_date', 'created_at', 'is_active', 'notes'],
+     None, 'id'),
+    ('wms_inspection_questions', ['id', 'question_text', 'question_order', 'is_active', 'created_at'], None, 'id'),
+    ('wms_shelf_inspections', ['id', 'cycle_id', 'shelf_id', 'inspection_date', 'status', 'inspector_name',
+                               'created_at', 'updated_at', 'notes'], None, 'id'),
+    ('wms_inspection_responses', ['id', 'inspection_id', 'question_id', 'question_text', 'answer', 'notes',
+                                  'created_at'], None, 'id'),
+    ('wms_inspections', ['id', 'shelf_id', 'inspection_date', 'status', 'is_current'], None, 'id'),
+]
+
+BOOL_COLUMNS = {'is_undone', 'can_undo'}
+
+
+def to_oracle(col, value):
+    if col in BOOL_COLUMNS:
+        return 1 if value in (True, 1, '1', 't', 'T') else 0
+    if isinstance(value, str):
+        return value.strip()  # leading spaces too: codes are matched exactly (e.g. ' 0TA100PX')
+    if isinstance(value, date) and not isinstance(value, datetime):
+        return datetime(value.year, value.month, value.day)
+    return value
+
+
+def main():
+    execute = '--execute' in sys.argv
+    ifx = pyodbc.connect(IFX_CONN)
+    ora = pyodbc.connect(ORA_CONN)
+    ora.autocommit = False
+    icur, ocur = ifx.cursor(), ora.cursor()
+
+    try:
+        for table, ifx_cols, ora_cols, identity in TABLES:
+            ora_cols = ora_cols or ifx_cols
+            icur.execute(f"SELECT {', '.join(ifx_cols)} FROM {table}")
+            rows = [tuple(to_oracle(c, v) for c, v in zip(ora_cols, r)) for r in icur.fetchall()]
+            ocur.execute(f"SELECT COUNT(*) FROM {table}")
+            existing = int(ocur.fetchone()[0])
+            print(f"{table:28} informix={len(rows):6}  oracle(before)={existing:6}")
+            if not execute:
+                continue
+
+            ocur.execute(f"DELETE FROM {table}")
+            placeholders = ', '.join('?' * len(ora_cols))
+            if rows:  # executemany rejects an empty parameter list
+                ocur.executemany(f"INSERT INTO {table} ({', '.join(ora_cols)}) VALUES ({placeholders})", rows)
+
+            ocur.execute(f"SELECT COUNT(*) FROM {table}")
+            copied = int(ocur.fetchone()[0])
+            if copied != len(rows):
+                raise RuntimeError(f"{table}: copied {copied} rows, expected {len(rows)}")
+
+        if execute:
+            ora.commit()
+            # DDL auto-commits in Oracle, so identities are re-synced after the data commit
+            for table, _, _, identity in TABLES:
+                if identity:
+                    ocur.execute(f"ALTER TABLE {table} MODIFY {identity} "
+                                 f"GENERATED BY DEFAULT AS IDENTITY (START WITH LIMIT VALUE)")
+            print("Done: data committed and identity columns re-synced.")
+        else:
+            print("Dry run only. Re-run with --execute to copy the data.")
+    except Exception:
+        ora.rollback()
+        raise
+    finally:
+        ifx.close()
+        ora.close()
+
+
+if __name__ == '__main__':
+    main()
