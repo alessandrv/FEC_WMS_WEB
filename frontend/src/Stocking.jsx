@@ -6,6 +6,7 @@ import { useNavigate } from 'react-router-dom';
 import TrovaQuantita from "./TrovaQuantita"
 import { Pagination } from 'antd';
 import ViewMagazzino from "./ViewMagazzino"
+import { isEtichetta, parseEtichetta } from './barcode';
 
 const { Title } = Typography;
 const { Option } = Select;
@@ -16,21 +17,17 @@ const StockingDettagli = () => {
   const [selectedRows, setSelectedRows] = useState([]);
 
   const [descrizioneArticolo, setDescrizioneArticolo] = useState('');
-  const [fornitoreCode, setFornitoreCode] = useState('');
-  const [ragioneSocialeFornitore, setRagioneSocialeFornitore] = useState('');
   const [movimentoCode, setMovimentoCode] = useState('');
   const [quantitaPerPacco, setQuantitaPerPacco] = useState('');
   const [totalePacchi, setTotalePacchi] = useState(1);
   const [dimensione, setDimensione] = useState('Zero');
   const [isDataConsistent, setIsDataConsistent] = useState(false);
-  const [isModalVisible, setIsModalVisible] = useState(false);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [scannedArticolo, setScannedArticolo] = useState('');
-  const [scannedFornitore, setScannedFornitore] = useState('');
-  const [scannedMovimento, setScannedMovimento] = useState('');
   const [forzaDeposito, setForzaDeposito] = useState(false);
   const [showMovimentoInputModal, setShowMovimentoInputModal] = useState(false);
   const [movimentoInput, setMovimentoInput] = useState('');
+  // Movement whose articles are listed in "Deposito da Movimento" (saved on the packages deposited from it)
+  const [movimentoCaricato, setMovimentoCaricato] = useState('');
+  const [activeTab, setActiveTab] = useState('1');
   const [showArticoliModal, setShowArticoliModal] = useState(false);
   const [articoliMovimento, setArticoliMovimento] = useState([]);
   const [loadingArticoli, setLoadingArticoli] = useState(false);
@@ -48,32 +45,44 @@ const [multiplePartialQuantity, setMultiplePartialQuantity] = useState(0);
   const navigate = useNavigate();
 
   const articoloRef = useRef(null);
-  const fornitoreRef = useRef(null);
   const movimentoRef = useRef(null);
   const quantitaRef = useRef(null);
   const totalePacchiRef = useRef(null);
   const dimensioneSelectRef = useRef(null);
-  const scanArticoloRef = useRef(null);
-  const scanFornitoreRef = useRef(null);
-  const scanMovimentoRef = useRef(null);
+  const etichettaTimer = useRef(null);
 
   useEffect(() => {
     if (articoloRef.current) {
       articoloRef.current.focus();
     }
+    return () => clearTimeout(etichettaTimer.current);
   }, []);
 
-  useEffect(() => {
-    if (isModalVisible && scanArticoloRef.current) {
-      scanArticoloRef.current.focus();
-    }
-  }, [isModalVisible]);
+  // A label scanned into the article field ('ART,2026,CA,000038' or old 'ART,FORNITORE,MOVIMENTO')
+  // fills article and movimento and runs the coherence check. The scanner ends with Enter; the
+  // timer covers scanners configured without the Enter suffix.
+  const applicaEtichetta = (value) => {
+    clearTimeout(etichettaTimer.current);
+    const { articolo, movimento } = parseEtichetta(value);
+    setArticoloCode(articolo);
+    setMovimentoCode(movimento);
+    verificaCoerenza(articolo, movimento);
+  };
 
-  const handleArticoloEnter = async () => {
-    // Only set the articolo code, don't make API call
-    setArticoloCode(articoloCode);
-    if (fornitoreRef.current) {
-      fornitoreRef.current.focus();
+  const handleArticoloChange = (e) => {
+    const value = e.target.value;
+    setArticoloCode(value);
+    clearTimeout(etichettaTimer.current);
+    if (isEtichetta(value)) {
+      etichettaTimer.current = setTimeout(() => applicaEtichetta(value), 300);
+    }
+  };
+
+  const handleArticoloEnter = () => {
+    if (isEtichetta(articoloCode)) {
+      applicaEtichetta(articoloCode);
+    } else if (movimentoRef.current) {
+      movimentoRef.current.focus();
     }
   };
 
@@ -92,24 +101,20 @@ const [multiplePartialQuantity, setMultiplePartialQuantity] = useState(0);
     }
   };
 
-  const handleFornitoreEnter = async () => {
-    // Only set the fornitore code, don't make API call
-    setFornitoreCode(fornitoreCode);
-    if (movimentoRef.current) {
-      movimentoRef.current.focus();
-    }
+  const handleMovimentoChange = (e) => {
+    const value = e.target.value;
+    // A full label scanned here also works: keep only the movimento part
+    setMovimentoCode(isEtichetta(value) ? parseEtichetta(value).movimento : value);
   };
 
-  const handleMovimentoEnter = async () => {
+  const handleMovimentoEnter = () => verificaCoerenza(articoloCode, movimentoCode);
+
+  const verificaCoerenza = async (articolo, movimento) => {
     try {
       // Articolo API call
-      const articoloResponse = await axios.get(`${process.env.REACT_APP_API_URL}/api/articolo-descrizione?codice_articolo=${articoloCode}`);
+      const articoloResponse = await axios.get(`${process.env.REACT_APP_API_URL}/api/articolo-descrizione`, { params: { codice_articolo: articolo } });
       setDescrizioneArticolo(articoloResponse.data.descrizione || 'Descrizione non trovata');
-      setArticoloDaCercare(articoloCode);
-
-      // Fornitore API call
-      const fornitoreResponse = await axios.get(`${process.env.REACT_APP_API_URL}/api/fornitore-ragione-sociale?codice_fornitore=${fornitoreCode}`);
-      setRagioneSocialeFornitore(fornitoreResponse.data.ragione_sociale || 'Fornitore non trovato');
+      setArticoloDaCercare(articolo);
 
       if (forzaDeposito) {
         message.success('Coerenza ignorata');
@@ -121,8 +126,11 @@ const [multiplePartialQuantity, setMultiplePartialQuantity] = useState(0);
       }
 
       // Movimento API call
-      const movimentoResponse = await axios.get(`${process.env.REACT_APP_API_URL}/api/movimento-coerenza?codice_articolo=${articoloCode}&codice_movimento=${movimentoCode}&codice_fornitore=${fornitoreCode}`);
-      
+      // Movimento API call: the article must be part of the movement (Skyline document or ADAPTA)
+      const movimentoResponse = await axios.get(`${process.env.REACT_APP_API_URL}/api/movimento-coerenza`, {
+        params: { codice_articolo: articolo, codice_movimento: movimento }
+      });
+
       // Check if movimentoResponse.data is not null or undefined
       if (movimentoResponse.data && movimentoResponse.data.coerenza) {
         message.success('Informazioni coerenti');
@@ -131,7 +139,7 @@ const [multiplePartialQuantity, setMultiplePartialQuantity] = useState(0);
           quantitaRef.current.focus();
         }
       } else {
-        message.error('Errore: Movimento, articolo e fornitore non coerenti.');
+        message.error('Errore: articolo non presente nel movimento.');
         setIsDataConsistent(false);
       }
     } catch (ex) {
@@ -155,8 +163,6 @@ const [multiplePartialQuantity, setMultiplePartialQuantity] = useState(0);
   const clearAllFields = () => {
     setArticoloCode('');
     setDescrizioneArticolo('');
-    setFornitoreCode('');
-    setRagioneSocialeFornitore('');
     setMovimentoCode('');
     setQuantitaPerPacco('');
     setTotalePacchi();
@@ -189,72 +195,6 @@ const [multiplePartialQuantity, setMultiplePartialQuantity] = useState(0);
     setShowWarehouseModal(true);
   };
 
-  const showModal = () => {
-    setIsModalVisible(true);
-    setIsProcessing(false);
-    setScannedArticolo('');
-    setScannedFornitore('');
-    setScannedMovimento('');
-  };
-
-  const handleOk = () => {
-    setIsModalVisible(false);
-    setIsProcessing(false);
-    setScannedArticolo('');
-    setScannedFornitore('');
-    setScannedMovimento('');
-  };
-
-  const handleCancel = () => {
-    setIsModalVisible(false);
-    setIsProcessing(false);
-    setScannedArticolo('');
-    setScannedFornitore('');
-    setScannedMovimento('');
-  };
-
-  const processScannedCode = async () => {
-    setIsProcessing(true);
-  
-    try {
-      await handleArticoloEnter(scannedArticolo);
-      await handleFornitoreEnter(scannedFornitore);
-      await handleMovimentoEnter(scannedArticolo, scannedMovimento, scannedFornitore);
-  
-      // Update state variables after processing
-      setArticoloCode(scannedArticolo);
-      setFornitoreCode(scannedFornitore);
-      setMovimentoCode(scannedMovimento);
-  
-      setIsProcessing(false);
-      handleOk();
-    } catch (error) {
-      // Error handling...
-    }
-  };
-  
-
-  const handleInputChange = (e, setter, nextRef) => {
-    const value = e.target.value;
-    if (value.includes(',')) {
-      const [beforeComma, afterComma] = value.split(',');
-      setter(beforeComma);
-      if (nextRef && nextRef.current) {
-        nextRef.current.focus();
-        nextRef.current.input.value = afterComma;
-      }
-    } else {
-      setter(value);
-    }
-  };
-  const handleMovimentoInputChange = (e) => {
-    const value = e.target.value;
-    setScannedMovimento(value);
-    if (value && scannedArticolo && scannedFornitore) {
-      processScannedCode();
-    }
-  };
-  
   const handleForzaDepositoChange = (e) => {
     setForzaDeposito(e.target.checked);
     if (e.target.checked) {
@@ -305,6 +245,7 @@ const [multiplePartialQuantity, setMultiplePartialQuantity] = useState(0);
       }));
       
       setArticoliMovimento(articoliMovimento);
+      setMovimentoCaricato(movimentoInput.trim());
       setShowMovimentoInputModal(false);
     } catch (error) {
       console.error('Errore dettagliato:', error);
@@ -508,7 +449,7 @@ const [multiplePartialQuantity, setMultiplePartialQuantity] = useState(0);
   return (
     <div className="stocking-dettagli">
       <Title level={2} className="title">Deposito</Title>
-      <Tabs defaultActiveKey="1">
+      <Tabs activeKey={activeTab} onChange={setActiveTab}>
       <Tabs.TabPane tab="Deposito Singolo" key="1">
 
       <Row gutter={16}>
@@ -518,9 +459,9 @@ const [multiplePartialQuantity, setMultiplePartialQuantity] = useState(0);
               <Form.Item label="Codice Articolo">
                 <Input
                   value={articoloCode}
-                  onChange={(e) => handleInputChange(e, setArticoloCode, fornitoreRef)}
+                  onChange={handleArticoloChange}
                   onPressEnter={handleArticoloEnter}
-                  placeholder="Codice Articolo"
+                  placeholder="Codice Articolo o etichetta"
                   ref={articoloRef}
                   className="input-small"
                 />
@@ -538,47 +479,20 @@ const [multiplePartialQuantity, setMultiplePartialQuantity] = useState(0);
         </Col>
 
         <Col xs={24} sm={12} md={12}>
-          <Card title="Fornitore" className="card">
-            <Form layout="vertical" className="form">
-              <Form.Item label="Codice Fornitore">
-              <Input
-                  value={fornitoreCode}
-                  onChange={(e) => handleInputChange(e, setFornitoreCode, movimentoRef)}
-                  onPressEnter={handleFornitoreEnter}
-                  placeholder="Codice Fornitore"
-                  ref={fornitoreRef}
-                  className="input-small"
-                />
-              </Form.Item>
-              <Form.Item label="Ragione Sociale Fornitore">
-                <Input
-                  value={ragioneSocialeFornitore}
-                  readOnly
-                  placeholder="Ragione Sociale Fornitore"
-                  className="input-small"
-                />
-              </Form.Item>
-            </Form>
-          </Card>
-        </Col>
-        </Row>
-
-        <Row gutter={16}>
-        <Col xs={24} sm={12} md={12}>
           <Card title="Movimento" className="card">
             <Form layout="vertical" className="form">
               <Form.Item label="Codice Movimento">
               <Input
                   value={movimentoCode}
-                  onChange={(e) => handleInputChange(e, setMovimentoCode, quantitaRef)}
+                  onChange={handleMovimentoChange}
                   onPressEnter={handleMovimentoEnter}
-                  placeholder="Codice Movimento"
+                  placeholder="es. 2026/CA/38 oppure 83005"
                   ref={movimentoRef}
                   className="input-small"
                 />
               </Form.Item>
               <Form.Item>
-                <Tooltip title="Ignora coerenza articolo, fornitore e movimento">
+                <Tooltip title="Ignora coerenza articolo e movimento">
                   <Checkbox
                     checked={forzaDeposito}
                     onChange={handleForzaDepositoChange}
@@ -626,7 +540,7 @@ const [multiplePartialQuantity, setMultiplePartialQuantity] = useState(0);
             <Form layout="vertical">
               <Form.Item label="Codice Movimento">
                 <Input
-                  placeholder="Inserisci il codice movimento"
+                  placeholder="Scansiona l'etichetta o inserisci il movimento (2026/CA/38 oppure 83005)"
                   value={movimentoInput}
                   onChange={(e) => setMovimentoInput(e.target.value)}
                   onPressEnter={handleMovimentoInputConfirm}
@@ -721,9 +635,7 @@ const [multiplePartialQuantity, setMultiplePartialQuantity] = useState(0);
   onComplete={handleWarehouseComplete}
   articoloCode={articoloCode}
   descrizioneArticolo={descrizioneArticolo}
-  fornitoreCode={fornitoreCode}
-  ragioneSocialeFornitore={ragioneSocialeFornitore}
-  movimentoCode={movimentoCode}
+  movimentoCode={activeTab === '2' ? movimentoCaricato : movimentoCode}
   quantita={quantitaPerPacco}
   totalePacchi={totalePacchi}
   dimensione={dimensione}

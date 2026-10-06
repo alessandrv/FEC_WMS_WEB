@@ -8,6 +8,7 @@ import json
 import os
 from dotenv import load_dotenv
 import calendar
+import re
 
 # Load environment variables from .env file
 load_dotenv()
@@ -115,6 +116,31 @@ def normalizza_fornitore(codice):
     """Supplier codes are 'F' + Skyline partitario; accept the bare partitario too."""
     codice = (codice or '').strip().upper()
     return codice if codice.startswith('F') else f"F{codice}"
+
+# Package labels:
+#   new  'ARTICOLO,ANNO,TIPO,NUMERO'   e.g. '0SW948MI,2026,CA,000038' -> Skyline purchase document 2026/CA/38
+#   old  'ARTICOLO,FORNITORE,MOVIMENTO' e.g. '0TA100PX,F504358,83005'  -> ADAPTA movement 83005
+_DOCUMENTO_RE = re.compile(r'(?:^|[,\s])(\d{4})\s*[,/\-]\s*([A-Z]{1,3})\s*[,/\-]\s*(\d+)\s*$')
+
+def normalizza_movimento(codice):
+    """Movement key stored in wms_items.id_mov and used by wms_v_movimenti.mov_code:
+    'ANNO/TIPO/NUMERO' for Skyline documents, the plain number for ADAPTA movements.
+    Accepts a full label, 'ANNO/TIPO/NUMERO', 'ANNO,TIPO,NUMERO' or an ADAPTA number."""
+    codice = str(codice or '').strip().upper()
+    if not codice:
+        return ''
+    documento = _DOCUMENTO_RE.search(codice)
+    if documento:
+        anno, tipo, numero = documento.groups()
+        return f"{anno}/{tipo}/{int(numero)}"
+    parti = [p.strip() for p in codice.split(',') if p.strip()]
+    if len(parti) >= 3:  # old label: the movement is the last field (the supplier is ignored)
+        codice = parti[-1]
+    return str(int(codice)) if codice.isdigit() else codice
+
+def articolo_da_barcode(codice):
+    """The article is always the first field of a label."""
+    return str(codice or '').split(',')[0].strip()
 
 def parse_log_date(value, end_of_day=False):
     """Log filters arrive as 'YYYY-MM-DD[ HH:MM:SS]' strings; Oracle needs a real datetime."""
@@ -371,8 +397,8 @@ def get_movimento_articoli():
     try:
         conn = connect_to_db()
         cursor = conn.cursor()
-        query = "select gim_arti, gim_desc, gim_des2, gim_qmov from wms_v_mggior where gim_code = ? and gim_arti is not null order by gim_riga"
-        cursor.execute(query, (int(movimento),))
+        query = "select gim_arti, gim_desc, gim_des2, gim_qmov from wms_v_movimenti where mov_code = ? order by gim_riga"
+        cursor.execute(query, (normalizza_movimento(movimento),))
         
         # Fetch all rows
         rows = cursor.fetchall()
@@ -738,7 +764,6 @@ def get_items():
 def check_movimento_coerenza():
     codice_movimento = request.args.get('codice_movimento')
     codice_articolo = request.args.get('codice_articolo')
-    codice_fornitore = request.args.get('codice_fornitore')
 
     if not codice_movimento or not codice_articolo:
         return jsonify({'error': 'Missing codice_movimento or codice_articolo parameter'}), 400
@@ -747,26 +772,14 @@ def check_movimento_coerenza():
         conn = connect_to_db()
         cursor = conn.cursor()
 
-        # The movement must contain the article and be a supplier receipt (causale with a
-        # 36xx supplier on the header). 'F000000' = any supplier, like on Informix.
-        # In Skyline the receipt supplier is on MAG_MOVIM_TESTATA (Informix: bfbolt.blt_cocl).
-        query = '''SELECT DISTINCT gim_cofo, gim_arti, gim_code
-            FROM wms_v_mggior
-            WHERE gim_code = ?
-              AND gim_arti = ?
-              AND gim_cofo IS NOT NULL'''
-        params = [int(codice_movimento), codice_articolo.strip()]
-        if codice_fornitore and normalizza_fornitore(codice_fornitore) != 'F000000':
-            query += " AND gim_cofo = ?"
-            params.append(normalizza_fornitore(codice_fornitore))
-        cursor.execute(query, params)
+        # Coherent = the article is a row of the movement (Skyline document or ADAPTA movement).
+        # The supplier is no longer checked (codice_fornitore is ignored if sent).
+        movimento = normalizza_movimento(codice_movimento)
+        cursor.execute("SELECT 1 FROM wms_v_movimenti WHERE mov_code = ? AND gim_arti = ? FETCH FIRST 1 ROWS ONLY",
+                       (movimento, articolo_da_barcode(codice_articolo)))
+        coerenza = cursor.fetchone() is not None
+        return jsonify({'coerenza': coerenza, 'movimento': movimento})
 
-        result = cursor.fetchall()
-        coerenza = len(result) > 0
-        return jsonify({'coerenza': coerenza})
-
-    except ValueError:
-        return jsonify({'coerenza': False})
     except pyodbc.Error as e:
         return jsonify({'error': str(e)}), 500
     finally:
@@ -780,23 +793,16 @@ def check_movimento_coerenza():
 def check_coerenza_dati():
     codice_movimento = request.args.get('codice_movimento')
     codice_articolo = request.args.get('codice_articolo')
-    codice_fornitore = request.args.get('codice_fornitore')
-    if not codice_movimento or not codice_articolo or not codice_fornitore:
-        return jsonify({'error': 'Missing codice_movimento, codice_articolo, or codice_fornitore parameter'}), 400
+    if not codice_movimento or not codice_articolo:
+        return jsonify({'error': 'Missing codice_movimento or codice_articolo parameter'}), 400
 
     try:
         conn = connect_to_db()
         cursor = conn.cursor()
-        query = "SELECT gim_cofo FROM wms_v_mggior WHERE gim_arti = ? AND gim_code = ?"
-        cursor.execute(query, (codice_articolo.strip(), int(codice_movimento)))
-        rows = cursor.fetchall()
-        if rows:
-            coerenza = any(row.gim_cofo == normalizza_fornitore(codice_fornitore) for row in rows)
-            return jsonify({'coerenza': coerenza})
-        return jsonify({'coerenza': False})
+        cursor.execute("SELECT 1 FROM wms_v_movimenti WHERE mov_code = ? AND gim_arti = ? FETCH FIRST 1 ROWS ONLY",
+                       (normalizza_movimento(codice_movimento), articolo_da_barcode(codice_articolo)))
+        return jsonify({'coerenza': cursor.fetchone() is not None})
 
-    except ValueError:
-        return jsonify({'coerenza': False})
     except pyodbc.Error as e:
         return jsonify({'error': str(e)}), 500
     finally:
@@ -957,7 +963,7 @@ def get_articoli_scaffale():
         # Define the query to fetch shelves based on area
         query = "select * FROM wms_items WHERE area = ? AND  scaffale = ? AND colonna= ? AND piano= ? AND id_art= ?"
 
-        cursor.execute(query, (area, scaffale, colonna, piano, articolo))
+        cursor.execute(query, (area, scaffale, colonna, piano, articolo_da_barcode(articolo)))
         
         # Fetch all rows
         rows = cursor.fetchall()
@@ -1000,7 +1006,7 @@ def get_item_presence():
 
         # Proceed with the full query
         query = "select * from wms_items where id_mov = ? and area = ? and scaffale = ? and colonna = ? and piano = ? and id_art = ?"
-        cursor.execute(query, (id_mov, area, scaffale, colonna, piano, id_art))
+        cursor.execute(query, (normalizza_movimento(id_mov), area, scaffale, colonna, piano, id_art))
         
         rows = cursor.fetchall()
         
@@ -1096,8 +1102,8 @@ def conferma_inserimento_multiplo():
         # Process each item
         for item in items:
             # Scanned codes can carry stray spaces: stored codes must match exact lookups (picking)
-            codice_articolo = (item.get('articoloCode') or '').strip()
-            codice_movimento = item.get('movimentoCode')
+            codice_articolo = articolo_da_barcode(item.get('articoloCode'))
+            codice_movimento = normalizza_movimento(item.get('movimentoCode')) or None
             quantita = item.get('quantita')
             dimensioni = item.get('dimensioni', 'Zero')
             
@@ -1166,8 +1172,9 @@ def conferma_inserimento():
     colonna = data.get('colonna')
     piano = data.get('piano')
     # Scanned codes can carry stray spaces: stored codes must match exact lookups (picking)
-    codice_articolo = (data.get('codice_articolo') or '').strip()
-    codice_movimento = data.get('codice_movimento')
+    codice_articolo = articolo_da_barcode(data.get('codice_articolo'))
+    # Stored as 'ANNO/TIPO/NUMERO' (Skyline document) or the ADAPTA number
+    codice_movimento = normalizza_movimento(data.get('codice_movimento')) or None
     quantita = data.get('quantita')
     dimensioni = data.get('dimensioni')
     numero_pacchi = data.get('numero_pacchi')
@@ -1889,7 +1896,7 @@ ORDER BY
             conn.close()
 @app.route('/api/articolo-search', methods=['GET'])
 def articolo_search():
-    articolo_id = request.args.get('articolo_id')
+    articolo_id = articolo_da_barcode(request.args.get('articolo_id'))  # plain code or scanned label
     required_quantity = request.args.get('quantity', type=int)
 
     if not articolo_id or required_quantity is None:
@@ -1905,7 +1912,7 @@ def articolo_search():
             FROM wms_v_mganag
             WHERE amg_code = ?
         """
-        cursor.execute(query_desc, (articolo_id.strip(),))
+        cursor.execute(query_desc, (articolo_id,))
         desc_row = cursor.fetchone()
         if desc_row:
             occ_desc_combined = f"{desc_row.amg_desc} {desc_row.amg_des2}".strip()
@@ -2541,9 +2548,9 @@ def get_movimento_location_items():
         cursor = conn.cursor()
         
         # First get movimento items
-        movimento_query = """SELECT DISTINCT gim_arti FROM wms_v_mggior
-                          WHERE gim_code = ? AND gim_arti IS NOT NULL"""
-        cursor.execute(movimento_query, (int(movimento),))
+        movimento_query = """SELECT DISTINCT gim_arti FROM wms_v_movimenti
+                          WHERE mov_code = ?"""
+        cursor.execute(movimento_query, (normalizza_movimento(movimento),))
         movimento_items = [row.gim_arti for row in cursor.fetchall()][:900]
         
         if not movimento_items:
@@ -2891,8 +2898,8 @@ def undo_pacchi():
     piano = data.get('piano')
     quantity = data.get('quantity')
     odl = data.get('odl')
-    movimento = data.get('movimento')
-    
+    movimento = normalizza_movimento(data.get('movimento')) or None
+
     # Validate input parameters
     if not all([articolo, area, scaffale, colonna, piano, quantity]):
         return jsonify({'error': 'Missing required parameters'}), 400
@@ -5913,6 +5920,187 @@ def get_inspection_questions_v2():
     except Exception as e:
         print(f"Error fetching questions: {str(e)}")
         return jsonify({'success': False, 'error': str(e)}), 500
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        if 'conn' in locals():
+            conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Warehouse map (shared by every page, edited from the "Editor mappa" page)
+# The latest wms_map_layout row is the map in use; every save adds a version.
+# Editing the map never changes wms_items.
+# ---------------------------------------------------------------------------
+
+MAP_DEFAULT_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'map_layout_default.json')
+MAP_SECTION_TYPES = ('shelf', 'customText', 'blocked')
+
+
+def _carica_mappa_default():
+    with open(MAP_DEFAULT_FILE, encoding='utf-8') as f:
+        return json.load(f)
+
+
+def _valida_mappa(layout):
+    """Basic structure check; returns an error message or None."""
+    if not isinstance(layout, dict) or not isinstance(layout.get('pages'), list) or not layout['pages']:
+        return "La mappa deve contenere almeno una pagina"
+    for page in layout['pages']:
+        if not isinstance(page, dict):
+            return "Pagina non valida"
+        for key in ('rows', 'cols'):
+            if not isinstance(page.get(key), int) or not 1 <= page[key] <= 200:
+                return f"Pagina {page.get('page')}: '{key}' deve essere un intero tra 1 e 200"
+        if not isinstance(page.get('sections'), list):
+            return f"Pagina {page.get('page')}: sezioni mancanti"
+        for section in page['sections']:
+            if not isinstance(section, dict) or not section.get('id'):
+                return f"Pagina {page.get('page')}: sezione senza codice"
+            for key in ('startRow', 'startCol', 'width', 'height'):
+                if not isinstance(section.get(key), int) or section[key] < (1 if key in ('width', 'height') else 0):
+                    return f"Pagina {page.get('page')}, sezione {section.get('id')}: '{key}' non valido"
+            if section.get('type', 'shelf') not in MAP_SECTION_TYPES:
+                return f"Pagina {page.get('page')}, sezione {section.get('id')}: tipo non valido"
+    return None
+
+
+@app.route('/api/map-layout', methods=['GET'])
+def get_map_layout():
+    try:
+        conn = connect_to_db()
+        cursor = conn.cursor()
+        cursor.execute("""SELECT id, layout, created_at, created_by FROM wms_map_layout
+                          ORDER BY id DESC FETCH FIRST 1 ROWS ONLY""")
+        row = cursor.fetchone()
+        if not row:
+            # Nothing saved yet: the map is the original layout of the WMS
+            return jsonify({**_carica_mappa_default(), 'version': None, 'updated_at': None, 'updated_by': None})
+        layout = json.loads(row.layout)
+        return jsonify({**layout, 'version': row.id,
+                        'updated_at': row.created_at.strftime('%Y-%m-%d %H:%M:%S') if row.created_at else None,
+                        'updated_by': row.created_by})
+    except pyodbc.Error as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        if 'conn' in locals():
+            conn.close()
+
+
+@app.route('/api/map-layout', methods=['PUT'])
+def save_map_layout():
+    data = request.get_json() or {}
+    layout = {'pages': data.get('pages')}
+    errore = _valida_mappa(layout)
+    if errore:
+        return jsonify({'error': errore}), 400
+
+    try:
+        conn = connect_to_db()
+        cursor = conn.cursor()
+        conn.autocommit = False
+        cursor.execute("INSERT INTO wms_map_layout (layout, created_at, created_by, note) VALUES (?, ?, ?, ?)",
+                       (json.dumps(layout, ensure_ascii=False), datetime.now().replace(microsecond=0),
+                        (data.get('user') or request.remote_addr or 'current_user')[:50],
+                        (data.get('note') or '').strip()[:255] or None))
+        cursor.execute("SELECT MAX(id) FROM wms_map_layout")
+        version = cursor.fetchone()[0]
+        conn.commit()
+
+        log_operation(
+            operation_type="MAPPA",
+            operation_details=f"Mappa magazzino salvata (versione {version}, "
+                              f"{len(data.get('scaffali_fuori_mappa') or [])} locazioni con articoli fuori mappa)",
+            user="current_user",
+            ip_address=request.remote_addr,
+            can_undo=False,
+            additional_data={'version': version,
+                             'scaffali_fuori_mappa': (data.get('scaffali_fuori_mappa') or [])[:100]}
+        )
+        return jsonify({'success': True, 'version': version}), 200
+    except pyodbc.Error as e:
+        if 'conn' in locals():
+            conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        if 'conn' in locals():
+            conn.close()
+
+
+@app.route('/api/map-layout/history', methods=['GET'])
+def get_map_layout_history():
+    """Saved versions of the map, newest first (the layout itself is loaded on demand)."""
+    try:
+        conn = connect_to_db()
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, created_at, created_by, note FROM wms_map_layout ORDER BY id DESC")
+        versions = [{
+            'version': row.id,
+            'created_at': row.created_at.strftime('%Y-%m-%d %H:%M:%S') if row.created_at else None,
+            'created_by': row.created_by,
+            'note': row.note,
+        } for row in cursor.fetchall()]
+        return jsonify(versions)
+    except pyodbc.Error as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        if 'conn' in locals():
+            conn.close()
+
+
+@app.route('/api/map-layout/version/<version>', methods=['GET'])
+def get_map_layout_version(version):
+    """One saved version, or 'originale' for the map the WMS started from."""
+    if version == 'originale':
+        return jsonify({**_carica_mappa_default(), 'version': 'originale'})
+    try:
+        conn = connect_to_db()
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, layout FROM wms_map_layout WHERE id = ?", (int(version),))
+        row = cursor.fetchone()
+        if not row:
+            return jsonify({'error': f'Versione {version} non trovata'}), 404
+        return jsonify({**json.loads(row.layout), 'version': row.id})
+    except ValueError:
+        return jsonify({'error': 'Versione non valida'}), 400
+    except pyodbc.Error as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        if 'conn' in locals():
+            conn.close()
+
+
+@app.route('/api/map-occupancy', methods=['GET'])
+def get_map_occupancy():
+    """Locations holding packages: used to colour the map and to warn about shelves with items."""
+    try:
+        conn = connect_to_db()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT area, scaffale, colonna, piano,
+                   COUNT(*) AS pacchi, SUM(qta) AS qta, COUNT(DISTINCT id_art) AS articoli,
+                   MIN(id_art) AS primo_articolo
+              FROM wms_items
+             WHERE qta > 0
+             GROUP BY area, scaffale, colonna, piano
+             ORDER BY area, scaffale, colonna, piano""")
+        result = [{
+            'area': row.area, 'scaffale': row.scaffale, 'colonna': row.colonna, 'piano': row.piano,
+            'shelf_id': f"{row.scaffale}-{row.colonna}-{row.piano}",
+            'locazione': f"{row.area}-{row.scaffale}-{row.colonna}-{row.piano}",
+            'pacchi': row.pacchi, 'qta': row.qta, 'articoli': row.articoli, 'primo_articolo': row.primo_articolo,
+        } for row in cursor.fetchall()]
+        return jsonify(result)
+    except pyodbc.Error as e:
+        return jsonify({'error': str(e)}), 500
     finally:
         if 'cursor' in locals():
             cursor.close()

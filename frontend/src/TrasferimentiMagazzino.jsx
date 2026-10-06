@@ -1,14 +1,13 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Input, Tabs, Typography, Button, message, Modal, notification, Table, Tooltip, Tag, InputNumber, Row, Space, Col, Spin, Pagination, Card, Form, Alert } from 'antd';
+import { Input, Tabs, Typography, Button, message, Modal, notification, Table, Tooltip, Tag, InputNumber, Row, Space, Col, Spin, Card, Form, Alert } from 'antd';
 import axios from 'axios';
 import { InfoCircleOutlined, CloseCircleOutlined, FullscreenOutlined } from '@ant-design/icons';
 
-import WarehouseGrid from './GridComponent';
 import './App.css'; // Make sure to import your CSS
-import WarehouseGridSystem from './WarehouseGridSystem';
+import WarehouseMap from './map/WarehouseMap';
 import { LoadingOutlined } from '@ant-design/icons';
 import ViewMagazzino from './ViewMagazzino';
-import { WarehouseLayouts } from './layouts';
+import { articoloDaEtichetta } from './barcode';
 
 const { Text } = Typography;
 const App = () => {
@@ -17,7 +16,6 @@ const App = () => {
   const [otp, setOtp] = useState(['', '', '', '']);
   const inputRefs = [useRef(), useRef(), useRef(), useRef()];
   const articoloRef = useRef(null);
-  const fornitoreRef = useRef(null);
   const [articoloCode, setArticoloCode] = useState('');
   const [fornitoreCode, setFornitoreCode] = useState('');
   const [movimentoCode, setMovimentoCode] = useState('');
@@ -45,7 +43,6 @@ const App = () => {
   const [isWarehouseMapOpen, setIsWarehouseMapOpen] = useState(false);
   const [highlightedShelf, setHighlightedShelf] = useState('');
   const [shelvesData, setShelvesData] = useState([]);
-  const [currentPage, setCurrentPage] = useState(1);
   const [movimentoInput, setMovimentoInput] = useState('');
   const [articoliMovimento, setArticoliMovimento] = useState([]);
   const [loadingArticoli, setLoadingArticoli] = useState(false);
@@ -629,14 +626,10 @@ const App = () => {
     setIsWarehouseMapOpen(false);
   };
 
-  const layouts = WarehouseLayouts;
   const getShelfStatus = (shelfId) => {
     if (shelfId === selectedShelf) return 'selected';
     if (occupiedShelves.has(shelfId)) return 'full';
     return 'available';
-  };
-  const handlePageChange = (page) => {
-    setCurrentPage(page);
   };
   const handleMovimentoInputConfirm = async () => {
     if (!movimentoInput) {
@@ -717,130 +710,6 @@ const App = () => {
     }
   };
 
-  const renderWarehouseSection2 = () => {
-    if (currentPage === 1) {
-      return (
-        <div> <WarehouseGridSystem
-          warehouseLayout={layouts[currentPage]}
-          GRID_ROWS={30}
-          GRID_COLS={9}
-          onCellClick={handleLocationTransferComplete}
-
-
-          getShelfStatus={(cell) => {
-            if (!cell) return 'available';
-            return 'available';
-          }}
-          tooltipContent={getTooltipContent}
-          currentPage={1}
-          onPageChange={() => { }}
-        />
-        </div>)
-    }
-    else if (currentPage === 2) {
-      return (
-        <div>
-          <WarehouseGridSystem
-            warehouseLayout={layouts[currentPage]}
-            GRID_ROWS={16}
-            GRID_COLS={22}
-            onCellClick={handleLocationTransferComplete}
-
-
-            getShelfStatus={(cell) => {
-              if (!cell) return 'available';
-              return 'available';
-            }}
-            tooltipContent={getTooltipContent}
-            currentPage={1}
-            onPageChange={() => { }}
-          />
-        </div>)
-    } else if (currentPage === 3) {
-      return (
-        <div>
-          <WarehouseGridSystem
-            GRID_ROWS={9}
-            GRID_COLS={50}
-            warehouseLayout={layouts[3]}
-            onCellClick={handleLocationTransferComplete}
-            getShelfStatus={(cell) => {
-              if (!cell) return 'available';
-              return 'available';
-            }}
-                        tooltipContent={getTooltipContent}
-                        onPageChange={() => { }}
-
-          />
-        </div>)
-    }
-  };
-
-
-  const renderWarehouseSection = () => {
-    if (currentPage === 1) {
-      return (
-        <div>
-          <WarehouseGridSystem
-            warehouseLayout={layouts[1]}
-            GRID_ROWS={30}
-            GRID_COLS={9}
-            onCellClick={handleShelfClick}
-            getShelfStatus={getShelfStatus}
-            tooltipContent={getTooltipContent}
-
-          />
-        </div>)
-    }
-    else if (currentPage === 2) {
-      return (
-        <div>
-          <WarehouseGridSystem
-            GRID_ROWS={16}
-            GRID_COLS={22}
-            warehouseLayout={layouts[2]}
-            onCellClick={handleShelfClick}
-            getShelfStatus={getShelfStatus}
-            tooltipContent={getTooltipContent}
-
-          />
-        </div>)
-    }
-  };
-
-
-
-
-  const renderWarehouseSectionSelection = () => {
-    if (currentPage === 1) {
-      return (
-        <div>
-          <WarehouseGridSystem
-            warehouseLayout={layouts[1]}
-            GRID_ROWS={30}
-            GRID_COLS={9}
-            onCellClick={handleShelfClickSelection}
-            getShelfStatus={getShelfStatus}
-            tooltipContent={getTooltipContent}
-
-          />
-        </div>)
-    }
-    else if (currentPage === 2) {
-      return (
-        <div>
-          <WarehouseGridSystem
-            GRID_ROWS={16}
-            GRID_COLS={22}
-            warehouseLayout={layouts[2]}
-            onCellClick={handleShelfClickSelection}
-            getShelfStatus={getShelfStatus}
-            tooltipContent={getTooltipContent}
-
-          />
-        </div>)
-    }
-  };
   const openWarehouseMapToSelect = () => {
     setIsWarehouseMapOpen(true);
   };
@@ -1072,19 +941,6 @@ const App = () => {
     }
   };
 
-  const handleInputChange = (e, setter, nextRef) => {
-    const value = e.target.value;
-    if (value.includes(',')) {
-      const [beforeComma, afterComma] = value.split(',');
-      setter(beforeComma);
-      if (nextRef && nextRef.current) {
-        nextRef.current.focus();
-        nextRef.current.input.value = afterComma;
-      }
-    } else {
-      setter(value);
-    }
-  };
   const handleKeyDownArticolo = (e) => {
 
     if (e.key === 'Enter') {
@@ -1094,15 +950,6 @@ const App = () => {
 
     }
 
-  };
-  const handleKeyDownFornitore = (e) => {
-
-    if (e.key === 'Enter') {
-
-      fornitoreRef.current.focus();
-
-
-    }
   };
   const fetchDescriptions = async (articoli) => {
     const newDescriptions = { ...descriptions };
@@ -1177,10 +1024,13 @@ const App = () => {
     const scaffale = otp[1];
     const colonna = otp[2];
     const piano = otp[3];
+    // The field may hold a scanned package label: keep only the article
+    const articolo = articoloDaEtichetta(articoloCode);
+    setArticoloCode(articolo);
 
     try {
       const response = await fetch(
-        `${process.env.REACT_APP_API_URL}/api/articoli-scaffale?area=${area}&scaffale=${scaffale}&colonna=${colonna}&piano=${piano}&articolo=${articoloCode}&fornitore=${fornitoreCode}`
+        `${process.env.REACT_APP_API_URL}/api/articoli-scaffale?area=${area}&scaffale=${scaffale}&colonna=${colonna}&piano=${piano}&articolo=${encodeURIComponent(articolo)}`
       );
 
       if (!response.ok) {
@@ -1748,7 +1598,7 @@ const App = () => {
 
               <Form layout="vertical">
                 <Form.Item label="Codice Articolo">
-                  <Input ref={articoloRef} onChange={(e) => handleInputChange(e, setArticoloCode, fornitoreRef)} value={articoloCode} onKeyDown={(e) => handleKeyDownArticolo(e)} placeholder="Codice Articolo" />
+                  <Input ref={articoloRef} onChange={(e) => setArticoloCode(e.target.value)} value={articoloCode} onKeyDown={(e) => handleKeyDownArticolo(e)} placeholder="Codice Articolo o etichetta" />
                 </Form.Item>
 
               </Form>
@@ -1801,10 +1651,7 @@ const App = () => {
 
                   <Button
                     icon={<FullscreenOutlined />}
-                    onClick={() => {
-                      setCurrentPage(1);
-                      setIsWarehouseMapOpen(true);
-                    }}
+                    onClick={() => setIsWarehouseMapOpen(true)}
                     style={{ marginLeft: '10px' }}
                   />
                 </div>
@@ -1951,10 +1798,7 @@ const App = () => {
 
                   <Button
                     icon={<FullscreenOutlined />}
-                    onClick={() => {
-                      setCurrentPage(1);
-                      setIsWarehouseMapOpen(true);
-                    }}
+                    onClick={() => setIsWarehouseMapOpen(true)}
                     style={{ marginLeft: '10px' }}
                   />
                 </div>
@@ -2101,54 +1945,37 @@ const App = () => {
 
       <Modal
         title="Selezionare scaffale di partenza"
-        visible={isWarehouseMapOpen}
+        open={isWarehouseMapOpen}
         onCancel={() => setIsWarehouseMapOpen(false)}
         footer={null}
-        style={{ top: '50%', transform: 'translateY(-50%)' }}
-
+        centered
         width="80%"
       >
-        <div style={{ maxHeight: '100%' }}>
-          <div className="grid-container">
-            {renderWarehouseSectionSelection()}
-          </div>
-          <div className="pagination-container" style={{ marginTop: '20px', textAlign: 'center' }}>
-            <Pagination
-              current={currentPage}
-              total={3}
-              pageSize={1}
-              onChange={handlePageChange}
-              showSizeChanger={false}
-              simple
-            />
-          </div>
+        <div className="grid-container">
+          <WarehouseMap
+            onCellClick={handleShelfClickSelection}
+            getShelfStatus={getShelfStatus}
+            tooltipContent={getTooltipContent}
+          />
         </div>
       </Modal>
 
       {isLocationWarehouseMapOpen && (
         <Modal
           title="Seleziona Posizione Destinazione"
-          visible={isLocationWarehouseMapOpen}
+          open={isLocationWarehouseMapOpen}
           onCancel={() => setIsLocationWarehouseMapOpen(false)}
           footer={null}
           width="80%"
-          style={{ top: '50%', transform: 'translateY(-50%)' }}
-
+          centered
         >
-          <div style={{ maxHeight: '100%' }}>
-            <div className="grid-container">
-              {renderWarehouseSection2()}
-            </div>
-            <div className="pagination-container" style={{ marginTop: '20px', textAlign: 'center' }}>
-              <Pagination
-                current={currentPage}
-                total={3}
-                pageSize={1}
-                onChange={handlePageChange}
-                showSizeChanger={false}
-                simple
-              />
-            </div>
+          <div className="grid-container">
+            {/* Destination: every shelf is selectable */}
+            <WarehouseMap
+              onCellClick={handleLocationTransferComplete}
+              getShelfStatus={() => 'available'}
+              tooltipContent={getTooltipContent}
+            />
           </div>
         </Modal>
       )}

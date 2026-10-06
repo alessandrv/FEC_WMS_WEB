@@ -14,6 +14,7 @@ Stop the backend (pm2) during the copy so no rows are written to Informix meanwh
 import os
 import sys
 from datetime import datetime, date
+from decimal import Decimal
 
 import pyodbc
 from dotenv import load_dotenv
@@ -57,6 +58,10 @@ BOOL_COLUMNS = {'is_undone', 'can_undo'}
 def to_oracle(col, value):
     if col in BOOL_COLUMNS:
         return 1 if value in (True, 1, '1', 't', 'T') else 0
+    if col == 'id_mov' and value is not None:
+        return str(value).strip()  # VARCHAR2 in Oracle: ADAPTA numbers and 'ANNO/TIPO/NUMERO' keys
+    if isinstance(value, Decimal):
+        return int(value) if value == value.to_integral_value() else float(value)
     if isinstance(value, str):
         return value.strip()  # leading spaces too: codes are matched exactly (e.g. ' 0TA100PX')
     if isinstance(value, date) and not isinstance(value, datetime):

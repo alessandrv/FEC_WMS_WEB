@@ -1,11 +1,9 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import axios from 'axios';
-import { message, Modal, Button, Spin, Pagination } from 'antd'; // Import Spin for loading spinner
+import { message, Modal, Button, Spin } from 'antd'; // Import Spin for loading spinner
 import './ViewMagazzino.css';
 import { LoadingOutlined, UpOutlined, DownOutlined } from '@ant-design/icons';
-import WarehouseGrid from './GridComponent';
-import WarehouseGridSystem from './WarehouseGridSystem';
-import { WarehouseLayouts } from './layouts';
+import WarehouseMap from './map/WarehouseMap';
 
 const generateShelfNames = (group, columns, rows) => {
   const shelves = [];
@@ -21,8 +19,6 @@ const generateShelfNames = (group, columns, rows) => {
 const ViewMagazzino = ({
   articoloCode,
   descrizioneArticolo,
-  fornitoreCode,
-  ragioneSocialeFornitore,
   movimentoCode,
   quantita,
   totalePacchi,
@@ -37,13 +33,10 @@ const ViewMagazzino = ({
   const [loading, setLoading] = useState(true); // State for loading spinner
   const inputRef = useRef(null);
   const [showHiddenInput, setShowHiddenInput] = useState(false);
-  const [currentPage, setCurrentPage] = useState(1);
   const [selectedShelf, setSelectedShelf] = useState(null);
   const [occupiedShelves, setOccupiedShelves] = useState(new Set());
   const [depositedArticoli, setDepositedArticoli] = useState(new Set());
 
-  const layouts = WarehouseLayouts;
-  
   const getShelfStatus = (shelfId) => {
     if (shelfId === selectedShelf) return 'selected';
     if (occupiedShelves.has(shelfId)) return 'full';
@@ -54,49 +47,6 @@ const ViewMagazzino = ({
   const [totalVolumeRequired, setTotalVolumeRequired] = useState(0);
   const [totalVolume, setTotalVolume] = useState(0);
   const [selectedArea, setSelectedArea] = useState('A');
-  const renderWarehouseSection = () => {
-    if (currentPage === 1) {
-        return (
-            <div>
-                <WarehouseGridSystem
-                    warehouseLayout={layouts[1]}
-                    GRID_ROWS={30}
-                    GRID_COLS={9}
-                    onCellClick={handleShelfClick}
-                    getShelfStatus={getShelfStatus}
-                    tooltipContent={getTooltipContent}
-
-                />
-            </div>)
-    }
-    else if (currentPage === 2) {
-        return (
-            <div>
-                <WarehouseGridSystem
-                    GRID_ROWS={16}
-                    GRID_COLS={22}
-                    warehouseLayout={layouts[2]}
-                    onCellClick={handleShelfClick}
-                    getShelfStatus={getShelfStatus}
-                    tooltipContent={getTooltipContent}
-
-                />
-            </div>)
-    }
-    else if (currentPage === 3) {
-        return (
-            <div>
-                <WarehouseGridSystem
-                    GRID_ROWS={9}
-                    GRID_COLS={50}
-                    warehouseLayout={layouts[3]}
-                    onCellClick={handleShelfClick}
-                    getShelfStatus={getShelfStatus}
-                    tooltipContent={getTooltipContent}
-                />
-            </div>)
-    }
-};
 
   // Fetch volumes on component mount
   useEffect(() => {
@@ -326,7 +276,6 @@ const postMultipleShelfData = async (data) => {
                 piano: scannedValue.split('-')[3],
                 codice_articolo: articoloCode,
                 codice_movimento: movimentoCode,
-                codice_fornitore: fornitoreCode,
                 quantita: quantita,
                 dimensioni: "Zero",
                 numero_pacchi: 1,
@@ -382,16 +331,10 @@ const postMultipleShelfData = async (data) => {
             inputMode="none"
           />
           <div className="grid-container">
-            {renderWarehouseSection()}
-          </div>
-          <div className="pagination-container">
-            <Pagination
-              current={currentPage}
-              total={3}
-              pageSize={1}
-              onChange={(page) => setCurrentPage(page)}
-              showSizeChanger={false}
-              simple
+            <WarehouseMap
+              onCellClick={handleShelfClick}
+              getShelfStatus={getShelfStatus}
+              tooltipContent={getTooltipContent}
             />
           </div>
         </div>

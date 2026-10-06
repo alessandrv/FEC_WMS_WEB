@@ -1,47 +1,64 @@
 import React, { useState, useCallback } from 'react';
 import { Tooltip } from 'antd';
+import { getShelfId } from './map/mapUtils';
 
-// Shelf id ("C-01-1") of a cell inside a shelf section, same formula used to build the grid
-const getShelfId = (section, r, c) => {
-  const { id, shelfPattern, startingValue = 1, startingFloor = 1, spanRow = 1, spanCol = 1, height } = section;
-  let shelfNumber;
-  let floorNumber;
-  if (shelfPattern === 'horizontal') {
-    shelfNumber = startingValue + Math.floor(r / spanRow);
-    floorNumber = startingFloor + c;
-  } else {
-    shelfNumber = startingValue + Math.floor(c / spanCol);
-    floorNumber = height - Math.floor(r / spanRow) + (startingFloor - 1);
-  }
-  return `${id}-${String(shelfNumber).padStart(2, '0')}-${floorNumber}`;
-};
-
-// Returns the layout page (key of `layouts`) that contains the shelf, or null
-export const findShelfPage = (layouts, shelfId) => {
-  for (const page of Object.keys(layouts)) {
-    for (const section of layouts[page]) {
-      if (section.shelfPattern !== 'regular' && section.shelfPattern !== 'horizontal') continue;
-      for (let r = 0; r < section.height; r++) {
-        for (let c = 0; c < section.width; c++) {
-          if (getShelfId(section, r, c) === shelfId) return Number(page);
-        }
-      }
-    }
-  }
-  return null;
-};
-
-const WarehouseGridSystem = ({ 
-  warehouseLayout, 
-  onCellClick, 
-  getShelfStatus, 
-  tooltipContent, 
-  GRID_ROWS, 
+// Low-level grid renderer. Pages use map/WarehouseMap (shared layout, pages, shelves outside the map);
+// the map editor uses this directly with the extra editing props.
+const WarehouseGridSystem = ({
+  warehouseLayout,
+  onCellClick = () => {},
+  getShelfStatus = () => 'available',
+  tooltipContent,
+  GRID_ROWS,
   GRID_COLS,
   highlightedShelves,
   showFloorNumber = true,
-  cellRenderer
+  cellRenderer,
+  height = '80vh',
+  // Map editor only
+  onSectionClick,
+  selectedSection,
+  onEmptyCellClick,
+  onSectionMove
 }) => {
+    const gridRef = React.useRef(null);
+    // Drag & drop of a section (map editor): offset of the grabbed cell inside the section and
+    // the top-left cell where the section would land
+    const [drag, setDrag] = useState(null);
+    const [dropAt, setDropAt] = useState(null);
+
+    const pointerCell = (event) => {
+      const rect = gridRef.current.getBoundingClientRect();
+      const r = Math.floor(((event.clientY - rect.top) / rect.height) * GRID_ROWS);
+      const c = Math.floor(((event.clientX - rect.left) / rect.width) * GRID_COLS);
+      return { r: Math.min(GRID_ROWS - 1, Math.max(0, r)), c: Math.min(GRID_COLS - 1, Math.max(0, c)) };
+    };
+
+    const startDrag = (event, cell) => {
+      const section = warehouseLayout?.[cell.sectionIndex];
+      if (!section) return;
+      const { r, c } = pointerCell(event);
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', String(cell.sectionIndex)); // required by Firefox
+      setDrag({ index: cell.sectionIndex, offR: r - section.startRow, offC: c - section.startCol,
+                width: section.width, height: section.height });
+      setDropAt({ r: section.startRow, c: section.startCol });
+    };
+
+    const dragHandlers = onSectionMove && drag ? {
+      onDragOver: (event) => {
+        event.preventDefault();
+        const { r, c } = pointerCell(event);
+        const target = { r: Math.max(0, r - drag.offR), c: Math.max(0, c - drag.offC) };
+        if (!dropAt || dropAt.r !== target.r || dropAt.c !== target.c) setDropAt(target);
+      },
+      onDrop: (event) => {
+        event.preventDefault();
+        if (dropAt) onSectionMove(drag.index, dropAt.r, dropAt.c);
+        setDrag(null);
+        setDropAt(null);
+      },
+    } : {};
     const createEmptyGrid = () => {
       return Array(GRID_ROWS).fill(null).map(() => 
         Array(GRID_COLS).fill(null)
@@ -49,13 +66,11 @@ const WarehouseGridSystem = ({
     };
   
     const [gridData, setGridData] = useState(createEmptyGrid());
-    const [groupBoundaries, setGroupBoundaries] = useState({});
-  
+
     React.useEffect(() => {
-      const newGrid = createEmptyGrid();
-      const boundaries = {};
-      
-      warehouseLayout.forEach(section => {
+      const newGrid = Array(GRID_ROWS).fill(null).map(() => Array(GRID_COLS).fill(null));
+
+      (warehouseLayout || []).forEach((section) => {
         const { 
           id, 
           startRow, 
@@ -68,23 +83,13 @@ const WarehouseGridSystem = ({
           customText,
           rotateText = false,
           type = 'shelf',
-          direction = 'vertical',
           showText = true,
           borderTop = true,
           borderBottom = true,
           borderLeft = true,
           borderRight = true
         } = section;
-        
-        boundaries[id] = {
-          startRow,
-          startCol,
-          endRow: startRow + height - 1,
-          endCol: startCol + width - 1,
-          spanRow,
-          spanCol
-        };
-        
+
         for (let r = 0; r < height; r++) {
           for (let c = 0; c < width; c++) {
             const gridRow = startRow + r;
@@ -169,9 +174,21 @@ const WarehouseGridSystem = ({
         }
       });
       
+      // Every cell knows which section drew it (used by the map editor). Overlapping sections:
+      // the cell object belongs to the last section that wrote it, so walk the sections backwards.
+      const sections = warehouseLayout || [];
+      for (let sectionIndex = sections.length - 1; sectionIndex >= 0; sectionIndex--) {
+        const section = sections[sectionIndex];
+        for (let r = 0; r < section.height; r++) {
+          for (let c = 0; c < section.width; c++) {
+            const cell = newGrid[section.startRow + r]?.[section.startCol + c];
+            if (cell && cell.sectionIndex === undefined) cell.sectionIndex = sectionIndex;
+          }
+        }
+      }
+
       setGridData(newGrid);
-      setGroupBoundaries(boundaries);
-    }, [warehouseLayout]);
+    }, [warehouseLayout, GRID_ROWS, GRID_COLS]);
 
     const getCellClassName = useCallback((cell) => {
       if (!cell) return 'empty-cell';
@@ -215,7 +232,7 @@ const WarehouseGridSystem = ({
       return style;
     };
 
-    const renderCellContent = useCallback((cell) => {
+    const renderCellContent = useCallback((cell, rowIndex, colIndex) => {
       if (cellRenderer && cell) {
         const customRenderedCell = cellRenderer(cell);
         if (customRenderedCell !== null) {
@@ -223,10 +240,22 @@ const WarehouseGridSystem = ({
         }
       }
 
+      // Map editor: any cell selects its section, an empty cell starts a new one, sections can be dragged
+      const editorClick = onSectionClick && cell ? () => onSectionClick(cell.sectionIndex, cell) : undefined;
+      const dragProps = onSectionMove && cell && cell.sectionIndex !== undefined ? {
+        draggable: true,
+        onDragStart: (event) => startDrag(event, cell),
+        onDragEnd: () => { setDrag(null); setDropAt(null); },
+      } : {};
+      const editorClass = selectedSection !== undefined && selectedSection !== null && cell?.sectionIndex === selectedSection
+        ? ' section-selected' : '';
+
       if (cell?.type === 'customText') {
         return (
           <div
-            className={getCellClassName(cell)}
+            className={getCellClassName(cell) + editorClass}
+            onClick={editorClick}
+            {...dragProps}
             style={{
               width: '100%',
               height: '-webkit-fill-available',
@@ -244,10 +273,14 @@ const WarehouseGridSystem = ({
       }
 
       if (cell?.type === 'shelf') {
-        return (
+        // Text tooltips use the native title; rich ones (e.g. Picking's item table) an antd Tooltip
+        const tip = tooltipContent ? tooltipContent(cell.id) : null;
+        const shelfCell = (
           <div
-            className={getCellClassName(cell)}
-            onClick={() => onCellClick(cell.id)}
+            className={getCellClassName(cell) + editorClass}
+            onClick={editorClick || (() => onCellClick(cell.id))}
+            title={typeof tip === 'string' ? tip : undefined}
+            {...dragProps}
             style={{
               width: '100%',
               textAlign:"center",
@@ -262,23 +295,30 @@ const WarehouseGridSystem = ({
             {cell.showText && (showFloorNumber ? cell.id : cell.columnId)}
           </div>
         );
+        return React.isValidElement(tip) ? <Tooltip title={tip}>{shelfCell}</Tooltip> : shelfCell;
       }
 
       return (
-        <div 
-          className={getCellClassName(cell)}
+        <div
+          className={getCellClassName(cell) + editorClass}
+          onClick={editorClick || (!cell && onEmptyCellClick ? () => onEmptyCellClick(rowIndex, colIndex) : undefined)}
+          {...dragProps}
           style={{
             width: '100%',
-            height: '100%'
+            height: '100%',
+            cursor: editorClick || (!cell && onEmptyCellClick) ? 'pointer' : undefined
           }}
         />
       );
-    }, [getCellClassName, onCellClick, tooltipContent, cellRenderer, showFloorNumber]);
-  
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [getCellClassName, onCellClick, tooltipContent, cellRenderer, showFloorNumber,
+        onSectionClick, selectedSection, onEmptyCellClick, onSectionMove, warehouseLayout]);
+
     return (
-      <div style={{ width: '100%', height: '80vh'}}>
-        <div 
-          style={{ 
+      <div style={{ width: '100%', height, position: 'relative' }} {...dragHandlers}>
+        <div
+          ref={gridRef}
+          style={{
             display: 'grid',
             gridTemplateColumns: `repeat(${GRID_COLS}, minmax(0, 1fr))`,
             gridTemplateRows: `repeat(${GRID_ROWS}, minmax(0, 1fr))`,
@@ -296,12 +336,28 @@ const WarehouseGridSystem = ({
                   key={`${rowIndex}-${colIndex}`} 
                   style={getCellStyle(rowIndex, colIndex, cell)}
                 >
-                  {renderCellContent(cell)}
+                  {renderCellContent(cell, rowIndex, colIndex)}
                 </div>
               )
             ))
           ))}
         </div>
+        {drag && dropAt && (
+          // Where the dragged section will land
+          <div
+            style={{
+              position: 'absolute',
+              top: `${(dropAt.r / GRID_ROWS) * 100}%`,
+              left: `${(dropAt.c / GRID_COLS) * 100}%`,
+              height: `${(drag.height / GRID_ROWS) * 100}%`,
+              width: `${(drag.width / GRID_COLS) * 100}%`,
+              border: '2px solid #1677ff',
+              background: 'rgba(22, 119, 255, 0.15)',
+              pointerEvents: 'none',
+              zIndex: 5
+            }}
+          />
+        )}
         <style jsx global>{`
           .hidden-cell {
             display: none;
@@ -367,6 +423,12 @@ const WarehouseGridSystem = ({
           .empty-cell {
             background: white;
             border: 1px solid #f0f0f0;
+          }
+          .section-selected {
+            outline: 2px dashed #1677ff;
+            outline-offset: -2px;
+            position: relative;
+            z-index: 3;
           }
         `}</style>
       </div>

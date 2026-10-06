@@ -1,6 +1,6 @@
 import React, { useState,useRef, useCallback, useEffect } from 'react';
-import { Input, Button, Table, Layout, Space, message, Tooltip, Spin, Tag, Modal, InputNumber, Pagination } from 'antd';
-import WarehouseGrid from './GridComponent';
+import { Input, Button, Table, Layout, Space, message, Tooltip, Spin, Tag, Modal, InputNumber } from 'antd';
+import WarehouseMap from './map/WarehouseMap';
 import './Picking.css';
 import { LoadingOutlined } from '@ant-design/icons';
 import { v4 as uuidv4 } from 'uuid';
@@ -28,7 +28,6 @@ const Picking2 = () => {
     const [quantityModalData, setQuantityModalData] = useState(null);
     const [pickedQuantity, setPickedQuantity] = useState(0);
     const [maxAvailableQuantity, setMaxAvailableQuantity] = useState(0);
-    const [currentPage, setCurrentPage] = useState(1);
 
     // New state variables for ARTICOLO Tab
     const [articoloInput, setArticoloInput] = useState('');
@@ -577,11 +576,6 @@ const Picking2 = () => {
     };
 
 
-    const getShelfClass = useCallback((shelf) => {
-        const isHighlighted = highlightedShelves.has(shelf);
-        return isHighlighted ? 'highlighted' : '';
-    }, [highlightedShelves]);
-
     const handleShelfClick = (shelf) => {
         console.log('Clicked shelf:', shelf);
     };
@@ -949,87 +943,6 @@ const Picking2 = () => {
         }
     }, [articolo, scaffale, movimento, tableData, highlightedRows, highlightedShelves, forcedPickingModalVisible]);
 
-    const renderWarehouseSection = () => {
-        if (currentPage === 1) {
-            return (
-                <>
-                    <WarehouseGrid
-                        group='A'
-                        columns={8}
-                        rows={4}
-                        getShelfClass={getShelfClass}
-                        onShelfClick={handleShelfClick}
-                        tooltipContent={getTooltipContent}
-                        gridClassName="large-grid"
-                    />
-                    <div className="spacer" />
-                    <div>
-                        <WarehouseGrid
-                            group="B"
-                            columns={7}
-                            rows={4}
-                            getShelfClass={getShelfClass}
-                            onShelfClick={handleShelfClick}
-                            tooltipContent={getTooltipContent}
-                            gridClassName="smaller-grid second-group"
-                        />
-                        <WarehouseGrid
-                            group="C"
-                            columns={7}
-                            rows={5}
-                            getShelfClass={getShelfClass}
-                            onShelfClick={handleShelfClick}
-                            tooltipContent={getTooltipContent}
-                            gridClassName="smaller-grid second-group"
-                        />
-                    </div>
-                    <div className="spacer" />
-                    <WarehouseGrid
-                        group="D"
-                        columns={7}
-                        rows={6}
-                        getShelfClass={getShelfClass}
-                        onShelfClick={handleShelfClick}
-                        tooltipContent={getTooltipContent}
-                        gridClassName="smaller-grid third-grid"
-                    />
-                </>
-            );
-        } else if (currentPage === 2) {
-            return (
-                <>
-                
-                    <div className="spacer" />
-                     {/* Rectangle with "PRODUZIONE" text */}
-                     <div className="vertical-grid-container">
-              <div className="vertical-grid">
-                <WarehouseGrid
-                  group="R"
-                  columns={3}
-                  rows={5}
-                  getShelfClass={getShelfClass}
-                  onShelfClick={handleShelfClick}
-                  tooltipContent={getTooltipContent}
-                  gridClassName="vertical-grid-r"
-                />
-              </div>
-              <div className="vertical-bar">RIPARAZIONI</div>
-            </div>
-
-                    <WarehouseGrid
-                        group="E"
-                        columns={8}
-                        rows={5}
-                        getShelfClass={getShelfClass}
-                        onShelfClick={handleShelfClick}
-                        tooltipContent={getTooltipContent}
-                        gridClassName="large-grid"
-                    />
-                </>
-            );
-        }
-    };
-
     const columns = [
         {
             title: 'Articolo',
@@ -1302,16 +1215,10 @@ const Picking2 = () => {
                             <div className="view-magazzino">
 
                                 <div className="grid-container">
-                                    {renderWarehouseSection()}
-                                </div>
-                                <div className="pagination-container">
-                                    <Pagination
-                                        current={currentPage}
-                                        total={2}
-                                        pageSize={1}
-                                        onChange={(page) => setCurrentPage(page)}
-                                        showSizeChanger={false}
-                                        simple
+                                    <WarehouseMap
+                                        onCellClick={handleShelfClick}
+                                        tooltipContent={getTooltipContent}
+                                        highlightedShelves={highlightedShelves}
                                     />
                                 </div>
                             </div>

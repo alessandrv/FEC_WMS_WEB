@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { Input, ConfigProvider, Button, Table, Layout, Space, message, Tooltip, Spin, Tag, Modal, InputNumber, Pagination, Form, Alert, Typography, Checkbox } from 'antd';
+import { Input, ConfigProvider, Button, Table, Layout, Space, message, Tooltip, Spin, Tag, Modal, InputNumber, Form, Alert, Typography, Checkbox } from 'antd';
 import axios from 'axios';
 import { SettingOutlined, PlusOutlined, MinusOutlined, FullscreenOutlined } from '@ant-design/icons';
 
@@ -10,8 +10,8 @@ import { notification } from 'antd';
 import { InfoCircleOutlined } from '@ant-design/icons';
 import { Tabs } from 'antd';
 import { CloseCircleOutlined } from '@ant-design/icons';
-import WarehouseGridSystem, { findShelfPage } from './WarehouseGridSystem';
-import { WMSLayout, WarehouseLayouts } from './layouts';
+import WarehouseMap from './map/WarehouseMap';
+import { articoloDaEtichetta } from './barcode';
 const { Text } = Typography;
 
 const { TabPane } = Tabs;
@@ -39,9 +39,6 @@ const Picking = () => {
     const [confirmLoading, setConfirmLoading] = useState(false); // State to manage loading
     const [quantityNeeded, setQuantityNeeded] = useState(0);
 
-    // Use the imported layouts from the shared file
-    const layouts = WarehouseLayouts;
-
     const getShelfStatus = (shelfId) => {
         if (shelfId === selectedShelf) return 'selected';
         if (occupiedShelves.has(shelfId)) return 'full';
@@ -68,7 +65,6 @@ const Picking = () => {
     const [quantityModalData, setQuantityModalData] = useState(null);
     const [pickedQuantity, setPickedQuantity] = useState(0);
     const [maxAvailableQuantity, setMaxAvailableQuantity] = useState(0);
-    const [currentPage, setCurrentPage] = useState(1);
 
     // New state variables for ARTICOLO Tab
     const [articoloInput, setArticoloInput] = useState('');
@@ -117,9 +113,6 @@ const Picking = () => {
         }
         setMultiSelectMode(!multiSelectMode);
     };
-const handlePageChange = (page) => {
-  setCurrentPage(page);
-};
     // 2. Add logging to getColumnConfig
     const getColumnConfig = () => {
         // Create a copy of the base columns
@@ -1334,17 +1327,7 @@ const handlePageChange = (page) => {
         setHighlightedShelves(newHighlightedShelves); // Update highlightedShelves
     }, [tableData, highlightedRows]);
 
-    // Show the map page that contains the highlighted shelves (e.g. E/R/M on page 2, F/G/H/I/Y on page 3).
-    // Only reacts to new highlights, so manual paging afterwards is not overridden.
-    useEffect(() => {
-        const pages = [...highlightedShelves]
-            .map(shelf => findShelfPage(layouts, shelf))
-            .filter(Boolean);
-        if (pages.length > 0 && !pages.includes(currentPage)) {
-            setCurrentPage(pages[0]);
-        }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [highlightedShelves]);
+
 
 
 
@@ -1382,7 +1365,8 @@ const handlePageChange = (page) => {
         let alreadyPickedFound = false;
 
         // Trim inputs to avoid whitespace issues
-        const trimmedArticolo = articolo.trim();
+        // The scanned package label ('ART,2026,CA,000038' or old 'ART,FORNITORE,MOVIMENTO') identifies the article
+        const trimmedArticolo = articoloDaEtichetta(articolo);
         const trimmedScaffale = scaffale.trim();
 
         // Check if inputs are provided
@@ -1533,52 +1517,6 @@ const handlePageChange = (page) => {
         }
     }, [articolo, scaffale, tableData, highlightedRows, highlightedShelves, forcedPickingModalVisible]);
 
-    const renderWarehouseSection = () => {
-        if (currentPage === 1) {
-            return (
-                <div>
-                    <WarehouseGridSystem
-                        warehouseLayout={layouts[1]}
-                        GRID_ROWS={30}
-                        GRID_COLS={9}
-                        onCellClick={handleShelfClick}
-                        getShelfStatus={getShelfStatus}
-                        tooltipContent={getTooltipContent}
-                        highlightedShelves={highlightedShelves}
-
-                    />
-                </div>)
-        }
-        else if (currentPage === 2) {
-            return (
-                <div>
-                    <WarehouseGridSystem
-                        GRID_ROWS={16}
-                        GRID_COLS={22}
-                        warehouseLayout={layouts[2]}
-                        onCellClick={handleShelfClick}
-                        getShelfStatus={getShelfStatus}
-                        tooltipContent={getTooltipContent}
-                        highlightedShelves={highlightedShelves}
-
-                    />
-                </div>)
-        }
-        else if (currentPage === 3) {
-            return (
-                <div>
-                    <WarehouseGridSystem
-                        GRID_ROWS={9}
-                        GRID_COLS={50}
-                        warehouseLayout={layouts[3]}
-                        onCellClick={handleShelfClick}
-                        getShelfStatus={getShelfStatus}
-                        tooltipContent={getTooltipContent}
-                        highlightedShelves={highlightedShelves}
-                    />
-                </div>)
-        }
-    };
     const handleGroupLocationModalVisible = (record) => {
         // Use our new function instead
         openMultiLocationModalForDistinta(record);
@@ -3385,47 +3323,6 @@ const handlePageChange = (page) => {
             });
         }
     };
-    const renderWarehouseSectionSelection = () => {
-        if (currentPage === 1) {
-            return (
-        <div>
-        <WarehouseGridSystem
-        warehouseLayout={layouts[1]}
-        GRID_ROWS = {30}
-        GRID_COLS = {9}
-        onCellClick={handleShelfClickSelection}
-        getShelfStatus={getShelfStatus}
-        tooltipContent={getTooltipContent}
-      
-      />
-      </div>)}
-      else if (currentPage === 2) {
-          return (
-      <div>
-      <WarehouseGridSystem
-        GRID_ROWS={16}
-        GRID_COLS={22}
-      warehouseLayout={layouts[2]}
-      onCellClick={handleShelfClickSelection}
-      getShelfStatus={getShelfStatus}
-      tooltipContent={getTooltipContent}
-      
-      />
-      </div>)}
-      else if (currentPage === 3) {
-        return (
-            <div>
-                <WarehouseGridSystem
-                    GRID_ROWS={9}
-                    GRID_COLS={50}
-                    warehouseLayout={layouts[3]}
-                    onCellClick={handleShelfClick}
-                    getShelfStatus={getShelfStatus}
-                    tooltipContent={getTooltipContent}
-                />
-            </div>)
-    }
-      };
       const handleShelfClickSelection = (shelf) => {
         setHighlightedShelf(shelf);
         
@@ -4680,10 +4577,7 @@ const handlePageChange = (page) => {
 
                                 <Button
                                     icon={<FullscreenOutlined />}
-                                    onClick={() => {
-                                        setCurrentPage(1);
-                                        setIsWarehouseMapOpen(true);
-                                    }}
+                                    onClick={() => setIsWarehouseMapOpen(true)}
                                     style={{ marginLeft: '10px' }}
                                 /><Button
                                 type="primary"
@@ -4915,18 +4809,14 @@ const handlePageChange = (page) => {
                             <div className="view-magazzino">
 
                                 <div className="grid-container">
-                                    {renderWarehouseSection()}
-                                </div>
-                                <div className="pagination-container">
-                                    <Pagination
-                                        current={currentPage}
-                                        total={3}
-                                        pageSize={1}
-                                        onChange={(page) => setCurrentPage(page)}
-                                        showSizeChanger={false}
-                                        simple
+                                    {/* Jumps to the page of the article's shelf */}
+                                    <WarehouseMap
+                                        onCellClick={handleShelfClick}
+                                        getShelfStatus={getShelfStatus}
+                                        tooltipContent={getTooltipContent}
+                                        highlightedShelves={highlightedShelves}
                                     />
-                                        </div>
+                                </div>
                                     </div>
                                 )}
                     </div>
@@ -4936,27 +4826,18 @@ const handlePageChange = (page) => {
             </Layout>
             <Modal
       title="Selezionare scaffale di partenza"
-      visible={isWarehouseMapOpen}
+      open={isWarehouseMapOpen}
       onCancel={() => setIsWarehouseMapOpen(false)}
       footer={null}
-      style={{top: '50%', transform: 'translateY(-50%)' }}
-
+      centered
       width="80%"
     >
-      <div style={{ maxHeight: '100%'}}>
-        <div className="grid-container">
-          {renderWarehouseSectionSelection()}
-        </div>
-        <div className="pagination-container" style={{ marginTop: '20px', textAlign: 'center' }}>
-          <Pagination
-            current={currentPage}
-            total={3}
-            pageSize={1}
-            onChange={handlePageChange}
-            showSizeChanger={false}
-            simple
-          />
-        </div>
+      <div className="grid-container">
+        <WarehouseMap
+          onCellClick={handleShelfClickSelection}
+          getShelfStatus={getShelfStatus}
+          tooltipContent={getTooltipContent}
+        />
       </div>
     </Modal>
             <Modal

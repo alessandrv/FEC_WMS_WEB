@@ -2,10 +2,8 @@ import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { Table, Spin, Input, Button, Pagination, Row, Col, message, Modal, notification, Tooltip, Typography, Dropdown, Menu } from 'antd';
 import axios from 'axios';
 import { LoadingOutlined, ReloadOutlined, FullscreenOutlined, InfoCircleOutlined, CloseCircleOutlined, EditOutlined, CheckOutlined, CloseOutlined, PrinterOutlined, DownOutlined } from '@ant-design/icons';
-import WarehouseGrid from './GridComponent';
 import './GridComponent.css';
-import WarehouseGridSystem, { findShelfPage } from './WarehouseGridSystem';
-import { WarehouseLayouts } from './layouts';
+import WarehouseMap from './map/WarehouseMap';
 
 const { Text } = Typography;
 
@@ -22,7 +20,6 @@ const GroupedItemsTable = () => {
 
   // Pagination states
   const [currentPage, setCurrentPage] = useState(1);
-  const [currentPage2, setCurrentPage2] = useState(1);
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [selectedRecord, setSelectedRecord] = useState(null);
   
@@ -100,7 +97,6 @@ const locationInputRefs = [useRef(), useRef(), useRef(), useRef()];
     setIsWarehouseMapOpen(false);
   };
 
-  const layouts = WarehouseLayouts;
     const getShelfStatus = (shelfId) => {
       if (shelfId === selectedShelf) return 'selected';
       if (occupiedShelves.has(shelfId)) return 'full';
@@ -206,9 +202,6 @@ const locationInputRefs = [useRef(), useRef(), useRef(), useRef()];
   const handlePageChange = (page) => {
     setCurrentPage(page);
   };
-  const handlePageChange2 = (page) => {
-    setCurrentPage2(page);
-  };
 
   
   // Function to visualize the location of the subitem
@@ -217,8 +210,6 @@ const locationInputRefs = [useRef(), useRef(), useRef(), useRef()];
     const colFormatted = colonna.toString().padStart(2, '0');
     const shelfToHighlight = `${scaffale}-${colFormatted}-${piano}`;
     setHighlightedShelves(new Set([shelfToHighlight]));
-    // Open the map on the page that contains the shelf
-    setCurrentPage2(findShelfPage(layouts, shelfToHighlight) || 1);
 
   setSelectedRecord(subItem);
   setIsModalVisible(true);
@@ -507,49 +498,6 @@ const locationInputRefs = [useRef(), useRef(), useRef(), useRef()];
       </Menu.Item>
     </Menu>
   );
-  const renderWarehouseSection = () => {
-    if (currentPage2 === 1) {
-        return (
-    <div>
-    <WarehouseGridSystem
-    warehouseLayout={layouts[1]}
-    GRID_ROWS = {30}
-    GRID_COLS = {9}
-    onCellClick={handleShelfClick}
-    getShelfStatus={getShelfStatus}
-    tooltipContent={getTooltipContent}
-    highlightedShelves={highlightedShelves}
-
-  />
-</div>)}
-else if (currentPage2 === 2) {
-    return (
-<div>
-<WarehouseGridSystem
-GRID_ROWS = {16}
-GRID_COLS = {22}
-warehouseLayout={layouts[2]}
-onCellClick={handleShelfClick}
-getShelfStatus={getShelfStatus}
-tooltipContent={getTooltipContent}
-highlightedShelves={highlightedShelves}
-
-/>
-</div>)}
-else if (currentPage2 === 3) {
-    return (
-<div>
-<WarehouseGridSystem
-GRID_ROWS = {9}
-GRID_COLS = {50}
-warehouseLayout={layouts[3]}
-onCellClick={handleShelfClick}
-getShelfStatus={getShelfStatus}
-tooltipContent={getTooltipContent}
-highlightedShelves={highlightedShelves}
-/>
-</div>)}
-};
   // Columns configuration for the main table
   const columns = [
     {
@@ -730,34 +678,6 @@ const expandableConfig = {
     }
   };
 
-  const renderWarehouseSectionSelection = () => {
-    if (currentPage === 1) {
-        return (
-    <div>
-    <WarehouseGridSystem
-    warehouseLayout={layouts[1]}
-    GRID_ROWS = {30}
-    GRID_COLS = {9}
-    onCellClick={handleShelfClickSelection}
-    getShelfStatus={getShelfStatus}
-    tooltipContent={getTooltipContent}
-  
-  />
-  </div>)}
-  else if (currentPage === 2) {
-      return (
-  <div>
-  <WarehouseGridSystem
-    GRID_ROWS={16}
-    GRID_COLS={22}
-  warehouseLayout={layouts[2]}
-  onCellClick={handleShelfClickSelection}
-  getShelfStatus={getShelfStatus}
-  tooltipContent={getTooltipContent}
-  
-  />
-  </div>)}
-  };
   return (
 
     <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', height: '95vh' }}>
@@ -770,21 +690,14 @@ const expandableConfig = {
   centered
 
 >
-  <div style={{ maxHeight: '100%' }}>
-    <div className="grid-container">
-      {renderWarehouseSection()}
-    </div>
-    {/* Add Pagination Below the Grids */}
-    <div className="pagination-container" style={{ marginTop: '20px', textAlign: 'center' }}>
-      <Pagination
-        current={currentPage2}
-        total={3}
-        pageSize={1}
-        onChange={(page) => setCurrentPage2(page)}
-        showSizeChanger={false}
-        simple
-      />
-    </div>
+  <div className="grid-container">
+    {/* Opens on the page that contains the highlighted shelf */}
+    <WarehouseMap
+      onCellClick={handleShelfClick}
+      getShelfStatus={getShelfStatus}
+      tooltipContent={getTooltipContent}
+      highlightedShelves={highlightedShelves}
+    />
   </div>
 </Modal>
       <h2>Articoli in magazzino</h2>
@@ -901,27 +814,18 @@ const expandableConfig = {
 
       <Modal
       title="Selezionare scaffale di partenza"
-      visible={isWarehouseMapOpen}
+      open={isWarehouseMapOpen}
       onCancel={() => setIsWarehouseMapOpen(false)}
       footer={null}
-      style={{top: '50%', transform: 'translateY(-50%)' }}
-
+      centered
       width="80%"
     >
-      <div style={{ maxHeight: '100%'}}>
-        <div className="grid-container">
-          {renderWarehouseSectionSelection()}
-        </div>
-        <div className="pagination-container" style={{ marginTop: '20px', textAlign: 'center' }}>
-          <Pagination
-            current={currentPage}
-            total={2}
-            pageSize={1}
-            onChange={handlePageChange}
-            showSizeChanger={false}
-            simple
-          />
-        </div>
+      <div className="grid-container">
+        <WarehouseMap
+          onCellClick={handleShelfClickSelection}
+          getShelfStatus={getShelfStatus}
+          tooltipContent={getTooltipContent}
+        />
       </div>
     </Modal>
     </div>

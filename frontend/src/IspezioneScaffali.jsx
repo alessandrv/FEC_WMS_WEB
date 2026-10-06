@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { Typography, Spin, Pagination, Modal, Table, Button, Card, Row, Col, Tooltip, Select, message, Radio, Input, Space, Divider, Form, Alert, Tag, Empty, Descriptions, Progress } from 'antd';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Typography, Spin, Modal, Table, Button, Card, Row, Col, Tooltip, Select, message, Radio, Input, Space, Divider, Form, Alert, Tag, Empty, Descriptions, Progress } from 'antd';
 import { LoadingOutlined, CheckCircleOutlined, SaveOutlined, HistoryOutlined, FormOutlined, ExclamationCircleOutlined, WarningOutlined, ClockCircleOutlined, InfoCircleOutlined, PlusCircleOutlined } from '@ant-design/icons';
 import axios from 'axios';
-import WarehouseGridSystem from './WarehouseGridSystem';
-import { WarehouseLayouts } from './layouts';
+import WarehouseMap from './map/WarehouseMap';
+import { useWarehouseMap } from './map/useWarehouseMap';
 import './ViewMagazzino.css';
 
 const { Title, Text } = Typography;
@@ -67,7 +67,6 @@ const createRotatedColumnBasedLayout = (originalLayout) => {
 const IspezioneScaffali = () => {
   const [loading, setLoading] = useState(false);
   const [modalLoading, setModalLoading] = useState(false);
-  const [currentPage, setCurrentPage] = useState(1);
   const [selectedColumn, setSelectedColumn] = useState(null);
   const [modalVisible, setModalVisible] = useState(false);
   const [shelfDetails, setShelfDetails] = useState(null);
@@ -102,22 +101,13 @@ const IspezioneScaffali = () => {
     loadDefaultQuestions();
   }, []);
 
-  // Create modified layouts for column-based view
-  const columnBasedLayouts = useMemo(() => {
-    const modifiedLayouts = {};
-    Object.keys(WarehouseLayouts).forEach(key => {
-      modifiedLayouts[key] = createColumnBasedLayout(WarehouseLayouts[key]);
-    });
-    return modifiedLayouts;
-  }, []);
-  
-  // Create rotated layouts for horizontal column-based view
-  const rotatedColumnBasedLayouts = useMemo(() => {
-    const modifiedLayouts = {};
-    Object.keys(WarehouseLayouts).forEach(key => {
-      modifiedLayouts[key] = createRotatedColumnBasedLayout(WarehouseLayouts[key]);
-    });
-    return modifiedLayouts;
+  // Shared map, shown by column: a page with only horizontal shelves (F, G, H, I, Y) uses the
+  // rotated column view, the others group every column vertically
+  const { map } = useWarehouseMap();
+  const columnViewSections = useCallback((sections) => {
+    const shelves = sections.filter(section => section.shelfPattern === 'regular' || section.shelfPattern === 'horizontal');
+    const onlyHorizontal = shelves.length > 0 && shelves.every(section => section.shelfPattern === 'horizontal');
+    return onlyHorizontal ? createRotatedColumnBasedLayout(sections) : createColumnBasedLayout(sections);
   }, []);
 
   // Fetch shelves data when component mounts
@@ -622,11 +612,7 @@ const IspezioneScaffali = () => {
     const allColumns = new Set();
     
     // Get all actual shelf sections from layouts (exclude customText labels)
-    const allLayouts = [
-      WarehouseLayouts[1] || [],
-      WarehouseLayouts[2] || [],
-      WarehouseLayouts[3] || []
-    ];
+    const allLayouts = (map?.pages || []).map(page => page.sections || []);
     
     allLayouts.forEach(layout => {
       layout.forEach(section => {
@@ -796,59 +782,6 @@ const IspezioneScaffali = () => {
       return `Colonna: ${columnId}\nSpazio utilizzato: ${percentUsed}%${inspectionInfo}`;
     }
     return '';
-  };
-
-  const renderWarehouseSection = () => {
-    // Debug: log what's in selectedColumns
-    console.log("Selected columns:", selectedColumns);
-    
-    if (currentPage === 1) {
-      return (
-        <div className="warehouse-grid-container">
-          <WarehouseGridSystem
-            warehouseLayout={columnBasedLayouts[1]}
-            GRID_ROWS={30}
-            GRID_COLS={9}
-            onCellClick={handleCellClick}
-            getShelfStatus={getShelfStatus}
-            tooltipContent={getColumnTooltip}
-            showFloorNumber={false}
-            highlightedShelves={multiSelectMode ? new Set(selectedColumns) : new Set()}
-          />
-        </div>
-      );
-    } else if (currentPage === 2) {
-      return (
-        <div className="warehouse-grid-container">
-          <WarehouseGridSystem
-            warehouseLayout={columnBasedLayouts[2]}
-            GRID_ROWS={16}
-            GRID_COLS={22}
-            onCellClick={handleCellClick}
-            getShelfStatus={getShelfStatus}
-            tooltipContent={getColumnTooltip}
-            showFloorNumber={false}
-            highlightedShelves={multiSelectMode ? new Set(selectedColumns) : new Set()}
-          />
-        </div>
-      );
-    } else if (currentPage === 3) {
-      return (
-          <div className="warehouse-grid-container">
-              <WarehouseGridSystem
-                  GRID_ROWS={9}
-                  GRID_COLS={50}
-                  warehouseLayout={rotatedColumnBasedLayouts[3]}
-                  onCellClick={handleCellClick}
-                  getShelfStatus={getShelfStatus}
-                  tooltipContent={getColumnTooltip}
-                  showFloorNumber={false}
-                  highlightedShelves={multiSelectMode ? new Set(selectedColumns) : new Set()}
-              />
-          </div>
-      );
-    }
-    return null;
   };
 
   const columns = [
@@ -1460,7 +1393,17 @@ const IspezioneScaffali = () => {
                   )}
                   </div>
                   <div className="grid-container">
-                    {renderWarehouseSection()}
+                    <WarehouseMap
+                      transformSections={columnViewSections}
+                      onCellClick={handleCellClick}
+                      getShelfStatus={getShelfStatus}
+                      tooltipContent={getColumnTooltip}
+                      showFloorNumber={false}
+                      highlightedShelves={multiSelectMode ? new Set(selectedColumns) : new Set()}
+                      autoPage={false}
+                      showOutsideShelves={false}
+                      height="80vh"
+                    />
                   </div>
                   
                   <div className="color-legend" style={{ marginTop: '10px', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
@@ -1486,16 +1429,6 @@ const IspezioneScaffali = () => {
                         <span>Selezionato</span>
                       </div>
                     )}
-                  </div>
-                  <div className="pagination-container">
-                    <Pagination
-                      current={currentPage}
-                      total={3}
-                      pageSize={1}
-                      onChange={(page) => setCurrentPage(page)}
-                      showSizeChanger={false}
-                      simple
-                    />
                   </div>
                 </div>
               )}

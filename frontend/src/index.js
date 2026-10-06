@@ -20,6 +20,7 @@ import LogsTable from './LogsTable';
 import FiveInputPage from './FiveInputPage';
 import Incongurenze from './Incongruenze';
 import IspezioneScaffali from './IspezioneScaffali';
+import MapEditor from './map/MapEditor';
 
 const { Content } = Layout;
 
@@ -78,6 +79,7 @@ root.render(
               <Route path="/logs" element={<LogsTable />} />
               <Route path="/incongurenze" element={<Incongurenze />} />
               <Route path="/ispezione-scaffali" element={<IspezioneScaffali />} />
+              <Route path="/editor-mappa" element={<MapEditor />} />
             </Routes>
           </Content>
         </Layout>

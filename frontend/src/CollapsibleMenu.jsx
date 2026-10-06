@@ -13,7 +13,8 @@ import {
   CommentOutlined,
   InsertRowAboveOutlined,
   DatabaseFilled,
-  AppstoreOutlined
+  AppstoreOutlined,
+  EditOutlined
 } from '@ant-design/icons';
 
 const { Title } = Typography;
@@ -189,6 +190,14 @@ const handleHelpRequest = async () => {
               to="/ispezione-scaffali"
               icon={<AppstoreOutlined />}
               title="Ispezione Scaffali"
+              onClick={closeDrawer}
+            />
+          </Col>
+          <Col span={8}>
+            <MenuCard
+              to="/editor-mappa"
+              icon={<EditOutlined />}
+              title="Editor mappa"
               onClick={closeDrawer}
             />
           </Col>

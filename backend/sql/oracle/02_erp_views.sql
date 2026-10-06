@@ -6,6 +6,7 @@
 --   mganag        ->  wms_v_mganag    ->  MAG_ANA_ARTICOLI (+ MAG_ANA_ARTIC_FORNIT lead time)
 --   mgdepo        ->  wms_v_mgdepo    ->  MAG_GIACENZA (summed per article/warehouse)
 --   mggior/bfbolt ->  wms_v_mggior    ->  MAG_MOVIM_RIGHE + MAG_MOVIM_TESTATA
+--   movimento     ->  wms_v_movimenti ->  ACW_DOC_TEST/RIGA (new labels) + TRX_ABB_REG_MOV_MAGAZZINO (ADAPTA)
 --   agclifor      ->  wms_v_agclifor  ->  ANAGRAFICO_CONTI (supplier mastri 36xx)
 --   ofordit       ->  wms_v_ofordit   ->  ACW_ORD_FOR_TEST
 --   ofordic       ->  wms_v_ofordic   ->  ACW_ORD_FOR_RIGA
@@ -58,6 +59,30 @@ SELECT r.nro_registrazione                                    AS gim_code,
   JOIN mag_movim_testata t ON t.nro_registrazione = r.nro_registrazione
   LEFT JOIN mag_ana_articoli a
          ON a.tipo_articolo = r.tipo_articolo AND a.cod_articolo = r.cod_articolo;
+
+-- Movements a package can come from, under the key stored in wms_items.id_mov:
+--   * Skyline purchase documents: mov_code 'ANNO/TIPO/NUMERO' (new labels 'ART,2026,CA,000038')
+--   * ADAPTA movements: mov_code = ADAPTA number (old labels 'ART,FORNITORE,83005'), resolved to
+--     the Skyline registration through the ADAPTA -> Skyline mapping TRX_ABB_REG_MOV_MAGAZZINO
+CREATE OR REPLACE VIEW wms_v_movimenti AS
+SELECT t.anno_doc || '/' || TRIM(t.tipo_doc) || '/' || t.nro_doc       AS mov_code,
+       'DOC'                                                          AS mov_origine,
+       r.riga_doc                                                     AS gim_riga,
+       TRIM(r.cod_art)                                                AS gim_arti,
+       NVL(r.desc_riga, a.desc_articolo_1)                            AS gim_desc,
+       NVL(a.desc_articolo_2, ' ')                                    AS gim_des2,
+       r.qta_arrivata_gest                                            AS gim_qmov
+  FROM acw_doc_test t
+  JOIN acw_doc_riga r
+    ON r.anno_doc = t.anno_doc AND r.tipo_doc = t.tipo_doc AND r.nro_doc = t.nro_doc
+  LEFT JOIN mag_ana_articoli a
+    ON a.tipo_articolo = r.tipo_art AND a.cod_articolo = r.cod_art
+ WHERE r.cod_art IS NOT NULL
+UNION ALL
+SELECT x.nro_reg_orig, 'ADAPTA', g.gim_riga, g.gim_arti, g.gim_desc, g.gim_des2, g.gim_qmov
+  FROM trx_abb_reg_mov_magazzino x
+  JOIN wms_v_mggior g ON g.gim_code = x.nro_reg_fw AND g.gim_riga = x.nro_riga_fw
+ WHERE g.gim_arti IS NOT NULL;
 
 CREATE OR REPLACE VIEW wms_v_agclifor AS
 SELECT 'F' || TRIM(c.partitario)                                            AS cod_clifor,
