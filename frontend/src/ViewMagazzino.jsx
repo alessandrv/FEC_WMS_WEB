@@ -113,7 +113,17 @@ const postMultipleShelfData = async (data) => {
       message.success('Articoli salvati con successo!');
       // Pass all articoloCodes at once instead of calling onComplete multiple times
       const depositedArticoloCodes = selectedItems.map(item => item.articoloCode);
-      onComplete && onComplete(depositedArticoloCodes);
+      // Details for the "Depositi recenti" list of the Deposito page
+      const locazione = `${data.area}-${data.scaffale}-${data.colonna}-${data.piano}`;
+      const dettagli = data.items.map(item => ({
+        articolo: item.articoloCode,
+        descrizione: item.descrizioneArticolo,
+        movimento: item.movimentoCode,
+        quantita: item.quantita,
+        pacchi: 1,
+        locazione,
+      }));
+      onComplete && onComplete(depositedArticoloCodes, dettagli);
     } catch (error) {
       console.error('Error posting shelf data:', error);
       message.error('Errore nel salvataggio dei dati.');
@@ -124,7 +134,14 @@ const postMultipleShelfData = async (data) => {
       await axios.post(`${process.env.REACT_APP_API_URL}/api/conferma-inserimento`, data);
       message.success('Dati salvati con successo!');
       setDepositedArticoli(prev => new Set([...prev, data.codice_articolo]));
-      onComplete && onComplete(data.codice_articolo);
+      onComplete && onComplete(data.codice_articolo, [{
+        articolo: data.codice_articolo,
+        descrizione: descrizioneArticolo,
+        movimento: data.codice_movimento,
+        quantita: data.quantita,
+        pacchi: data.numero_pacchi,
+        locazione: `${data.area}-${data.scaffale}-${data.colonna}-${data.piano}`,
+      }]);
     } catch (error) {
       console.error('Error posting shelf data:', error);
       message.error('Errore nel salvataggio dei dati.');

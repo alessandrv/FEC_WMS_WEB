@@ -6,7 +6,8 @@ import { useNavigate } from 'react-router-dom';
 import TrovaQuantita from "./TrovaQuantita"
 import { Pagination } from 'antd';
 import ViewMagazzino from "./ViewMagazzino"
-import { isEtichetta, parseEtichetta } from './barcode';
+import { isEtichetta, normalizzaMovimento, parseEtichetta } from './barcode';
+import { addDeposits, clearDepositHistory, findPreviousDeposits, formatDepositTime, readDepositHistory } from './depositHistory';
 
 const { Title } = Typography;
 const { Option } = Select;
@@ -28,6 +29,8 @@ const StockingDettagli = () => {
   // Movement whose articles are listed in "Deposito da Movimento" (saved on the packages deposited from it)
   const [movimentoCaricato, setMovimentoCaricato] = useState('');
   const [activeTab, setActiveTab] = useState('1');
+  // Deposits made from this device (browser only, see depositHistory.js)
+  const [depositHistory, setDepositHistory] = useState(readDepositHistory);
   const [showArticoliModal, setShowArticoliModal] = useState(false);
   const [articoliMovimento, setArticoliMovimento] = useState([]);
   const [loadingArticoli, setLoadingArticoli] = useState(false);
@@ -109,6 +112,11 @@ const [multiplePartialQuantity, setMultiplePartialQuantity] = useState(0);
 
   const handleMovimentoEnter = () => verificaCoerenza(articoloCode, movimentoCode);
 
+  // Same article (and movement) already deposited from this device: warn before depositing again
+  const previousDeposits = isEtichetta(articoloCode)
+    ? []
+    : findPreviousDeposits(depositHistory, articoloCode, movimentoCode);
+
   const verificaCoerenza = async (articolo, movimento) => {
     try {
       // Articolo API call
@@ -165,9 +173,10 @@ const [multiplePartialQuantity, setMultiplePartialQuantity] = useState(0);
     setDescrizioneArticolo('');
     setMovimentoCode('');
     setQuantitaPerPacco('');
-    setTotalePacchi();
-    setDimensione();
+    setTotalePacchi(1);
+    setDimensione('Zero');
     setIsDataConsistent(false);
+    setForzaDeposito(false);
   };
   const handleSelectionChange = (selectedRowKeys, selectedRows) => {
     setSelectedRows(selectedRowKeys);
@@ -245,7 +254,7 @@ const [multiplePartialQuantity, setMultiplePartialQuantity] = useState(0);
       }));
       
       setArticoliMovimento(articoliMovimento);
-      setMovimentoCaricato(movimentoInput.trim());
+      setMovimentoCaricato(normalizzaMovimento(movimentoInput));
       setShowMovimentoInputModal(false);
     } catch (error) {
       console.error('Errore dettagliato:', error);
@@ -254,9 +263,19 @@ const [multiplePartialQuantity, setMultiplePartialQuantity] = useState(0);
       setLoadingArticoli(false);
     }
   };
-  const handleWarehouseComplete = (articoloCodes) => {
+  const handleWarehouseComplete = (articoloCodes, dettagli) => {
     setShowWarehouseModal(false);
     const codes = Array.isArray(articoloCodes) ? articoloCodes : [articoloCodes];
+
+    // Remember the deposit on this device and get the form ready for the next package
+    if (dettagli && dettagli.length > 0) {
+      setDepositHistory(addDeposits(dettagli));
+    }
+    clearAllFields();
+    if (activeTab === '1') {
+      // After the map modal has closed (it gives focus back to the last field): ready for the next scan
+      setTimeout(() => articoloRef.current && articoloRef.current.focus(), 400);
+    }
     
     if (multiplePartialQuantity > 0 && selectedRows.length >= 1) {
       // Handle both single and multiple partial deposits
@@ -529,6 +548,19 @@ const [multiplePartialQuantity, setMultiplePartialQuantity] = useState(0);
           </Card>
         </Col> */}
       </Row>
+      {previousDeposits.length > 0 && (
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginTop: 12 }}
+          message={`Articolo già depositato da questo dispositivo${movimentoCode ? ` per il movimento ${movimentoCode}` : ''}`}
+          description={previousDeposits.slice(0, 3).map((entry) => (
+            <div key={entry.id}>
+              {formatDepositTime(entry.data)}: {entry.pacchi > 1 ? `${entry.pacchi} pacchi da ` : ''}{entry.quantita} pz in {entry.locazione}
+            </div>
+          ))}
+        />
+      )}
       <div className="actions">
         <Button type="default" style={{margin:10}} onClick={clearAllFields}>Pulisci campi</Button>
         <Button type="primary" style={{margin:10}} onClick={handleShowMagazzino}>Immagazzina</Button>
@@ -575,7 +607,44 @@ const [multiplePartialQuantity, setMultiplePartialQuantity] = useState(0);
           </Card>
         </Tabs.TabPane>
       </Tabs>
-    
+
+      <Card
+        className="card"
+        style={{ marginTop: 16 }}
+        title={`Depositi recenti su questo dispositivo (${depositHistory.length})`}
+        extra={depositHistory.length > 0 && (
+          <Button
+            size="small"
+            onClick={() => Modal.confirm({
+              title: 'Svuotare l\'elenco dei depositi recenti?',
+              content: 'Viene cancellato solo l\'elenco su questo dispositivo: i pacchi depositati non vengono toccati.',
+              okText: 'Svuota',
+              cancelText: 'Annulla',
+              onOk: () => setDepositHistory(clearDepositHistory()),
+            })}
+          >
+            Svuota elenco
+          </Button>
+        )}
+      >
+        <Table
+          size="small"
+          rowKey="id"
+          dataSource={depositHistory}
+          pagination={{ pageSize: 10, hideOnSinglePage: true }}
+          locale={{ emptyText: 'Nessun deposito registrato su questo dispositivo' }}
+          columns={[
+            { title: 'Quando', dataIndex: 'data', key: 'data', render: formatDepositTime },
+            { title: 'Articolo', dataIndex: 'articolo', key: 'articolo' },
+            { title: 'Descrizione', dataIndex: 'descrizione', key: 'descrizione', ellipsis: true },
+            { title: 'Movimento', dataIndex: 'movimento', key: 'movimento' },
+            { title: 'Qtà', dataIndex: 'quantita', key: 'quantita' },
+            { title: 'Pacchi', dataIndex: 'pacchi', key: 'pacchi' },
+            { title: 'Locazione', dataIndex: 'locazione', key: 'locazione' },
+          ]}
+        />
+      </Card>
+
 
       {/* Movimento Input Modal */}
       <Modal
