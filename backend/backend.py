@@ -5930,11 +5930,42 @@ def get_inspection_questions_v2():
 # ---------------------------------------------------------------------------
 # Warehouse map (shared by every page, edited from the "Editor mappa" page)
 # The latest wms_map_layout row is the map in use; every save adds a version.
-# Editing the map never changes wms_items.
+# Editing the map never changes wms_items; saving creates the new shelves in wms_scaffali
+# (never deletes any).
 # ---------------------------------------------------------------------------
 
 MAP_DEFAULT_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'map_layout_default.json')
 MAP_SECTION_TYPES = ('shelf', 'customText', 'blocked')
+MAP_AREA = 'A'  # the map draws the shelves of area A
+MAP_NEW_SHELF_VOLUME = 99999999  # free volume of shelves created from the map (no limit, like X-01-0)
+
+
+def _shelf_ids_sezione(section):
+    """(scaffale, colonna, piano) of every cell of a shelf section: same rule as getShelfId in mapUtils.js."""
+    if section.get('type', 'shelf') != 'shelf' or section.get('shelfPattern') not in ('regular', 'horizontal'):
+        return set()
+    def num(key, default):
+        value = section.get(key)
+        return default if value is None else int(value)
+    starting_value, starting_floor = num('startingValue', 1), num('startingFloor', 1)
+    span_row, span_col = num('spanRow', 1) or 1, num('spanCol', 1) or 1
+    ids = set()
+    for r in range(section['height']):
+        for c in range(section['width']):
+            if section['shelfPattern'] == 'horizontal':
+                shelf, floor = starting_value + r // span_row, starting_floor + c
+            else:
+                shelf, floor = starting_value + c // span_col, section['height'] - r // span_row + (starting_floor - 1)
+            ids.add((section['id'], str(shelf).zfill(2), str(floor)))
+    return ids
+
+
+def _shelf_ids_mappa(layout):
+    ids = set()
+    for page in layout['pages']:
+        for section in page['sections']:
+            ids |= _shelf_ids_sezione(section)
+    return ids
 
 
 def _carica_mappa_default():
@@ -5962,6 +5993,15 @@ def _valida_mappa(layout):
                     return f"Pagina {page.get('page')}, sezione {section.get('id')}: '{key}' non valido"
             if section.get('type', 'shelf') not in MAP_SECTION_TYPES:
                 return f"Pagina {page.get('page')}, sezione {section.get('id')}: tipo non valido"
+            try:
+                shelf_ids = _shelf_ids_sezione(section)
+            except (TypeError, ValueError):
+                return f"Pagina {page.get('page')}, sezione {section.get('id')}: numerazione non valida"
+            # the shelves are created in wms_scaffali: the codes must fit its columns
+            for scaffale, colonna, piano in shelf_ids:
+                if len(scaffale) > 2 or len(colonna) > 3 or len(piano) > 2:
+                    return (f"Pagina {page.get('page')}: lo scaffale {scaffale}-{colonna}-{piano} non è valido "
+                            f"(max 2 caratteri per scaffale e piano, 3 per la colonna)")
     return None
 
 
@@ -6007,19 +6047,31 @@ def save_map_layout():
                         (data.get('note') or '').strip()[:255] or None))
         cursor.execute("SELECT MAX(id) FROM wms_map_layout")
         version = cursor.fetchone()[0]
+
+        # Shelves drawn on the map but missing in wms_scaffali are created (deposits need the row).
+        # Shelves no longer on the map are never deleted: they may still hold packages.
+        cursor.execute("SELECT scaffale, colonna, piano FROM wms_scaffali WHERE area = ?", (MAP_AREA,))
+        esistenti = {(row.scaffale.strip(), row.colonna.strip(), row.piano.strip()) for row in cursor.fetchall()}
+        nuovi = sorted(_shelf_ids_mappa(layout) - esistenti, key=lambda s: (s[0], s[1], int(s[2])))
+        if nuovi:
+            cursor.executemany(
+                "INSERT INTO wms_scaffali (area, scaffale, colonna, piano, volume_libero) VALUES (?, ?, ?, ?, ?)",
+                [(MAP_AREA, scaffale, colonna, piano, MAP_NEW_SHELF_VOLUME) for scaffale, colonna, piano in nuovi])
         conn.commit()
+        creati = [f"{scaffale}-{colonna}-{piano}" for scaffale, colonna, piano in nuovi]
 
         log_operation(
             operation_type="MAPPA",
             operation_details=f"Mappa magazzino salvata (versione {version}, "
+                              f"{len(creati)} scaffali creati, "
                               f"{len(data.get('scaffali_fuori_mappa') or [])} locazioni con articoli fuori mappa)",
             user="current_user",
             ip_address=request.remote_addr,
             can_undo=False,
-            additional_data={'version': version,
+            additional_data={'version': version, 'scaffali_creati': creati[:200],
                              'scaffali_fuori_mappa': (data.get('scaffali_fuori_mappa') or [])[:100]}
         )
-        return jsonify({'success': True, 'version': version}), 200
+        return jsonify({'success': True, 'version': version, 'scaffali_creati': creati}), 200
     except pyodbc.Error as e:
         if 'conn' in locals():
             conn.rollback()

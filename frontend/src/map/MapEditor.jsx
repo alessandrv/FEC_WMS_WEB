@@ -374,17 +374,24 @@ const MapEditor = () => {
     const doSave = async () => {
       setSaving(true);
       try {
-        await axios.put(`${process.env.REACT_APP_API_URL}/api/map-layout`, {
+        const response = await axios.put(`${process.env.REACT_APP_API_URL}/api/map-layout`, {
           pages,
           scaffali_fuori_mappa: outside.map((loc) => loc.locazione),
           note: note.trim() || (restoredFrom ? `Ripristino ${restoredFrom}` : ''),
         });
+        const creati = response.data?.scaffali_creati || [];
         await reloadWarehouseMap();
         setPages(null); // re-initialised from the saved map
         setSelected(null);
         setNote('');
         setRestoredFrom(null);
         message.success('Mappa salvata: tutte le pagine del WMS usano la nuova mappa');
+        if (creati.length > 0) {
+          message.info(
+            `Creati ${creati.length} nuovi scaffali: ${creati.slice(0, 20).join(', ')}${creati.length > 20 ? '…' : ''}`,
+            8
+          );
+        }
       } catch (e) {
         message.error(`Errore nel salvataggio: ${e.response?.data?.error || e.message}`);
       } finally {
