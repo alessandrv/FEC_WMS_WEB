@@ -5048,9 +5048,15 @@ def update_location_quantity():
         piano = data.get('piano')
         new_quantity = data.get('new_quantity')
         old_quantity = data.get('old_quantity')
+        # Visualizza magazzino shows one row per location and movement: when 'id_mov' is sent
+        # only that movement's packages are changed (null = packages without a movement)
+        per_movimento = 'id_mov' in data
+        id_mov = normalizza_movimento(data.get('id_mov')) or None
+        movimento_condition = (" AND id_mov = ?" if id_mov else " AND id_mov IS NULL") if per_movimento else ""
+        movimento_params = (id_mov,) if per_movimento and id_mov else ()
         
         # Validate input parameters
-        if not all([id_art, area, scaffale, colonna, piano, new_quantity, old_quantity]):
+        if not all([id_art, area, scaffale, colonna, piano, new_quantity is not None, old_quantity is not None]):
             return jsonify({'error': 'Missing required parameters'}), 400
         
         # Convert quantity to Decimal
@@ -5078,8 +5084,8 @@ def update_location_quantity():
               AND scaffale = ?
               AND colonna = ?
               AND piano = ?
-            """
-            cursor.execute(verify_query, (id_art, area, scaffale, colonna, piano))
+            """ + movimento_condition
+            cursor.execute(verify_query, (id_art, area, scaffale, colonna, piano) + movimento_params)
             result = cursor.fetchone()
             
             if not result or result.total_qta is None:
@@ -5100,10 +5106,10 @@ def update_location_quantity():
             if quantity_diff > 0:
                 # Adding quantity - create a new package
                 insert_query = """
-                INSERT INTO wms_items (id_art, area, scaffale, colonna, piano, qta, dimensione)
-                VALUES (?, ?, ?, ?, ?, ?, 'Zero')
+                INSERT INTO wms_items (id_art, id_mov, area, scaffale, colonna, piano, qta, dimensione)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'Zero')
                 """
-                cursor.execute(insert_query, (id_art, area, scaffale, colonna, piano, quantity_diff))
+                cursor.execute(insert_query, (id_art, id_mov, area, scaffale, colonna, piano, quantity_diff))
                 
             else:
                 # Removing quantity - need to remove from existing packages
@@ -5118,9 +5124,8 @@ def update_location_quantity():
                   AND scaffale = ?
                   AND colonna = ?
                   AND piano = ?
-                ORDER BY qta ASC
-                """
-                cursor.execute(packages_query, (id_art, area, scaffale, colonna, piano))
+                """ + movimento_condition + " ORDER BY qta ASC"
+                cursor.execute(packages_query, (id_art, area, scaffale, colonna, piano) + movimento_params)
                 packages = cursor.fetchall()
                 
                 for package in packages:
@@ -5145,7 +5150,7 @@ def update_location_quantity():
                     return jsonify({'error': 'Insufficient quantity to remove'}), 400
             
             # Log the operation
-            operation_details = f"Quantità aggiornata per articolo {id_art} in {area}-{scaffale}-{colonna}-{piano}: {old_quantity} a {new_quantity}"
+            operation_details = f"Quantità aggiornata per articolo {id_art}{f' (movimento {id_mov})' if id_mov else ''} in {area}-{scaffale}-{colonna}-{piano}: {old_quantity} a {new_quantity}"
             
             log_operation(
                 operation_type="AGGIORNAMENTO_QUANTITA",
@@ -6151,6 +6156,167 @@ def get_map_occupancy():
             'pacchi': row.pacchi, 'qta': row.qta, 'articoli': row.articoli, 'primo_articolo': row.primo_articolo,
         } for row in cursor.fetchall()]
         return jsonify(result)
+    except pyodbc.Error as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        if 'conn' in locals():
+            conn.close()
+
+
+# =============================================
+# INVENTARIO (sql/oracle/05_inventario.sql)
+# =============================================
+
+def parse_locazione(value):
+    """'A-C-01-1' or a map shelf 'C-01-1' (area A) -> (area, scaffale, colonna, piano), None if not valid."""
+    parti = [p.strip().upper() for p in str(value or '').split('-') if p.strip()]
+    if len(parti) == 3:
+        parti.insert(0, MAP_AREA)
+    if len(parti) != 4:
+        return None
+    area, scaffale, colonna, piano = parti
+    if colonna.isdigit():
+        colonna = colonna.zfill(2)
+    return area, scaffale, colonna, piano
+
+@app.route('/api/inventario', methods=['GET'])
+def get_inventario():
+    """Inventory rows, newest first. per_page=0 returns every row (Excel export)."""
+    page = max(request.args.get('page', 1, type=int), 1)
+    per_page = request.args.get('per_page', 50, type=int)
+    search_text = (request.args.get('search_text') or '').strip().upper()
+    try:
+        conn = connect_to_db()
+        cursor = conn.cursor()
+
+        where_clause, params = "1=1", []
+        if search_text:
+            where_clause = """(UPPER(i.id_art) LIKE ? OR UPPER(i.id_mov) LIKE ? OR i.ip_address LIKE ?
+                               OR i.area || '-' || i.scaffale || '-' || i.colonna || '-' || i.piano LIKE ?)"""
+            params = [f"%{search_text}%"] * 4
+
+        cursor.execute(f"SELECT COUNT(*) FROM wms_inventario i WHERE {where_clause}", params)
+        total = cursor.fetchone()[0]
+
+        paging = ""
+        if per_page > 0:
+            per_page = min(per_page, 200)
+            paging = f"OFFSET {(page - 1) * per_page} ROWS FETCH NEXT {per_page} ROWS ONLY"
+        cursor.execute(f"""
+            SELECT i.id, i.ins_ts, i.id_art, i.id_mov, i.area, i.scaffale, i.colonna, i.piano, i.qta, i.ip_address,
+                   TRIM(mg.amg_desc || ' ' || mg.amg_des2) AS descrizione
+              FROM wms_inventario i
+              LEFT JOIN wms_v_mganag mg ON mg.amg_code = i.id_art
+             WHERE {where_clause}
+             ORDER BY i.ins_ts DESC, i.id DESC
+             {paging}""", params)
+
+        current_ip = request.remote_addr
+        rows = [{
+            'id': row.id,
+            'timestamp': row.ins_ts.strftime("%Y-%m-%d %H:%M:%S") if row.ins_ts else None,
+            'codice_articolo': row.id_art,
+            'descrizione': row.descrizione,
+            'movimento': row.id_mov,
+            'locazione': f"{row.area}-{row.scaffale}-{row.colonna}-{row.piano}",
+            'quantita': row.qta,
+            'ip_address': row.ip_address,
+            'is_mine': row.ip_address == current_ip,
+        } for row in cursor.fetchall()]
+
+        return jsonify({'rows': rows, 'total': total, 'ip_address': current_ip}), 200
+    except pyodbc.Error as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        if 'conn' in locals():
+            conn.close()
+
+@app.route('/api/inventario', methods=['POST'])
+def add_inventario():
+    data = request.json or {}
+    codice_articolo = articolo_da_barcode(data.get('codice_articolo')).upper()
+    movimento = normalizza_movimento(data.get('movimento')) or None
+    locazione = parse_locazione(data.get('locazione'))
+    try:
+        quantita = int(str(data.get('quantita', '')).strip())
+    except ValueError:
+        quantita = None
+
+    if not codice_articolo:
+        return jsonify({'error': 'Codice articolo mancante'}), 400
+    if not locazione:
+        return jsonify({'error': 'Locazione non valida (formato A-C-01-1)'}), 400
+    if quantita is None or quantita <= 0:
+        return jsonify({'error': 'Quantità non valida'}), 400
+
+    try:
+        conn = connect_to_db()
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT 1 FROM wms_v_mganag WHERE amg_code = ? FETCH FIRST 1 ROWS ONLY", (codice_articolo,))
+        if cursor.fetchone() is None:
+            return jsonify({'error': f"Articolo {codice_articolo} non presente in anagrafica"}), 400
+
+        cursor.execute("SELECT 1 FROM wms_scaffali WHERE area = ? AND scaffale = ? AND colonna = ? AND piano = ?",
+                       locazione)
+        if cursor.fetchone() is None:
+            return jsonify({'error': f"Locazione {'-'.join(locazione)} non presente in magazzino"}), 400
+
+        # A movement that doesn't contain the article is saved anyway: the page only warns
+        warning = None
+        if movimento:
+            cursor.execute("SELECT 1 FROM wms_v_movimenti WHERE mov_code = ? AND gim_arti = ? FETCH FIRST 1 ROWS ONLY",
+                           (movimento, codice_articolo))
+            if cursor.fetchone() is None:
+                warning = f"L'articolo {codice_articolo} non risulta nel movimento {movimento}"
+
+        cursor.execute("""
+            INSERT INTO wms_inventario (ins_ts, id_art, id_mov, area, scaffale, colonna, piano, qta, ip_address)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (datetime.now().replace(microsecond=0), codice_articolo, movimento, *locazione, quantita,
+             request.remote_addr))
+        conn.commit()
+
+        return jsonify({'success': True, 'warning': warning, 'movimento': movimento,
+                        'locazione': '-'.join(locazione)}), 200
+    except pyodbc.Error as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        if 'conn' in locals():
+            conn.close()
+
+@app.route('/api/inventario/<int:row_id>', methods=['DELETE'])
+def delete_inventario(row_id):
+    try:
+        conn = connect_to_db()
+        cursor = conn.cursor()
+        cursor.execute("SELECT id_art, id_mov, area, scaffale, colonna, piano, qta, ip_address FROM wms_inventario WHERE id = ?",
+                       (row_id,))
+        row = cursor.fetchone()
+        if row is None:
+            return jsonify({'error': 'Riga non trovata'}), 404
+
+        cursor.execute("DELETE FROM wms_inventario WHERE id = ?", (row_id,))
+        conn.commit()
+
+        locazione = f"{row.area}-{row.scaffale}-{row.colonna}-{row.piano}"
+        log_operation(
+            operation_type="INVENTARIO_DELETE",
+            operation_details=f"Eliminata riga inventario {row_id}: {row.qta} articolo {row.id_art} in {locazione} (inserita da {row.ip_address})",
+            ip_address=request.remote_addr,
+            article_code=row.id_art,
+            source_location=locazione,
+            quantity=row.qta,
+            can_undo=False,
+            additional_data={'movimento': row.id_mov}
+        )
+        return jsonify({'success': True}), 200
     except pyodbc.Error as e:
         return jsonify({'error': str(e)}), 500
     finally:

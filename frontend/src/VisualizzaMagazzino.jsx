@@ -46,11 +46,12 @@ const locationInputRefs = [useRef(), useRef(), useRef(), useRef()];
     const groupedItems = {};
     
     subitems.forEach(subItem => {
-      const groupKey = `${subItem.area}-${subItem.scaffale}-${subItem.colonna}-${subItem.piano}`;
+      const groupKey = `${subItem.id_mov ?? ''}-${subItem.area}-${subItem.scaffale}-${subItem.colonna}-${subItem.piano}`;
         const locazione = `${subItem.area}-${subItem.scaffale}-${subItem.colonna.toString().padStart(2, '0')}-${subItem.piano}`;
         
         if (!groupedItems[groupKey]) {
             groupedItems[groupKey] = {
+                id_mov: subItem.id_mov,
                 area: subItem.area,
                 scaffale: subItem.scaffale,
                 colonna: subItem.colonna,
@@ -64,25 +65,24 @@ const locationInputRefs = [useRef(), useRef(), useRef(), useRef()];
         groupedItems[groupKey].totalQta += subItem.qta;
     });
 
-    // Convert to array and sort by locazione
-    return Object.values(groupedItems).sort((a, b) => a.locazione.localeCompare(b.locazione));
+    // Convert to array and sort by locazione, then movimento
+    return Object.values(groupedItems).sort((a, b) => a.locazione.localeCompare(b.locazione) || sortMovimento(a, b));
   };
 
   const sortMovimento = (a, b) => {
-    // Convert both values to strings for comparison
-    const movA = String(a.id_mov);
-    const movB = String(b.id_mov);
-    
-    // First try numeric sorting if both are valid numbers
-    const numA = parseInt(movA);
-    const numB = parseInt(movB);
-    
-    if (!isNaN(numA) && !isNaN(numB)) {
-      return numA - numB;
+    // ADAPTA movements ('83754') sort numerically, Skyline documents ('2026/CA/48') naturally; no movement last
+    const movA = a.id_mov == null ? '' : String(a.id_mov);
+    const movB = b.id_mov == null ? '' : String(b.id_mov);
+    if (!movA || !movB) return movB.length - movA.length;
+
+    const isNumA = /^\d+$/.test(movA);
+    const isNumB = /^\d+$/.test(movB);
+    if (isNumA && isNumB) {
+      return Number(movA) - Number(movB);
     }
-    
-    // Fall back to string comparison if not both numbers
-    return movA.localeCompare(movB);
+    if (isNumA !== isNumB) return isNumA ? -1 : 1;
+
+    return movA.localeCompare(movB, undefined, { numeric: true });
   };
   const handleShelfClickSelection = (shelf) => {
     setHighlightedShelf(shelf);
@@ -250,6 +250,7 @@ const locationInputRefs = [useRef(), useRef(), useRef(), useRef()];
     try {
       const response = await axios.put(`${process.env.REACT_APP_API_URL}/api/update-location-quantity`, {
         id_art: record.id_art,
+        id_mov: record.id_mov ?? null,
         area: record.area,
         scaffale: record.scaffale,
         colonna: record.colonna,
@@ -435,6 +436,7 @@ const locationInputRefs = [useRef(), useRef(), useRef(), useRef()];
                 <thead>
                   <tr>
                     <th>Locazione</th>
+                    <th>Movimento</th>
                     <th>Q.ta</th>
                   </tr>
                 </thead>
@@ -442,6 +444,7 @@ const locationInputRefs = [useRef(), useRef(), useRef(), useRef()];
                   ${subItemsGrouped.map(subItem => `
                     <tr>
                       <td>${subItem.locazione}</td>
+                      <td>${subItem.id_mov ?? '-'}</td>
                       <td>${subItem.totalQta}</td>
                     </tr>
                   `).join('')}
@@ -532,7 +535,13 @@ const locationInputRefs = [useRef(), useRef(), useRef(), useRef()];
       sorter: (a, b) => a.locazione.localeCompare(b.locazione),
       defaultSortOrder: 'ascend',
     },
-
+    {
+      title: 'Movimento',
+      dataIndex: 'id_mov',
+      key: 'id_mov',
+      sorter: sortMovimento,
+      render: (mov) => mov ?? '-',
+    },
     {
       title: 'Area',
       dataIndex: 'area',

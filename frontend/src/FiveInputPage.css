@@ -1,27 +1,30 @@
 /* FiveInputPage.css */
 
+.title {
+  text-align: center;
+  margin-bottom: 24px;
+}
 
-  
-  .title {
-    text-align: center;
-    margin-bottom: 24px;
-  }
-  
-  .card {
-    margin-bottom: 16px;
-  }
-  
-  .form {
-    max-width: 300px;
-  }
-  
-  .input-small {
-    width: 100%;
-  }
-  
-  .actions {
-    margin-top: 24px;
-    display: flex;
-    justify-content: center;
-  }
-  
+.card {
+  margin-bottom: 16px;
+}
+
+.field-label {
+  margin-bottom: 4px;
+  font-weight: 500;
+}
+
+.input-small {
+  width: 100%;
+  margin-bottom: 8px;
+}
+
+.actions {
+  margin-top: 16px;
+  display: flex;
+  justify-content: center;
+}
+
+.inventory-row-mine > td {
+  background-color: #f0f7ff;
+}

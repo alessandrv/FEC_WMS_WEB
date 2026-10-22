@@ -1,509 +1,351 @@
-import React, { useRef, useState, useEffect } from 'react';
-import { Input, Table, Button, Form, Typography, Select, Card, Row, Col, Modal, message, Tooltip } from 'antd';
-import { saveAs } from 'file-saver';
+import React, { useRef, useState, useEffect, useCallback } from 'react';
+import { Input, Table, Button, Typography, Card, Row, Col, Modal, message, Tooltip, Space, Popconfirm, Tag } from 'antd';
+import { CloseCircleOutlined, DeleteOutlined, DownloadOutlined, EnvironmentOutlined, ReloadOutlined } from '@ant-design/icons';
+import axios from 'axios';
 import * as XLSX from 'xlsx';
-import './FiveInputPage.css'; // Ensure this CSS file exists for styling
-import { useNavigate } from 'react-router-dom';
-import Checkbox from 'antd/es/checkbox/Checkbox';
-import { EyeOutlined, InfoCircleOutlined } from '@ant-design/icons';
+import './FiveInputPage.css';
+import WarehouseMap from './map/WarehouseMap';
+import { isEtichetta, parseEtichetta } from './barcode';
 
 const { Title } = Typography;
-const { Option } = Select;
 
+const API = `${process.env.REACT_APP_API_URL}/api/inventario`;
+const REFRESH_MS = 5000;
+
+// Inventory counts are saved in wms_inventario (one row per count) and exported to Excel from here.
+// Movement: ADAPTA number ('83754') or Skyline document ('2026/CA/48'); a scanned package label fills both
+// the article and the movement.
 const FiveInputPage = () => {
-  // State variables for the 5 inputs
-  const [input1, setInput1] = useState('');
-  const [input2, setInput2] = useState('');
-  const [input3, setInput3] = useState('');
-  const [input4, setInput4] = useState('');
-  const [input5, setInput5] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
+  const [articolo, setArticolo] = useState('');
+  const [movimento, setMovimento] = useState('');
+  const [locazione, setLocazione] = useState('');
+  const [quantita, setQuantita] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [isMapOpen, setIsMapOpen] = useState(false);
 
-  // Ref hooks for managing focus
-  const input1Ref = useRef(null);
-  const input2Ref = useRef(null);
-  const input3Ref = useRef(null);
-  const input4Ref = useRef(null);
-  const input5Ref = useRef(null);
-  const legacyFileInputRef = useRef(null);
-// New state variables
-const [isPackMultiple, setIsPackMultiple] = useState(false);
-const [isFullViewVisible, setIsFullViewVisible] = useState(false);
-  const navigate = useNavigate();
+  const [rows, setRows] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const [searchText, setSearchText] = useState('');
 
-  // File handle for the Excel file
-  const [fileHandle, setFileHandle] = useState(null);
-  const [legacyWorkbook, setLegacyWorkbook] = useState(null);
-  const [legacySheetName, setLegacySheetName] = useState(null);
-  const [legacyFileName, setLegacyFileName] = useState(null);
-  const [legacyDirty, setLegacyDirty] = useState(false);
+  const articoloRef = useRef(null);
+  const movimentoRef = useRef(null);
+  const locazioneRef = useRef(null);
+  const quantitaRef = useRef(null);
 
-  // Focus on the first input when the component mounts
   useEffect(() => {
-    if (input1Ref.current) {
-      input1Ref.current.focus();
-    }
+    articoloRef.current?.focus();
   }, []);
 
-  // Function to handle Enter key and focus shifting
-  const handleKeyPress = (e, nextRef) => {
+  const fetchRows = useCallback(async (showLoading = false) => {
+    if (showLoading) setLoading(true);
+    try {
+      const response = await axios.get(API, {
+        params: { page: currentPage, per_page: pageSize, search_text: searchText.trim() },
+      });
+      setRows(response.data.rows || []);
+      setTotal(response.data.total || 0);
+    } catch (error) {
+      console.error('Error fetching inventory:', error);
+      if (showLoading) message.error('Errore nel caricamento delle righe di inventario');
+    } finally {
+      if (showLoading) setLoading(false);
+    }
+  }, [currentPage, pageSize, searchText]);
+
+  // Live view: rows inserted by every operator appear without reloading
+  useEffect(() => {
+    fetchRows(true);
+    const timer = setInterval(() => fetchRows(false), REFRESH_MS);
+    return () => clearInterval(timer);
+  }, [fetchRows]);
+
+  const focusNext = (e, nextRef) => {
     if (e.key === 'Enter') {
       e.preventDefault();
-      if (nextRef && nextRef.current) {
-        nextRef.current.focus();
-      }
+      nextRef.current?.focus();
     }
   };
-  const handleSubmitKey = (e) => {
+
+  // A scanned package label carries the movement too: fill it and go on to the location
+  const handleArticoloKeyDown = (e) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    if (isEtichetta(articolo)) {
+      const etichetta = parseEtichetta(articolo);
+      setArticolo(etichetta.articolo);
+      if (etichetta.movimento) {
+        setMovimento(etichetta.movimento);
+        locazioneRef.current?.focus();
+        return;
+      }
+    }
+    movimentoRef.current?.focus();
+  };
+
+  const handleSubmit = async () => {
+    if (saving) return;
+    if (!articolo.trim() || !locazione.trim() || !quantita.trim()) {
+      message.error('Compila codice articolo, locazione e quantità.');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const scannedLabel = isEtichetta(articolo) ? parseEtichetta(articolo) : null;
+      const response = await axios.post(API, {
+        codice_articolo: scannedLabel?.articolo || articolo,
+        movimento: scannedLabel?.movimento || movimento,
+        locazione,
+        quantita,
+      });
+      if (response.data.warning) {
+        message.warning(response.data.warning);
+      } else {
+        message.success('Riga aggiunta');
+      }
+      // The location stays: the next counts are usually on the same shelf
+      setLocazione(response.data.locazione || locazione);
+      setArticolo('');
+      setMovimento('');
+      setQuantita('');
+      articoloRef.current?.focus();
+      if (currentPage === 1) {
+        fetchRows(false);
+      } else {
+        setCurrentPage(1);
+      }
+    } catch (error) {
+      console.error('Error saving inventory row:', error);
+      message.error(error.response?.data?.error || 'Errore durante il salvataggio della riga');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleQuantitaKeyDown = (e) => {
     if (e.key === 'Enter') {
       e.preventDefault();
       handleSubmit();
     }
   };
-  // State to store all submitted data
-  const [dataRows, setDataRows] = useState([]);
 
-  const loadExistingDataFromArrayBuffer = async (arrayBuffer) => {
-    const workbook = XLSX.read(arrayBuffer, { type: 'array' });
-    const sheetName = workbook.SheetNames[0];
-    const worksheet = workbook.Sheets[sheetName];
-    const existingData = XLSX.utils.sheet_to_json(worksheet);
-
-    const dataWithKeys = existingData.map((row, index) => ({
-      ...row,
-      key: `existing-${index}`,
-    }));
-
-    setDataRows(dataWithKeys);
-    return { workbook, sheetName };
+  const clearLocazione = () => {
+    setLocazione('');
+    locazioneRef.current?.focus();
   };
 
-  // Function to request file access
-  const loadExistingData = async (handle) => {
-    try {
-      setIsLoading(true);
-      const file = await handle.getFile();
-      const arrayBuffer = await file.arrayBuffer();
+  // Map shelves are 'C-01-1' (area A)
+  const handleShelfSelected = (shelfId) => {
+    setLocazione(`A-${shelfId}`);
+    setIsMapOpen(false);
+    setTimeout(() => (articolo.trim() ? quantitaRef : articoloRef).current?.focus(), 0);
+  };
 
-      await loadExistingDataFromArrayBuffer(arrayBuffer);
-      message.success('Dati esistenti caricati con successo!');
+  const handleDelete = async (id) => {
+    try {
+      await axios.delete(`${API}/${id}`);
+      message.success('Riga eliminata');
+      fetchRows(false);
     } catch (error) {
-      console.error('Error loading existing data:', error);
-      message.error('Errore nel caricamento dei dati esistenti.');
+      console.error('Error deleting inventory row:', error);
+      message.error(error.response?.data?.error || 'Errore durante l\'eliminazione della riga');
+    }
+  };
+
+  const exportExcel = async () => {
+    setExporting(true);
+    try {
+      const response = await axios.get(API, { params: { per_page: 0 } });
+      const data = (response.data.rows || []).map((row) => ({
+        DATA: row.timestamp,
+        CODICE_ARTICOLO: row.codice_articolo,
+        DESCRIZIONE: row.descrizione || '',
+        MOVIMENTO: row.movimento || '',
+        LOCAZIONE: row.locazione,
+        QUANTITA: row.quantita,
+        IP: row.ip_address || '',
+      }));
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(data), 'Inventario');
+      const stamp = new Date().toISOString().slice(0, 16).replace('T', '_').replace(':', '');
+      XLSX.writeFile(workbook, `inventario_${stamp}.xlsx`);
+      message.success(`Esportate ${data.length} righe`);
+    } catch (error) {
+      console.error('Error exporting inventory:', error);
+      message.error('Errore durante l\'esportazione');
     } finally {
-      setIsLoading(false);
+      setExporting(false);
     }
   };
 
-  // Updated requestFileAccess function
-  const requestFileAccess = async () => {
-    const canUseFileSystemAccessApi =
-      typeof window !== 'undefined' &&
-      typeof window.showOpenFilePicker === 'function' &&
-      window.isSecureContext;
-
-    if (!canUseFileSystemAccessApi) {
-      message.info(
-        'Il browser non permette accesso diretto ai file su HTTP. Seleziona un file: gli aggiornamenti verranno scaricati come nuovo Excel.'
-      );
-      if (legacyFileInputRef.current) {
-        legacyFileInputRef.current.value = '';
-        legacyFileInputRef.current.click();
-      }
-      return;
-    }
-
-    try {
-      const [handle] = await window.showOpenFilePicker({
-        types: [
-          {
-            description: 'Excel Files',
-            accept: {
-              'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
-            },
-          },
-        ],
-        multiple: false,
-      });
-
-      setFileHandle(handle);
-      setLegacyWorkbook(null);
-      setLegacySheetName(null);
-      setLegacyFileName(null);
-      setLegacyDirty(false);
-      await loadExistingData(handle);
-    } catch (error) {
-      console.error(error);
-      message.error('Selezione file cancellata o fallita.');
-    }
-  };
-
-  const handleLegacyFileSelected = async (e) => {
-    const file = e.target.files && e.target.files[0];
-    if (!file) return;
-
-    try {
-      setIsLoading(true);
-      const arrayBuffer = await file.arrayBuffer();
-      const { workbook, sheetName } = await loadExistingDataFromArrayBuffer(arrayBuffer);
-
-      setFileHandle(null);
-      setLegacyWorkbook(workbook);
-      setLegacySheetName(sheetName);
-      setLegacyFileName(file.name);
-      setLegacyDirty(false);
-      message.success('Dati esistenti caricati con successo!');
-    } catch (error) {
-      console.error('Error loading legacy file:', error);
-      message.error('Errore nel caricamento del file Excel.');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const downloadLegacyExcel = () => {
-    if (!legacyWorkbook || !legacySheetName) {
-      message.error('Nessun file Excel selezionato.');
-      return;
-    }
-
-    try {
-      const wbout = XLSX.write(legacyWorkbook, { bookType: 'xlsx', type: 'array' });
-      const blob = new Blob([wbout], {
-        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      });
-      saveAs(blob, legacyFileName || 'output.xlsx');
-      setLegacyDirty(false);
-      message.success('File Excel scaricato!');
-    } catch (error) {
-      console.error(error);
-      message.error('Errore durante la creazione del file Excel.');
-    }
-  };
-  // Function to write data to the Excel file
-  const writeToExcel = async (rows) => {
-    const hasWritableHandle = !!fileHandle;
-    const hasLegacyWorkbook = !!legacyWorkbook && !!legacySheetName;
-
-    if (!hasWritableHandle && !hasLegacyWorkbook) {
-      message.error('Seleziona prima un file');
-      return false;
-    }
-  
-    try {
-      if (!hasWritableHandle && hasLegacyWorkbook) {
-        const worksheet = legacyWorkbook.Sheets[legacySheetName];
-        const existingData = XLSX.utils.sheet_to_json(worksheet);
-        const updatedData = [...existingData, ...rows];
-        const newWorksheet = XLSX.utils.json_to_sheet(updatedData);
-
-        setLegacyWorkbook((prev) => {
-          const wb = prev || legacyWorkbook;
-          return {
-            ...wb,
-            Sheets: {
-              ...wb.Sheets,
-              [legacySheetName]: newWorksheet,
-            },
-          };
-        });
-        setLegacyDirty(true);
-
-        return true;
-      }
-
-      // Create a writable stream
-      const writable = await fileHandle.createWritable();
-  
-      // Read existing file content
-      const file = await fileHandle.getFile();
-      const arrayBuffer = await file.arrayBuffer();
-      const workbook = XLSX.read(arrayBuffer, { type: 'array' });
-  
-      // Assuming data is written to the first sheet
-      const sheetName = workbook.SheetNames[0];
-      const worksheet = workbook.Sheets[sheetName];
-  
-      // Convert existing sheet to JSON
-      const existingData = XLSX.utils.sheet_to_json(worksheet);
-  
-      // Append new rows
-      const updatedData = [...existingData, ...rows];
-  
-      // Convert JSON back to sheet
-      const newWorksheet = XLSX.utils.json_to_sheet(updatedData);
-  
-      // Replace the old sheet with the new one
-      workbook.Sheets[sheetName] = newWorksheet;
-  
-      // Write the updated workbook back to the file
-      const wbout = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
-      await writable.write(wbout);
-      await writable.close();
-  
-      message.success('File Excel aggiornato!');
-      return true;
-    } catch (error) {
-      console.error(error);
-      message.error('Errore durante il salvataggio del file. Probabilmente Excel ha il file selezionato aperto.');
-      return false;
-    }
-  };
-  
   const columns = [
     {
-      title: 'Codice Articolo',
-      dataIndex: 'CODICE_ARTICOLO',
-      key: 'CODICE_ARTICOLO',
+      title: 'Data',
+      dataIndex: 'timestamp',
+      key: 'timestamp',
+      render: (value) => (value ? new Date(value.replace(' ', 'T')).toLocaleString('it-IT') : '-'),
+    },
+    { title: 'Codice Articolo', dataIndex: 'codice_articolo', key: 'codice_articolo' },
+    { title: 'Descrizione', dataIndex: 'descrizione', key: 'descrizione', ellipsis: true },
+    { title: 'Movimento', dataIndex: 'movimento', key: 'movimento', render: (value) => value || '-' },
+    { title: 'Locazione', dataIndex: 'locazione', key: 'locazione' },
+    { title: 'Quantità', dataIndex: 'quantita', key: 'quantita' },
+    {
+      title: 'Inserito da',
+      dataIndex: 'ip_address',
+      key: 'ip_address',
+      render: (ip, record) => (record.is_mine ? <Tag color="blue">{ip} (TU)</Tag> : ip || '-'),
     },
     {
-      title: 'Fornitore',
-      dataIndex: 'FORNITORE',
-      key: 'FORNITORE',
+      title: '',
+      key: 'actions',
+      width: 60,
+      render: (_, record) => (
+        <Popconfirm
+          title="Eliminare questa riga di inventario?"
+          okText="Elimina"
+          cancelText="Annulla"
+          okButtonProps={{ danger: true }}
+          onConfirm={() => handleDelete(record.id)}
+        >
+          <Button type="text" danger icon={<DeleteOutlined />} />
+        </Popconfirm>
+      ),
     },
-    {
-      title: 'Movimento',
-      dataIndex: 'MOVIMENTO',
-      key: 'MOVIMENTO',
-    },
-    {
-      title: 'Locazione',
-      dataIndex: 'LOCAZIONE',
-      key: 'LOCAZIONE',
-    },
-    {
-      title: 'Quantità',
-      dataIndex: 'QUANTITA',
-      key: 'QUANTITA',
-    },
-    {
-      title: 'Pacco Multiplo',
-      dataIndex: 'PACCO_MULTIPLO',
-      key: 'PACCO_MULTIPLO',
-      render: (value) => value === 'X' ? 'X' : '',
-    }
   ];
-  // Function to handle form submission
-  const handleSubmit = async () => {
-    if (!input1 || !input2 || !input3 || !input4 || !input5) {
-      message.error('Per favore, compila tutti i campi.');
-      return;
-    }
 
-    const rowForExcel = {
-      CODICE_ARTICOLO: input1,
-      FORNITORE: input2,
-      MOVIMENTO: input3,
-      LOCAZIONE: input4,
-      QUANTITA: input5,
-      PACCO_MULTIPLO: isPackMultiple ? 'X' : '',
-    };
-  
-    // Attempt to write to Excel
-    const writeSuccess = await writeToExcel([rowForExcel]);
-  
-    if (writeSuccess) {
-      // Only update the table if writing to Excel was successful
-      const rowForUi = { ...rowForExcel, key: `new-${Date.now()}` };
-      const updatedDataRows = [...dataRows, rowForUi];
-      setDataRows(updatedDataRows);
-  
-      // Reset the form
-      setInput1('');
-      setInput2('');
-      setInput3('');
-      setInput4('');
-      setInput5('');
-      setIsPackMultiple(false);
-  
-      // Refocus on the first input
-      if (input1Ref.current) {
-        input1Ref.current.focus();
-      }
-  
-      message.success('Dati aggiunti con successo!');
-     
-    }
-  };
-  
- // Get last 5 rows for the table
- const getLastFiveRows = () => {
-  return dataRows.slice(-5).reverse(); // Reverse to show newest first
-};
-
-  const hasSelectedFile = !!fileHandle || !!legacyWorkbook;
   return (
     <div className="five-input-page">
-      <Title level={2} className="title">Inserimento Dati</Title>
+      <Title level={2} className="title">Inventario</Title>
 
-      <Row gutter={16}>
-        <Col xs={24} sm={12} md={8}>
-          <Card title="Codice articolo" className="card">
-            <Form layout="vertical" className="form">
-              <Form.Item label="COD ARTICOLO">
-                <Input
-                  value={input1}
-                  onChange={(e) => setInput1(e.target.value)}
-                  onKeyPress={(e) => handleKeyPress(e, input2Ref)}
-                  placeholder="Inserisci Codice Articolo"
-                  ref={input1Ref}
-                  className="input-small"
-                />
-              </Form.Item>
-            </Form>
-          </Card>
-        </Col>
+      <Card className="card">
+        <Row gutter={16}>
+          <Col xs={24} sm={12} md={6}>
+            <div className="field-label">Codice articolo</div>
+            <Input
+              ref={articoloRef}
+              value={articolo}
+              onChange={(e) => setArticolo(e.target.value)}
+              onKeyDown={handleArticoloKeyDown}
+              placeholder="Codice o etichetta"
+              className="input-small"
+            />
+          </Col>
+          <Col xs={24} sm={12} md={6}>
+            <div className="field-label">Movimento</div>
+            <Input
+              ref={movimentoRef}
+              value={movimento}
+              onChange={(e) => setMovimento(e.target.value)}
+              onKeyDown={(e) => focusNext(e, locazioneRef)}
+              placeholder="83754 o 2026/CA/48"
+              className="input-small"
+            />
+          </Col>
+          <Col xs={24} sm={12} md={6}>
+            <div className="field-label">Locazione</div>
+            <Space.Compact className="input-small">
+              <Input
+                ref={locazioneRef}
+                value={locazione}
+                onChange={(e) => setLocazione(e.target.value.toUpperCase())}
+                onKeyDown={(e) => focusNext(e, quantitaRef)}
+                placeholder="A-C-01-1"
+              />
+              <Tooltip title="Seleziona dalla mappa">
+                <Button icon={<EnvironmentOutlined />} onClick={() => setIsMapOpen(true)} />
+              </Tooltip>
+              <Tooltip title="Pulisci locazione">
+                <Button icon={<CloseCircleOutlined />} onClick={clearLocazione} disabled={!locazione} />
+              </Tooltip>
+            </Space.Compact>
+          </Col>
+          <Col xs={24} sm={12} md={6}>
+            <div className="field-label">Quantità</div>
+            <Input
+              ref={quantitaRef}
+              value={quantita}
+              onChange={(e) => setQuantita(e.target.value.replace(/[^\d]/g, ''))}
+              onKeyDown={handleQuantitaKeyDown}
+              placeholder="Quantità"
+              inputMode="numeric"
+              className="input-small"
+            />
+          </Col>
+        </Row>
 
-        <Col xs={24} sm={12} md={8}>
-          <Card title="Fornitore" className="card">
-            <Form layout="vertical" className="form">
-              <Form.Item label="Fornitore">
-                <Input
-                  value={input2}
-                  onChange={(e) => setInput2(e.target.value)}
-                  onKeyPress={(e) => handleKeyPress(e, input3Ref)}
-                  placeholder="Inserisci Fornitore"
-                  ref={input2Ref}
-                  className="input-small"
-                />
-              </Form.Item>
-            </Form>
-          </Card>
-        </Col>
-
-        <Col xs={24} sm={12} md={8}>
-          <Card title="Movimento" className="card">
-            <Form layout="vertical" className="form">
-              <Form.Item label="Movimento">
-                <Input
-                  value={input3}
-                  onChange={(e) => setInput3(e.target.value)}
-                  onKeyPress={(e) => handleKeyPress(e, input4Ref)}
-                  placeholder="Inserisci Movimento"
-                  ref={input3Ref}
-                  className="input-small"
-                />
-              </Form.Item>
-            </Form>
-          </Card>
-        </Col>
-      </Row>
-
-      <Row gutter={16}>
-        <Col xs={24} sm={12} md={8}>
-          <Card title="Locazione" className="card">
-            <Form layout="vertical" className="form">
-              <Form.Item label="Campo Locazione">
-                <Input
-                  value={input4}
-                  onChange={(e) => setInput4(e.target.value)}
-                  onKeyPress={(e) => handleKeyPress(e, input5Ref)}
-                  placeholder="Inserisci Locazione"
-                  ref={input4Ref}
-                  className="input-small"
-                />
-              </Form.Item>
-            </Form>
-          </Card>
-        </Col>
-
-        <Col xs={24} sm={12} md={8}>
-          <Card title="Quantità" className="card">
-            <Form layout="vertical" className="form">
-              <Form.Item label="Campo Quantità">
-                <Input
-                  value={input5}
-                  onChange={(e) => setInput5(e.target.value)}
-                  onKeyPress={(e) => handleSubmitKey(e)}
-                  placeholder="Inserisci Quantità"
-                  ref={input5Ref}
-                  className="input-small"
-                />
-              </Form.Item>
-              <Form.Item>
-                <Checkbox 
-                  checked={isPackMultiple}
-                  onChange={(e) => setIsPackMultiple(e.target.checked)}
-                >
-                  Pacco multiplo
-                </Checkbox>
-                <Tooltip color={"rgb(230 45 58)"} title="Selezionare se la quantità inserita è divisa tra piu pacchi, non se un singolo pacco ha piu articoli. Esempio: bancale con 30 PP sarà quantità 30 con pacco multiplo. Singolo pacco con 10 ram NON rappresenta pacco multiplo.">
-    <InfoCircleOutlined/>
-  </Tooltip>
-              </Form.Item>
-            </Form>
-          </Card>
-        </Col>
-      </Row>
-
-      <div className="actions" style={{ marginTop: '16px', marginBottom: '20px' }}>
-        <input
-          ref={legacyFileInputRef}
-          type="file"
-          accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-          style={{ display: 'none' }}
-          onChange={handleLegacyFileSelected}
-        />
-        {!hasSelectedFile && (
-          <Button type="default" onClick={requestFileAccess} style={{ marginRight: '10px' }}>
-            Seleziona File Excel
+        <div className="actions">
+          <Button type="primary" onClick={handleSubmit} loading={saving}>
+            Aggiungi Riga
           </Button>
-        )}
-        <Button type="primary" onClick={handleSubmit} disabled={!hasSelectedFile} style={{ marginRight: '10px' }}>
-          Aggiungi Riga
-        </Button>
-        {!!legacyWorkbook && (
-          <Button
-            type="default"
-            onClick={downloadLegacyExcel}
-            disabled={!legacyDirty}
-            style={{ marginRight: '10px' }}
-          >
-            Scarica Excel aggiornato
-          </Button>
-        )}
-        <Button 
-          type="default" 
-          icon={<EyeOutlined />}
-          onClick={() => setIsFullViewVisible(true)}
-          disabled={!hasSelectedFile}
-        >
-          Visualizza Tutto
-        </Button>
-      </div>
+        </div>
+      </Card>
 
-      <Card 
-        title="Ultime 5 righe inserite" 
+      <Card
+        title={`Righe inserite (${total})`}
         className="recent-entries-card"
-        extra={isLoading && <span>Caricamento dati...</span>}
+        extra={
+          <Space wrap>
+            <Input.Search
+              placeholder="Cerca articolo, movimento, locazione, IP"
+              allowClear
+              onSearch={(value) => {
+                setSearchText(value);
+                setCurrentPage(1);
+              }}
+              style={{ width: 300 }}
+            />
+            <Tooltip title="Aggiorna">
+              <Button icon={<ReloadOutlined />} onClick={() => fetchRows(true)} />
+            </Tooltip>
+            <Button icon={<DownloadOutlined />} onClick={exportExcel} loading={exporting}>
+              Esporta Excel
+            </Button>
+          </Space>
+        }
       >
-        <Table 
+        <Table
           columns={columns}
-          dataSource={getLastFiveRows()}
-          pagination={false}
+          dataSource={rows}
+          rowKey="id"
           size="small"
           scroll={{ x: true }}
-          loading={isLoading}
+          loading={loading}
+          rowClassName={(record) => (record.is_mine ? 'inventory-row-mine' : '')}
+          pagination={{
+            current: currentPage,
+            pageSize,
+            total,
+            showSizeChanger: true,
+            pageSizeOptions: [20, 50, 100],
+            onChange: (page, size) => {
+              setCurrentPage(size !== pageSize ? 1 : page);
+              setPageSize(size);
+            },
+            showTotal: (count) => `Totale ${count} righe`,
+          }}
         />
       </Card>
 
       <Modal
-        title="Visualizzazione Completa"
-        open={isFullViewVisible}
-        onCancel={() => setIsFullViewVisible(false)}
+        title="Seleziona locazione"
+        open={isMapOpen}
+        onCancel={() => setIsMapOpen(false)}
+        footer={null}
+        centered
         width="80%"
-        footer={[
-          <Button key="close" onClick={() => setIsFullViewVisible(false)}>
-            Chiudi
-          </Button>
-        ]}
+        destroyOnClose
       >
-        <Table
-          columns={columns}
-          dataSource={dataRows}
-          pagination={false} 
-
-        />
+        <div className="grid-container">
+          <WarehouseMap
+            onCellClick={handleShelfSelected}
+            highlightedShelves={locazione ? new Set([locazione.split('-').slice(1).join('-')]) : undefined}
+          />
+        </div>
       </Modal>
     </div>
   );
