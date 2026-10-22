@@ -6362,6 +6362,45 @@ def get_inventario_differenze():
             conn.close()
 
 
+@app.route('/api/inventario/differenze-skyline', methods=['GET'])
+def get_inventario_differenze_skyline():
+    try:
+        conn = connect_to_db()
+        cursor = conn.cursor()
+        # A single statement gives both sides the same Oracle read-consistent snapshot.
+        cursor.execute("""
+            SELECT TRIM(id_art), SUM(qta), 0
+              FROM wms_inventario GROUP BY TRIM(id_art)
+            UNION ALL
+            SELECT TRIM(cod_articolo), 0, SUM(giacenza_gest)
+              FROM mag_giacenza WHERE TRIM(cod_magazzino) = ?
+             GROUP BY TRIM(cod_articolo)
+        """, (MAGAZZINO_PRINCIPALE,))
+        totals = {}
+        for article, counted, skyline in cursor.fetchall():
+            key = article
+            if key not in totals:
+                totals[key] = [Decimal(0), Decimal(0)]
+            totals[key][0] += Decimal(str(counted or 0))
+            totals[key][1] += Decimal(str(skyline or 0))
+        rows = [{
+            'codice_articolo': article,
+            'quantita_inventario': _normalize_value(qty[0]),
+            'quantita_skyline': _normalize_value(qty[1]),
+            'differenza': _normalize_value(qty[0] - qty[1]),
+        } for article, qty in sorted(totals.items(), key=lambda item: item[0] or '')
+            if qty[0] != qty[1]]
+        return jsonify({'rows': rows, 'magazzino': MAGAZZINO_PRINCIPALE,
+                        'timestamp': datetime.now().isoformat(timespec='seconds')})
+    except pyodbc.Error as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        if 'conn' in locals():
+            conn.close()
+
+
 @app.route('/api/inventario/reset', methods=['POST'])
 def reset_inventario():
     if (request.get_json(silent=True) or {}).get('confirmation') != 'confermo':

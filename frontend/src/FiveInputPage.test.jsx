@@ -53,6 +53,21 @@ test('loads the final differences summary on demand', async () => {
   expect(screen.getByText('-5')).toBeInTheDocument();
 });
 
+test('compares Skyline article totals without locations or lots', async () => {
+  axios.get.mockImplementation((url) => Promise.resolve({
+    data: url.endsWith('/differenze-skyline') ? {
+      timestamp: '2026-10-22T12:00:00', magazzino: 'BAS01',
+      rows: [{ codice_articolo: 'abc', movimento: '880', quantita_inventario: 3,
+        quantita_skyline: 8, differenza: -5 }],
+    } : { rows: [], total: 0 },
+  }));
+  render(<FiveInputPage />);
+  fireEvent.click(screen.getByRole('button', { name: 'Confronta Skyline' }));
+  await waitFor(() => expect(screen.getByText('Totale Skyline')).toBeInTheDocument());
+  expect(screen.queryByText('Movimento / Lotto')).not.toBeInTheDocument();
+  expect(axios.get).toHaveBeenCalledWith(expect.stringContaining('/differenze-skyline'));
+});
+
 test('shows stock for the scanned article, movement and location', async () => {
   axios.get.mockImplementation((url) => Promise.resolve({
     data: url.endsWith('/stock') ? { quantita: 17 } : { rows: [], total: 0 },

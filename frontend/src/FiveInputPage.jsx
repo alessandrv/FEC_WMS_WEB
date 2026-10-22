@@ -32,6 +32,10 @@ const FiveInputPage = () => {
   const [resetOpen, setResetOpen] = useState(false);
   const [confirmation, setConfirmation] = useState('');
   const [resetting, setResetting] = useState(false);
+  const [skylineComparison, setSkylineComparison] = useState(null);
+  const [skylineLoading, setSkylineLoading] = useState(false);
+  const [skylineSearch, setSkylineSearch] = useState('');
+  const skylineRequest = useRef(0);
 
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
@@ -233,6 +237,9 @@ const FiveInputPage = () => {
       setTotal(0);
       setDifferences(null);
       setDifferencesTime(null);
+      skylineRequest.current += 1;
+      setSkylineComparison(null);
+      setSkylineLoading(false);
       setResetOpen(false);
       setConfirmation('');
       setCurrentPage(1);
@@ -242,6 +249,20 @@ const FiveInputPage = () => {
       message.error(error.response?.data?.error || 'Errore durante l’azzeramento inventario');
     } finally {
       setResetting(false);
+    }
+  };
+
+  const compareSkyline = async () => {
+    const requestId = ++skylineRequest.current;
+    setSkylineLoading(true);
+    setSkylineComparison(null);
+    try {
+      const response = await axios.get(`${API}/differenze-skyline`);
+      if (requestId === skylineRequest.current) setSkylineComparison(response.data);
+    } catch (error) {
+      if (requestId === skylineRequest.current) message.error('Errore nel confronto con Skyline');
+    } finally {
+      if (requestId === skylineRequest.current) setSkylineLoading(false);
     }
   };
 
@@ -454,6 +475,30 @@ const FiveInputPage = () => {
               { title: 'WMS', dataIndex: 'quantita_wms' },
               { title: 'Differenza', dataIndex: 'differenza', render: (v) => <Tag color={v < 0 ? 'red' : 'orange'}>{v > 0 ? '+' : ''}{v}</Tag> },
               { title: 'Esito', dataIndex: 'tipo' },
+            ]} />
+        </>}
+      </Card>
+
+      <Card title="Differenze totali inventario / Skyline" style={{ marginTop: 16 }}
+        extra={<Button onClick={() => compareSkyline()} loading={skylineLoading}>Confronta Skyline</Button>}>
+        <p>Totali senza distinzione di locazione. Differenza = inventario − Skyline.
+          {' '}Tutti i movimenti e lotti vengono sommati per articolo.
+          {' '}Gli articoli presenti su un solo lato sono inclusi; le quantità uguali sono escluse.</p>
+        {skylineComparison && <>
+          <p>Magazzino Skyline: {skylineComparison.magazzino}. Confronto del {new Date(skylineComparison.timestamp).toLocaleString('it-IT')}.
+            {' '}Ricalcola dopo modifiche o nuove conte.</p>
+          <Input.Search placeholder="Filtra articolo Skyline" allowClear
+            onChange={(e) => setSkylineSearch(e.target.value)} style={{ maxWidth: 400, marginBottom: 12 }} />
+          <Table size="small" scroll={{ x: true }}
+            rowKey="codice_articolo"
+            dataSource={skylineComparison.rows.filter((r) => String(r.codice_articolo || '').toLowerCase().includes(skylineSearch.toLowerCase()))}
+            pagination={{ pageSize: 20, showTotal: (count) => `${count} differenze` }}
+            locale={{ emptyText: 'Nessuna differenza trovata' }}
+            columns={[
+              { title: 'Articolo', dataIndex: 'codice_articolo' },
+              { title: 'Totale inventario', dataIndex: 'quantita_inventario' },
+              { title: 'Totale Skyline', dataIndex: 'quantita_skyline' },
+              { title: 'Differenza', dataIndex: 'differenza', render: (v) => <Tag color={v < 0 ? 'red' : 'orange'}>{v > 0 ? '+' : ''}{v}</Tag> },
             ]} />
         </>}
       </Card>
