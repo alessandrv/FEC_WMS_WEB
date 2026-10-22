@@ -20,6 +20,58 @@ beforeEach(() => {
 
 afterEach(() => jest.clearAllMocks());
 
+test('requires exact typed confirmation before resetting inventory', async () => {
+  axios.post.mockResolvedValue({ data: { deleted: 12 } });
+  render(<FiveInputPage />);
+  fireEvent.click(screen.getByRole('button', { name: 'Azzera inventario' }));
+  const deleteButton = screen.getByRole('button', { name: 'Elimina tutto l’inventario' });
+  expect(deleteButton).toBeDisabled();
+  fireEvent.change(screen.getByLabelText('Conferma azzeramento'), { target: { value: 'Confermo' } });
+  expect(deleteButton).toBeDisabled();
+  fireEvent.change(screen.getByLabelText('Conferma azzeramento'), { target: { value: 'confermo' } });
+  expect(deleteButton).toBeEnabled();
+  fireEvent.click(deleteButton);
+  await waitFor(() => expect(axios.post).toHaveBeenCalledWith(expect.stringContaining('/inventario/reset'), {
+    confirmation: 'confermo',
+  }));
+});
+
+test('loads the final differences summary on demand', async () => {
+  axios.get.mockImplementation((url) => Promise.resolve({
+    data: url.endsWith('/differenze') ? {
+      timestamp: '2026-10-22T12:00:00', rows: [{
+        codice_articolo: 'abc', movimento: '880', locazione: 'A-A-01-1',
+        quantita_inventario: 3, quantita_wms: 8, differenza: -5, tipo: 'Quantità diversa',
+      }],
+    } : { rows: [], total: 0 },
+  }));
+  render(<FiveInputPage />);
+  expect(axios.get).not.toHaveBeenCalledWith(expect.stringContaining('/differenze'));
+  fireEvent.click(screen.getByRole('button', { name: 'Calcola differenze' }));
+  await waitFor(() => expect(screen.getByText('Quantità diversa')).toBeInTheDocument());
+  expect(screen.getByText('A-A-01-1')).toBeInTheDocument();
+  expect(screen.getByText('-5')).toBeInTheDocument();
+});
+
+test('shows stock for the scanned article, movement and location', async () => {
+  axios.get.mockImplementation((url) => Promise.resolve({
+    data: url.endsWith('/stock') ? { quantita: 17 } : { rows: [], total: 0 },
+  }));
+  render(<FiveInputPage />);
+  fireEvent.change(screen.getByPlaceholderText('Codice o etichetta'), {
+    target: { value: '0AC618MC,2026,CA,063' },
+  });
+  fireEvent.change(screen.getByPlaceholderText('A-C-01-1'), {
+    target: { value: 'A-C-01-1' },
+  });
+  await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('WMS: 17'));
+  expect(axios.get).toHaveBeenCalledWith(expect.stringContaining('/inventario/stock'), {
+    params: { codice_articolo: '0AC618MC', movimento: '2026/CA/63', locazione: 'A-C-01-1' },
+  });
+  fireEvent.change(screen.getByPlaceholderText('A-C-01-1'), { target: { value: '' } });
+  expect(screen.getByRole('status')).toHaveTextContent('WMS: —');
+});
+
 test.each([
   ['1000228ASXPOSAR10,40,880', '1000228ASXPOSAR10', '880'],
   ['0AC618MC,2026,CA,063', '0AC618MC', '2026/CA/63'],

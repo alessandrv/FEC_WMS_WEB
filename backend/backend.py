@@ -6181,6 +6181,34 @@ def parse_locazione(value):
         colonna = colonna.zfill(2)
     return area, scaffale, colonna, piano
 
+@app.route('/api/inventario/stock', methods=['GET'])
+def get_inventario_stock():
+    articolo = articolo_da_barcode(request.args.get('codice_articolo')).upper()
+    movimento = normalizza_movimento(request.args.get('movimento')) or None
+    locazione = parse_locazione(request.args.get('locazione'))
+    if not articolo or not locazione:
+        return jsonify({'error': 'Codice articolo e locazione validi richiesti'}), 400
+    try:
+        conn = connect_to_db()
+        cursor = conn.cursor()
+        movement_filter = 'id_mov = ?' if movimento else 'id_mov IS NULL'
+        params = (articolo, *locazione) + ((movimento,) if movimento else ())
+        cursor.execute(f"""
+            SELECT COALESCE(SUM(qta), 0)
+            FROM wms_items
+            WHERE id_art = ? AND area = ? AND scaffale = ? AND colonna = ? AND piano = ?
+              AND {movement_filter}
+        """, params)
+        return jsonify({'quantita': cursor.fetchone()[0]})
+    except pyodbc.Error as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        if 'conn' in locals():
+            conn.close()
+
+
 @app.route('/api/inventario', methods=['GET'])
 def get_inventario():
     """Inventory rows, newest first. per_page=0 returns every row (Excel export)."""
@@ -6290,6 +6318,78 @@ def add_inventario():
             cursor.close()
         if 'conn' in locals():
             conn.close()
+
+@app.route('/api/inventario/differenze', methods=['GET'])
+def get_inventario_differenze():
+    try:
+        conn = connect_to_db()
+        cursor = conn.cursor()
+        # Aggregate before joining: multiple counts/packages must not multiply quantities.
+        cursor.execute("""
+            WITH inv AS (
+                SELECT id_art, id_mov, area, scaffale, colonna, piano, SUM(qta) AS qta
+                FROM wms_inventario GROUP BY id_art, id_mov, area, scaffale, colonna, piano
+            ), stock AS (
+                SELECT id_art, id_mov, area, scaffale, colonna, piano, SUM(qta) AS qta
+                FROM wms_items GROUP BY id_art, id_mov, area, scaffale, colonna, piano
+            )
+            SELECT COALESCE(i.id_art, w.id_art), COALESCE(i.id_mov, w.id_mov),
+                   COALESCE(i.area, w.area), COALESCE(i.scaffale, w.scaffale),
+                   COALESCE(i.colonna, w.colonna), COALESCE(i.piano, w.piano),
+                   COALESCE(i.qta, 0), COALESCE(w.qta, 0),
+                   CASE WHEN i.id_art IS NULL THEN 'Mancante in inventario'
+                        WHEN w.id_art IS NULL THEN 'Assente nel WMS'
+                        ELSE 'Quantità diversa' END
+            FROM inv i FULL OUTER JOIN stock w
+              ON i.id_art = w.id_art AND (i.id_mov = w.id_mov OR (i.id_mov IS NULL AND w.id_mov IS NULL))
+             AND i.area = w.area AND i.scaffale = w.scaffale AND i.colonna = w.colonna AND i.piano = w.piano
+            WHERE COALESCE(i.qta, 0) <> COALESCE(w.qta, 0)
+            ORDER BY 3, 4, 5, 6, 1, 2
+        """)
+        rows = [{
+            'codice_articolo': r[0], 'movimento': r[1],
+            'locazione': '-'.join(str(v) for v in r[2:6]),
+            'quantita_inventario': r[6], 'quantita_wms': r[7],
+            'differenza': r[6] - r[7], 'tipo': r[8],
+        } for r in cursor.fetchall()]
+        return jsonify({'rows': rows, 'timestamp': datetime.now().isoformat(timespec='seconds')})
+    except pyodbc.Error as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        if 'conn' in locals():
+            conn.close()
+
+
+@app.route('/api/inventario/reset', methods=['POST'])
+def reset_inventario():
+    if (request.get_json(silent=True) or {}).get('confirmation') != 'confermo':
+        return jsonify({'error': 'Scrivi esattamente confermo per eliminare tutto l’inventario.'}), 400
+    try:
+        conn = connect_to_db()
+        cursor = conn.cursor()
+        cursor.execute('LOCK TABLE wms_inventario IN EXCLUSIVE MODE NOWAIT')
+        cursor.execute('SELECT COUNT(*) FROM wms_inventario')
+        deleted = cursor.fetchone()[0]
+        cursor.execute('DELETE FROM wms_inventario')
+        conn.commit()
+    except pyodbc.Error as e:
+        if 'conn' in locals():
+            conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        if 'conn' in locals():
+            conn.close()
+    log_operation(
+        operation_type='INVENTARIO_RESET',
+        operation_details=f'Azzeramento inventario: eliminate {deleted} righe',
+        ip_address=request.remote_addr, can_undo=False,
+    )
+    return jsonify({'success': True, 'deleted': deleted})
+
 
 @app.route('/api/inventario/<int:row_id>', methods=['DELETE'])
 def delete_inventario(row_id):

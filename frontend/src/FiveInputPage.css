@@ -1,5 +1,17 @@
 /* FiveInputPage.css */
 
+.five-input-page .inventory-quantity-label {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.five-input-page .inventory-stock {
+  color: #1677ff;
+  font-variant-numeric: tabular-nums;
+}
+
 .title {
   text-align: center;
   margin-bottom: 24px;

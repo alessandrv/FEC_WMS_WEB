@@ -22,6 +22,16 @@ const FiveInputPage = () => {
   const [quantita, setQuantita] = useState('');
   const [saving, setSaving] = useState(false);
   const [isMapOpen, setIsMapOpen] = useState(false);
+  const [stock, setStock] = useState(null);
+  const [stockLoading, setStockLoading] = useState(false);
+  const [stockError, setStockError] = useState(false);
+  const [differences, setDifferences] = useState(null);
+  const [differencesTime, setDifferencesTime] = useState(null);
+  const [comparing, setComparing] = useState(false);
+  const [differenceSearch, setDifferenceSearch] = useState('');
+  const [resetOpen, setResetOpen] = useState(false);
+  const [confirmation, setConfirmation] = useState('');
+  const [resetting, setResetting] = useState(false);
 
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
@@ -35,6 +45,50 @@ const FiveInputPage = () => {
   const movimentoRef = useRef(null);
   const locazioneRef = useRef(null);
   const quantitaRef = useRef(null);
+
+  const scannedArticle = isEtichetta(articolo) ? parseEtichetta(articolo) : null;
+  const stockArticle = (scannedArticle?.articolo || articolo).trim();
+  const stockMovement = (scannedArticle?.movimento || movimento).trim();
+
+  useEffect(() => {
+    let active = true;
+    let inFlight = false;
+    setStock(null);
+    setStockError(false);
+    const parts = locazione.split('-').map((part) => part.trim());
+    const validLocation = [3, 4].includes(parts.length) && parts.every(Boolean);
+    setStockLoading(Boolean(stockArticle && validLocation));
+    if (!stockArticle || !validLocation) return undefined;
+
+    const fetchStock = async () => {
+      if (inFlight) return;
+      inFlight = true;
+      try {
+        const response = await axios.get(`${API}/stock`, {
+          params: { codice_articolo: stockArticle, movimento: stockMovement, locazione },
+        });
+        if (active) {
+          setStock(response.data.quantita);
+          setStockError(false);
+        }
+      } catch (error) {
+        if (active) {
+          setStock(null);
+          setStockError(true);
+        }
+      } finally {
+        inFlight = false;
+        if (active) setStockLoading(false);
+      }
+    };
+    const timer = setTimeout(fetchStock, 300);
+    const refresh = setInterval(fetchStock, REFRESH_MS);
+    return () => {
+      active = false;
+      clearTimeout(timer);
+      clearInterval(refresh);
+    };
+  }, [stockArticle, stockMovement, locazione]);
 
   useEffect(() => {
     articoloRef.current?.focus();
@@ -156,6 +210,41 @@ const FiveInputPage = () => {
     }
   };
 
+  const compareInventory = async () => {
+    setComparing(true);
+    setDifferences(null);
+    try {
+      const response = await axios.get(`${API}/differenze`);
+      setDifferences(response.data.rows);
+      setDifferencesTime(response.data.timestamp);
+    } catch (error) {
+      message.error('Errore nel confronto inventario e WMS');
+    } finally {
+      setComparing(false);
+    }
+  };
+
+  const resetInventory = async () => {
+    if (confirmation !== 'confermo' || resetting) return;
+    setResetting(true);
+    try {
+      const response = await axios.post(`${API}/reset`, { confirmation });
+      setRows([]);
+      setTotal(0);
+      setDifferences(null);
+      setDifferencesTime(null);
+      setResetOpen(false);
+      setConfirmation('');
+      setCurrentPage(1);
+      fetchRows(true);
+      message.success(`Inventario azzerato: ${response.data.deleted} righe eliminate`);
+    } catch (error) {
+      message.error(error.response?.data?.error || 'Errore durante l’azzeramento inventario');
+    } finally {
+      setResetting(false);
+    }
+  };
+
   const exportExcel = async () => {
     setExporting(true);
     try {
@@ -265,7 +354,14 @@ const FiveInputPage = () => {
             </Space.Compact>
           </Col>
           <Col xs={24} sm={12} md={6}>
-            <div className="field-label">Quantità</div>
+            <div className="field-label inventory-quantity-label">
+              <span>Quantità</span>
+              <Tooltip title="Giacenza WMS per articolo, movimento e locazione selezionati. Movimento vuoto: solo pacchi senza movimento.">
+                <span role="status" className="inventory-stock">
+                  WMS: {stockLoading ? '…' : stockError ? 'non disponibile' : stock == null ? '—' : stock}
+                </span>
+              </Tooltip>
+            </div>
             <Input
               ref={quantitaRef}
               value={quantita}
@@ -305,6 +401,9 @@ const FiveInputPage = () => {
             <Button icon={<DownloadOutlined />} onClick={exportExcel} loading={exporting}>
               Esporta Excel
             </Button>
+            <Button danger onClick={() => { setConfirmation(''); setResetOpen(true); }}>
+              Azzera inventario
+            </Button>
           </Space>
         }
       >
@@ -330,6 +429,47 @@ const FiveInputPage = () => {
           }}
         />
       </Card>
+
+      <Card title="Differenze inventario / WMS" style={{ marginTop: 16 }}
+        extra={<Button onClick={compareInventory} loading={comparing}>Calcola differenze</Button>}>
+        <p>Verifica finale su tutto il magazzino, per articolo, movimento e locazione.
+          Le righe di inventario della stessa combinazione vengono sommate.
+          Le locazioni non ancora contate appariranno come mancanti in inventario.
+          Differenza = inventario − WMS.</p>
+        {differencesTime && <p>Confronto del {new Date(differencesTime).toLocaleString('it-IT')}. Ricalcola dopo modifiche o nuove conte.</p>}
+        {differences !== null && <>
+          <Input.Search placeholder="Filtra differenze" allowClear
+            onChange={(e) => setDifferenceSearch(e.target.value)} style={{ maxWidth: 400, marginBottom: 12 }} />
+          <Table size="small" loading={comparing} scroll={{ x: true }}
+            rowKey={(r) => JSON.stringify([r.codice_articolo, r.movimento, r.locazione])}
+            dataSource={differences.filter((r) => [r.codice_articolo, r.movimento, r.locazione, r.tipo]
+              .some((v) => String(v || '').toLowerCase().includes(differenceSearch.toLowerCase())))}
+            pagination={{ pageSize: 20, showTotal: (count) => `${count} differenze` }}
+            locale={{ emptyText: 'Nessuna differenza trovata' }}
+            columns={[
+              { title: 'Articolo', dataIndex: 'codice_articolo' },
+              { title: 'Movimento', dataIndex: 'movimento', render: (v) => v || '-' },
+              { title: 'Locazione', dataIndex: 'locazione' },
+              { title: 'Inventario', dataIndex: 'quantita_inventario' },
+              { title: 'WMS', dataIndex: 'quantita_wms' },
+              { title: 'Differenza', dataIndex: 'differenza', render: (v) => <Tag color={v < 0 ? 'red' : 'orange'}>{v > 0 ? '+' : ''}{v}</Tag> },
+              { title: 'Esito', dataIndex: 'tipo' },
+            ]} />
+        </>}
+      </Card>
+
+      <Modal title="Azzera inventario per un nuovo anno" open={resetOpen}
+        onCancel={() => { if (!resetting) setResetOpen(false); }}
+        closable={!resetting} maskClosable={!resetting}
+        onOk={resetInventory} confirmLoading={resetting} okText="Elimina tutto l’inventario"
+        cancelText="Annulla" cancelButtonProps={{ disabled: resetting }}
+        okButtonProps={{ danger: true, disabled: confirmation !== 'confermo' }}>
+        <p>Tutte le righe di inventario saranno eliminate definitivamente. Esporta Excel prima di procedere se vuoi conservarle.
+          Le giacenze WMS rimangono invariate.</p>
+        <p>Scrivi <strong>confermo</strong> per procedere.</p>
+        <Input aria-label="Conferma azzeramento" value={confirmation} disabled={resetting}
+          onChange={(e) => setConfirmation(e.target.value)} autoComplete="off" />
+      </Modal>
 
       <Modal
         title="Seleziona locazione"
