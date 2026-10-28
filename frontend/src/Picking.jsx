@@ -11,7 +11,7 @@ import { InfoCircleOutlined } from '@ant-design/icons';
 import { Tabs } from 'antd';
 import { CloseCircleOutlined } from '@ant-design/icons';
 import WarehouseMap from './map/WarehouseMap';
-import { articoloDaEtichetta } from './barcode';
+import { articoloDaEtichetta, normalizzaMovimento, parseEtichetta } from './barcode';
 const { Text } = Typography;
 
 const { TabPane } = Tabs;
@@ -451,6 +451,8 @@ const Picking = () => {
 
             // Extract location details
             const { area, scaffale: scaffalePart, colonna, piano } = rowData.location;
+            // pick from the scanned package's movimento, otherwise from the row's movimento
+            const movimentoPrelievo = parseEtichetta(articolo).movimento || movimento || rowData.movimento || '';
 
             // Call the API
             try {
@@ -465,7 +467,7 @@ const Picking = () => {
                         scaffale: scaffalePart,
                         colonna: colonna,
                         piano: piano,
-                        movimento,
+                        movimento: movimentoPrelievo,
                         quantity: pickedQuantity,
                         odl: ordineLavoro,
                     }),
@@ -664,12 +666,13 @@ const Picking = () => {
         setMaxAvailableQuantity(0);
         setSelectedRowId(null);
     };
+    // Allocations of the prelievo rows, per location, movimento and article
     const getExistingAllocations = () => {
         const allocations = new Map();
 
         tableData.forEach(row => {
             if (row.location && row.id !== selectedRowId) {
-                const key = `${row.location.area}-${row.location.scaffale}-${row.location.colonna}-${row.location.piano}-${row.occ_arti}`;
+                const key = `${row.location.area}-${row.location.scaffale}-${row.location.colonna}-${row.location.piano}-${row.movimento || ''}-${row.occ_arti}`;
 
                 if (allocations.has(key)) {
                     allocations.set(key, {
@@ -693,9 +696,10 @@ const Picking = () => {
         if (!location || !location.area) return 0;
 
         const allocations = getExistingAllocations();
-        const locationKey = `${location.area}-${location.scaffale}-${location.colonna}-${location.piano}-${articolo}`;
+        const movimentoKey = location.id_mov || '';
+        const locationKey = `${location.area}-${location.scaffale}-${location.colonna}-${location.piano}-${movimentoKey}-${articolo}`;
 
-        // Get the highlighted row for this article and location if it exists
+        // Get the highlighted row for this article, location and movimento if it exists
         const highlightedRow = tableData.find(row =>
             highlightedRows.has(row.id) &&
             row.occ_arti === articolo &&
@@ -703,7 +707,8 @@ const Picking = () => {
             row.location.area === location.area &&
             row.location.scaffale === location.scaffale &&
             row.location.colonna === location.colonna &&
-            row.location.piano === location.piano
+            row.location.piano === location.piano &&
+            (row.movimento || '') === movimentoKey
         );
 
         const existingAllocation = allocations.get(locationKey);
@@ -1404,7 +1409,10 @@ const Picking = () => {
 
         const [area, scaffalePart, colonna, piano] = scaffaleParts;
 
-        const exactMatch = tableData.find(item => {
+        // Movimento of the scanned package (from the label, or the movimento input)
+        const scannedMovimento = normalizzaMovimento(parseEtichetta(articolo).movimento || movimento);
+
+        const locationMatches = tableData.filter(item => {
             const itemArticoloTrimmed = item.occ_arti.trim();
             const articoloMatch = itemArticoloTrimmed === trimmedArticolo;
 
@@ -1434,6 +1442,10 @@ const Picking = () => {
 
             return allConditionsMet; // Only return true if all conditions are met, including movimento
         });
+        // Rows are per location and movimento: prefer the row of the scanned package's movimento
+        const exactMatch = locationMatches.find(item =>
+            scannedMovimento && normalizzaMovimento(item.movimento) === scannedMovimento
+        ) || locationMatches[0];
 
         if (exactMatch) {
             const rowIndex = tableData.indexOf(exactMatch);
@@ -1515,7 +1527,7 @@ const Picking = () => {
                 duration: 5, // Notification will close after 3 seconds
             });
         }
-    }, [articolo, scaffale, tableData, highlightedRows, highlightedShelves, forcedPickingModalVisible]);
+    }, [articolo, scaffale, movimento, tableData, highlightedRows, highlightedShelves, forcedPickingModalVisible]);
 
     const handleGroupLocationModalVisible = (record) => {
         // Use our new function instead
@@ -1720,6 +1732,10 @@ const Picking = () => {
                                     : undefined}
                             >
                                 {location.area}-{location.scaffale}-{location.colonna}-{location.piano}
+                                {record.movimento && (
+                                    // rows are per location and movimento
+                                    <div style={{ fontSize: 11 }}>Mov. {record.movimento}</div>
+                                )}
                             </Tag>
                         ) : (
                             <Tag
@@ -1985,6 +2001,12 @@ const Picking = () => {
             }
         },
         {
+            title: 'Movimento',
+            dataIndex: 'id_mov',
+            key: 'id_mov',
+            render: (idMov) => idMov || '-',
+        },
+        {
             title: 'Q.ta',
             dataIndex: 'totalQta',
             key: 'availableQta',
@@ -2011,7 +2033,8 @@ const Picking = () => {
                 const isStartingLocation = currentRow?.location?.area === record.area &&
                     currentRow?.location?.scaffale === record.scaffale &&
                     currentRow?.location?.colonna === record.colonna &&
-                    currentRow?.location?.piano === record.piano;
+                    currentRow?.location?.piano === record.piano &&
+                    (currentRow?.movimento || '') === (record.id_mov || '');
 
                 const totalQta = record.totalQta;
                 // Use articoloQuantity for Articolo tab, quantityNeeded for ODL tab
@@ -2116,9 +2139,11 @@ const Picking = () => {
         }
 
         const rowToUpdate = updatedTableData[rowIndex];
+        // the chosen line of the window is a location and a movimento
+        const selectedMovimento = selectedLocation.id_mov || '';
 
         try {
-            // Find all non-highlighted rows in the target location with the same article
+            // Find all non-highlighted rows in the target location and movimento with the same article
             const existingRows = updatedTableData.filter(row =>
                 !highlightedRows.has(row.id) &&
                 row.id !== selectedRowId &&
@@ -2126,7 +2151,8 @@ const Picking = () => {
                 row.location?.area === selectedLocation.area &&
                 row.location?.scaffale === selectedLocation.scaffale &&
                 row.location?.colonna === selectedLocation.colonna &&
-                row.location?.piano === selectedLocation.piano
+                row.location?.piano === selectedLocation.piano &&
+                (row.movimento || '') === selectedMovimento
             );
 
             if (parseFloat(selectedQuantity) === parseFloat(rowToUpdate.available_quantity)) {
@@ -2150,9 +2176,10 @@ const Picking = () => {
                     const newTableData = updatedTableData.filter(row => !rowsToRemove.has(row.id));
                     setTableData(newTableData);
                 } else {
-                    // Just update location
+                    // Just update location and movimento
                     updatedTableData[rowIndex] = {
                         ...rowToUpdate,
+                        movimento: selectedMovimento,
                         location: {
                             area: selectedLocation.area,
                             scaffale: selectedLocation.scaffale,
@@ -2191,6 +2218,7 @@ const Picking = () => {
                         ...rowToUpdate,
                         id: uuidv4(),
                         available_quantity: parseFloat(selectedQuantity),
+                        movimento: selectedMovimento,
                         location: {
                             area: selectedLocation.area,
                             scaffale: selectedLocation.scaffale,
@@ -2270,8 +2298,9 @@ const Picking = () => {
 
         const groupedMap = new Map();
 
+        // one row per location and movimento: packages of different movimenti are not summed
         items.forEach(item => {
-            const key = `${item.area}-${item.scaffale}-${item.colonna}-${item.piano}`;
+            const key = `${item.area}-${item.scaffale}-${item.colonna}-${item.piano}-${item.id_mov || ''}`;
 
             if (groupedMap.has(key)) {
                 const existing = groupedMap.get(key);
@@ -4271,7 +4300,7 @@ const Picking = () => {
                     <Table
                         dataSource={groupLocations(dataSource[0].subItems).map(subItem => ({
                             key: `${subItem.id_mov}-${subItem.area}-${subItem.scaffale}-${subItem.colonna}-${subItem.piano}`,
-                            id_mov: subItem.id_mov,
+                            id_mov: subItem.id_mov || '',
                             area: subItem.area,
                             scaffale: subItem.scaffale,
                             colonna: subItem.colonna,

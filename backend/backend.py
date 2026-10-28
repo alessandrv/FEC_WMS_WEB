@@ -1230,18 +1230,29 @@ def conferma_inserimento():
         if 'conn' in locals():
             conn.close()
 
+def _filtro_movimento(movimento):
+    """SQL condition (and params) limiting a pick to the packages of one movimento.
+    Rows are per location and movimento: without a movimento any package of the location is used."""
+    mov = (movimento or '').strip()
+    if not mov:
+        return '', ()
+    # the row carries wms_items.id_mov as stored; a scanned label is normalised like at deposit time
+    return ' AND id_mov IN (?, ?)', (mov, normalizza_movimento(mov) or mov)
+
+
 @app.route('/api/update-pacchi', methods=['POST'])
 def update_pacchi():
     data = request.get_json()
 
     # Extract parameters from the request
-    articolo = data.get('articolo')
+    articolo = articolo_da_barcode(data.get('articolo'))  # plain code or scanned package label
     area = data.get('area')
     scaffale = data.get('scaffale')
     colonna = data.get('colonna')
     piano = data.get('piano')
     quantity = data.get('quantity')
     odl = data.get('odl')  # New parameter for ODL
+    filtro_mov, params_mov = _filtro_movimento(data.get('movimento'))
 
     # Validate input parameters
     if not all([articolo, area, scaffale, colonna, piano, quantity]):
@@ -1267,8 +1278,8 @@ def update_pacchi():
           AND scaffale = ?
           AND colonna = ?
           AND piano = ?
-        """
-        cursor.execute(total_quantity_query, (articolo, area, scaffale, colonna, piano))
+        """ + filtro_mov
+        cursor.execute(total_quantity_query, (articolo, area, scaffale, colonna, piano) + params_mov)
         result = cursor.fetchone()
 
         if not result or result.total_qta is None:
@@ -1288,9 +1299,10 @@ def update_pacchi():
           AND scaffale = ?
           AND colonna = ?
           AND piano = ?
+        """ + filtro_mov + """
         ORDER BY qta ASC
         """
-        cursor.execute(pacchi_query, (articolo, area, scaffale, colonna, piano))
+        cursor.execute(pacchi_query, (articolo, area, scaffale, colonna, piano) + params_mov)
         pacchi = cursor.fetchall()
 
         if not pacchi:
@@ -1771,30 +1783,32 @@ ORDER BY
 
             # Query wms_items for remaining quantity
             query_wms = """
-            SELECT 
-                id_art, 
+            SELECT
+                id_art,
                 id_pacco,
-                fornitore, 
-                area, 
-                scaffale, 
-                colonna, 
-                piano, 
+                id_mov,
+                fornitore,
+                area,
+                scaffale,
+                colonna,
+                piano,
                 SUM(qta) AS qta,
-                CASE 
-                    WHEN scaffale IN ('S', 'R') THEN 1 
-                    ELSE 0 
+                CASE
+                    WHEN scaffale IN ('S', 'R') THEN 1
+                    ELSE 0
                 END AS scaffale_order
-            FROM 
+            FROM
                 wms_items
-            WHERE 
+            WHERE
                 id_art = ?
-            GROUP BY 
-                id_art, 
+            GROUP BY
+                id_art,
                 id_pacco,
-                fornitore, 
-                area, 
-                scaffale, 
-                colonna, 
+                id_mov,
+                fornitore,
+                area,
+                scaffale,
+                colonna,
                 piano
             ORDER BY
                 scaffale_order,
@@ -1802,6 +1816,7 @@ ORDER BY
                 scaffale,
                 colonna,
                 piano,
+                id_mov,
                 id_pacco ASC
             """
             cursor.execute(query_wms, (occ_arti,))
@@ -1816,13 +1831,15 @@ ORDER BY
                     break
 
                 wms_qta = float(wms_row.qta)  # Ensure numeric conversion
-                location_key = (wms_row.area, wms_row.scaffale, wms_row.colonna, wms_row.piano)
+                # one row per location and movimento: packages of different movimenti are not summed
+                location_key = (wms_row.area, wms_row.scaffale, wms_row.colonna, wms_row.piano, wms_row.id_mov or '')
 
                 if wms_row.id_pacco and wms_qta > 0:
                     if location_key not in location_groups:
                         location_groups[location_key] = {
                             'total_available_quantity': 0,
                             'pacchi': [],
+                            'movimento': wms_row.id_mov or '',
                             'location': {
                                 'area': wms_row.area,
                                 'scaffale': wms_row.scaffale,
@@ -1854,6 +1871,7 @@ ORDER BY
                         'status': pick_status,
                         'sufficient_quantity': total_qty_in_location >= remaining_qty,
                         'pacchi': group_data['pacchi'],
+                        'movimento': group_data['movimento'],
                         'location': group_data['location'],
                         'available_quantity': str(int(total_qty_in_location)),
                         'needed_quantity': str(int(remaining_qty)),
@@ -1919,23 +1937,25 @@ def articolo_search():
         else:
             occ_desc_combined = 'Descrizione non disponibile'
 
-        # Step 2: Fetch available locations grouped by location only
+        # Step 2: Fetch available locations grouped by location and movimento
+        # (packages of different movimenti in the same location are separate rows)
         query_locations = """
-            SELECT 
+            SELECT
                 area,
                 scaffale,
                 colonna,
                 piano,
+                id_mov,
                 SUM(qta) AS available_quantity
-            FROM 
+            FROM
                 wms_items
-            WHERE 
+            WHERE
                 id_art = ?
                 AND qta > 0
-            GROUP BY 
-                area, scaffale, colonna, piano
-            ORDER BY 
-                area, scaffale, colonna, piano
+            GROUP BY
+                area, scaffale, colonna, piano, id_mov
+            ORDER BY
+                area, scaffale, colonna, piano, id_mov
         """
         cursor.execute(query_locations, (articolo_id,))
         location_rows = cursor.fetchall()
@@ -1957,6 +1977,7 @@ def articolo_search():
                 'occ_arti': articolo_id,
                 'occ_desc_combined': occ_desc_combined,
                 'available_quantity': pick_quantity,
+                'movimento': row.id_mov or '',
                 'location': {
                     'area': row.area,
                     'scaffale': row.scaffale,
@@ -3019,7 +3040,8 @@ def batch_update_pacchi():
             piano = item.get('piano')
             quantity = item.get('quantity')
             row_id = item.get('rowId')
-            
+            filtro_mov, params_mov = _filtro_movimento(item.get('movimento'))
+
             # Validate input parameters
             if not all([articolo, area, scaffale, colonna, piano, quantity]):
                 results.append({
@@ -3050,10 +3072,10 @@ def batch_update_pacchi():
                   AND scaffale = ?
                   AND colonna = ?
                   AND piano = ?
-                """
-                cursor.execute(total_quantity_query, (articolo, area, scaffale, colonna, piano))
+                """ + filtro_mov
+                cursor.execute(total_quantity_query, (articolo, area, scaffale, colonna, piano) + params_mov)
                 result = cursor.fetchone()
-                
+
                 if not result or result.total_qta is None:
                     results.append({
                         'rowId': row_id,
@@ -3061,9 +3083,9 @@ def batch_update_pacchi():
                         'error': 'No pacchi found for the specified articolo and location'
                     })
                     continue
-                
+
                 total_available_quantity = Decimal(result.total_qta)
-                
+
                 if total_available_quantity < quantity:
                     results.append({
                         'rowId': row_id,
@@ -3071,7 +3093,7 @@ def batch_update_pacchi():
                         'error': 'Insufficient quantity at the specified location'
                     })
                     continue
-                
+
                 # Step 2: Retrieve all pacchi matching the articolo and location, ordered by quantity ascending
                 pacchi_query = """
                 SELECT id_pacco, qta, dimensione
@@ -3081,9 +3103,10 @@ def batch_update_pacchi():
                   AND scaffale = ?
                   AND colonna = ?
                   AND piano = ?
+                """ + filtro_mov + """
                 ORDER BY qta ASC
                 """
-                cursor.execute(pacchi_query, (articolo, area, scaffale, colonna, piano))
+                cursor.execute(pacchi_query, (articolo, area, scaffale, colonna, piano) + params_mov)
                 pacchi = cursor.fetchall()
                 
                 if not pacchi:
@@ -4169,12 +4192,12 @@ def get_location_items():
                     'mpl_padre': mpl_padre  # Include distinta parent if exists
                 }
             
-            # Add location info
-            location_key = (row.area, row.scaffale, row.colonna, row.piano)
+            # Add location info: one entry per location and movimento
+            location_key = (row.area, row.scaffale, row.colonna, row.piano, row.id_mov or '')
             location_exists = False
-            
+
             for loc in article_groups[id_art]['locations']:
-                if (loc['area'], loc['scaffale'], loc['colonna'], loc['piano']) == location_key:
+                if (loc['area'], loc['scaffale'], loc['colonna'], loc['piano'], loc['movimento']) == location_key:
                     # Location already exists, add package
                     loc['pacchi'].append({
                         'id_pacco': row.id_pacco,
@@ -4192,6 +4215,7 @@ def get_location_items():
                     'scaffale': row.scaffale,
                     'colonna': row.colonna,
                     'piano': row.piano,
+                    'movimento': row.id_mov or '',
                     'pacchi': [{
                         'id_pacco': row.id_pacco,
                         'quantity': float(row.qta),
@@ -4214,6 +4238,7 @@ def get_location_items():
                     'occ_desc_combined': article_data['occ_desc_combined'],
                     'status': 'available',
                     'pacchi': location['pacchi'],
+                    'movimento': location['movimento'],
                     'location': {
                         'area': location['area'],
                         'scaffale': location['scaffale'],
